@@ -2,7 +2,7 @@ LUAGUI_NAME = "JokCombat Combat Prototype"
 LUAGUI_AUTH = "Jok; Critical Mix reference by Xendra / KSX"
 LUAGUI_DESC = "Cross combo, configurable Action Ability loadout, universal Guard/Dodge cancels and jump branch."
 
--- JokCombat v0.3.3 prototype for the current Steam Global executable.
+-- JokCombat v0.3.6 prototype for the current Steam Global executable.
 -- Critical Mix was used as an authorized technical reference. This script is
 -- intentionally limited to combat/input state and does not touch save data,
 -- story flags, rewards, inventory, AP, levels, worlds, chests, or synthesis.
@@ -52,7 +52,7 @@ local CONFIG = {
 
 local EXPECTED_GAME_ID = 0xAF71841E
 local FINGERPRINT = 0x7265737563697065 -- "epicures", little endian
-local VERSION = "v0.3.3"
+local VERSION = "v0.3.6"
 
 local ADDRESS = {
     fingerprint = 0x3B2271,
@@ -91,6 +91,17 @@ local ADDRESS = {
     airCombo1 = 0x2D2D898,
     flyingCombo1 = 0x2D2D8D4,
 
+    -- Canonical 0x14-byte action records. They preserve the complete route
+    -- entry, but live v0.3.4 testing proved that special VFX/hitbox dispatch
+    -- also depends on the native action selector. These addresses remain
+    -- signature-validated before any transient route is copied.
+    actionRecordStunImpact = 0x2D2D76C,
+    actionRecordGravityBreak = 0x2D2D794,
+    actionRecordBlitz = 0x2D2D7A8,
+    actionRecordRippleDrive = 0x2D2D7BC,
+    actionRecordZantetsuken = 0x2D2D780,
+    actionRecordCounterattack = 0x2D2DC08,
+
     dpadUpControlMap = 0x22C933C,
     dpadRightControlMap = 0x22C933D,
     dpadDownControlMap = 0x22C933E,
@@ -105,6 +116,15 @@ local ADDRESS = {
     guardAvailabilityBranch = 0x2A7BFD, -- 74 normal, 72 enabled, EB choose roll
     guardSelectionBranch = 0x2A7C01,    -- 74 normal, EB choose guard
     dodgeAvailabilityBranch = 0x2A7C1F, -- 84 normal, 82 enabled
+
+    -- Native ground-finisher selector. Stun Impact and Zantetsuken are gated
+    -- first by the current combo position and then by consecutive vanilla
+    -- random < 0.30 tests. The relevant branches are bypassed only while one
+    -- of those shortcuts is active, letting KH1 create the complete native
+    -- action (animation, VFX, hitbox and damage) rather than a routed pose.
+    groundFinisherGateBranch = 0x2A6F8A, -- 72 71 normal, 90 90 forced
+    stunImpactChanceBranch = 0x2A6FAF,   -- 76 07 normal, 90 90 forced
+    zantetsukenChanceBranch = 0x2A6FC5,  -- 76 07 normal, 90 90 forced
 
     -- One native KH notification box is reused only while the loadout editor
     -- is open. These Steam addresses and their color pointers were validated
@@ -156,51 +176,100 @@ local CONTROL_INDEX = {
 local DODGE_ROLL_ANIMATION = 0xDC
 local ACTION_KIND_PREFIX = "action:"
 local ACTION_PRIME_PREFIX = "action-prime:"
+local ACTION_RECORD_SIZE = 0x14
+local STUN_IMPACT_ABILITY_BIT = 0x08000000
+local ZANTETSUKEN_ABILITY_BIT = 0x10000000
+local NATIVE_FINISHER_ABILITY_MASK = STUN_IMPACT_ABILITY_BIT
+    | ZANTETSUKEN_ABILITY_BIT
 
 -- Only Sora combat Action Abilities are exposed. Guard and Dodge Roll stay on
 -- their fixed controls; support, shared and special/Limit abilities never enter
 -- this catalog. The animation map is adapted from the authorized Critical Mix
--- action dictionary and the Steam action tables. Stun Impact is already live-
--- validated; the remaining entries deliberately log their first transitions so
--- their hitboxes and contextual requirements can be verified one by one.
+-- action dictionary; every complete record below was read from and signature-
+-- checked against the Steam action table. Gameplay effects and contextual
+-- requirements still need live validation one ability at a time.
 local ACTION_CATALOG = {
     { id = "none", name = "None", context = "none" },
     { id = "slapshot", name = "Slapshot", context = "ground",
-        animation = 0xCF, finisher = false },
+        animation = 0xCF, finisher = false,
+        recordAddress = ADDRESS.groundComboSlapshot,
+        record = { 0xCF, 0x00, 0x05, 0xFF, 0x28, 0x51, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x05, 0x06, 0x04,
+            0x00, 0x00, 0x00, 0x00 } },
     { id = "sliding_dash", name = "Sliding Dash", context = "ground",
-        animation = 0xD0, finisher = false },
+        animation = 0xD0, finisher = false,
+        recordAddress = ADDRESS.groundComboSlide,
+        record = { 0xD0, 0x00, 0x05, 0xFF, 0xB8, 0x50, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x02, 0x05, 0x06, 0x04,
+            0x00, 0x00, 0x00, 0x00 } },
     { id = "vortex", name = "Vortex", context = "ground",
-        animation = 0xD3, finisher = false },
+        animation = 0xD3, finisher = false,
+        recordAddress = ADDRESS.groundComboImpulse,
+        record = { 0xD3, 0x00, 0x05, 0xFF, 0xC8, 0x4C, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x01, 0x05, 0x06, 0x04,
+            0x00, 0x00, 0x00, 0x00 } },
     { id = "aerial_sweep", name = "Aerial Sweep", context = "ground",
-        animation = 0xD6, finisher = false },
+        animation = 0xD6, finisher = false,
+        recordAddress = ADDRESS.airComboAerialSweep,
+        record = { 0xD6, 0x00, 0x05, 0xFF, 0xC8, 0x4C, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x03, 0x05, 0x06, 0x04,
+            0x00, 0x00, 0x00, 0x00 } },
     { id = "counterattack", name = "Counterattack", context = "ground",
-        animation = 0xD5, finisher = false, contextual = true },
+        animation = 0xD5, finisher = false, contextual = true,
+        recordAddress = ADDRESS.actionRecordCounterattack,
+        record = { 0xD5, 0x00, 0x05, 0xFF, 0x18, 0x4E, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x03, 0x05, 0x06, 0x05,
+            0x00, 0x00, 0x00, 0x00 } },
     { id = "blitz", name = "Blitz", context = "ground",
-        animation = 0xD2, finisher = true },
+        animation = 0xD2, finisher = true,
+        recordAddress = ADDRESS.actionRecordBlitz,
+        record = { 0xD2, 0x00, 0x05, 0xFF, 0x38, 0x4D, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x1B, 0x05, 0x06, 0x06,
+            0x00, 0x00, 0x00, 0x00 } },
     { id = "hurricane_blast", name = "Hurricane Blast", context = "air",
-        animation = 0xD1, finisher = true },
+        animation = 0xD1, finisher = true,
+        recordAddress = ADDRESS.airComboHurricane,
+        record = { 0xD1, 0x00, 0x05, 0xFF, 0x48, 0x50, 0x00, 0x00,
+            0x00, 0x00, 0x20, 0x42, 0x1B, 0x05, 0x06, 0x05,
+            0x00, 0x00, 0x00, 0x00 } },
     { id = "ripple_drive", name = "Ripple Drive", context = "ground",
-        animation = 0xD7, finisher = true },
+        animation = 0xD7, finisher = true,
+        recordAddress = ADDRESS.actionRecordRippleDrive,
+        record = { 0xD7, 0x00, 0x05, 0xFF, 0x88, 0x4E, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x17, 0x05, 0x17, 0x05,
+            0x00, 0x00, 0x00, 0x00 } },
     { id = "stun_impact", name = "Stun Impact", context = "ground",
-        animation = 0xD8, finisher = true, validated = true },
+        animation = 0xD8, finisher = true,
+        recordAddress = ADDRESS.actionRecordStunImpact,
+        record = { 0xD8, 0x00, 0x05, 0xFF, 0xF8, 0x4E, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x1B, 0x05, 0x1B, 0x06,
+            0x00, 0x00, 0x00, 0x00 } },
     { id = "gravity_break", name = "Gravity Break", context = "ground",
-        animation = 0xDA, finisher = true },
+        animation = 0xDA, finisher = true,
+        recordAddress = ADDRESS.actionRecordGravityBreak,
+        record = { 0xDA, 0x00, 0x05, 0xFF, 0xD8, 0x4F, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x18, 0x05, 0x18, 0x06,
+            0x00, 0x00, 0x00, 0x00 } },
     { id = "zantetsuken", name = "Zantetsuken", context = "ground",
-        animation = 0xDB, finisher = true },
+        animation = 0xD9, finisher = true,
+        recordAddress = ADDRESS.actionRecordZantetsuken,
+        record = { 0xD9, 0x00, 0x05, 0xFF, 0x68, 0x4F, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x17, 0x05, 0x17, 0x06,
+            0x00, 0x00, 0x00, 0x00 } },
 }
 
 local ACTION_BY_ID = {}
 local ACTION_INDEX_BY_ID = {}
-local ROUTABLE_ACTION_ANIMATION = {}
 local FINISHER_ACTION_ANIMATION = {}
+local ROUTE_RECORD_BY_ANIMATION = {}
 for index, action in ipairs(ACTION_CATALOG) do
     ACTION_BY_ID[action.id] = action
     ACTION_INDEX_BY_ID[action.id] = index
     if action.animation ~= nil then
-        ROUTABLE_ACTION_ANIMATION[action.animation] = true
         if action.finisher then
             FINISHER_ACTION_ANIMATION[action.animation] = true
         end
+        ROUTE_RECORD_BY_ANIMATION[action.animation] = action.record
     end
 end
 
@@ -314,39 +383,94 @@ local GROUND_CROSS_SEQUENCE = { 0xC8, 0xC9, 0xCA, 0xCB }
 
 local GROUND_ACTION_ROUTE = {
     { name = "groundFinisherDefault", address = ADDRESS.groundFinisherDefault,
-        normal = 0xCB },
+        normal = 0xCB,
+        record = { 0xCB, 0x00, 0x05, 0xFF, 0x58, 0x4C, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x03, 0x05, 0x06, 0x05,
+            0x00, 0x00, 0x00, 0x00 } },
     { name = "groundComboSlide", address = ADDRESS.groundComboSlide,
-        normal = 0xD0 },
+        normal = 0xD0,
+        record = { 0xD0, 0x00, 0x05, 0xFF, 0xB8, 0x50, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x02, 0x05, 0x06, 0x04,
+            0x00, 0x00, 0x00, 0x00 } },
     { name = "groundComboImpulse", address = ADDRESS.groundComboImpulse,
-        normal = 0xD3 },
+        normal = 0xD3,
+        record = { 0xD3, 0x00, 0x05, 0xFF, 0xC8, 0x4C, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x01, 0x05, 0x06, 0x04,
+            0x00, 0x00, 0x00, 0x00 } },
     { name = "groundCombo2", address = ADDRESS.groundCombo2,
-        normal = 0xC9 },
+        normal = 0xC9,
+        record = { 0xC9, 0x00, 0x05, 0xFF, 0xE8, 0x4B, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x01, 0x05, 0x06, 0x04,
+            0x00, 0x00, 0x00, 0x00 } },
     { name = "groundComboSlapshot", address = ADDRESS.groundComboSlapshot,
-        normal = 0xCF },
+        normal = 0xCF,
+        record = { 0xCF, 0x00, 0x05, 0xFF, 0x28, 0x51, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x05, 0x06, 0x04,
+            0x00, 0x00, 0x00, 0x00 } },
     { name = "groundComboA1", address = ADDRESS.groundComboA1,
-        normal = 0xC8 },
+        normal = 0xC8,
+        record = { 0xC8, 0x00, 0x05, 0xFF, 0x78, 0x4B, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x05, 0x06, 0x04,
+            0x00, 0x00, 0x00, 0x00 } },
     { name = "groundComboA2", address = ADDRESS.groundComboA2,
-        normal = 0xCA },
+        normal = 0xCA,
+        record = { 0xCA, 0x00, 0x05, 0xFF, 0x78, 0x4B, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x02, 0x05, 0x06, 0x04,
+            0x00, 0x00, 0x00, 0x00 } },
 }
 
 local AIR_ACTION_ROUTE = {
     { name = "airComboAerialSweep", address = ADDRESS.airComboAerialSweep,
-        normal = 0xD6 },
+        normal = 0xD6,
+        record = { 0xD6, 0x00, 0x05, 0xFF, 0xC8, 0x4C, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x03, 0x05, 0x06, 0x04,
+            0x00, 0x00, 0x00, 0x00 } },
     { name = "airCombo1C", address = ADDRESS.airCombo1C,
-        normal = 0xCD },
+        normal = 0xCD,
+        record = { 0xCD, 0x00, 0x05, 0xFF, 0xE8, 0x4B, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x04, 0x05, 0x06, 0x04,
+            0x00, 0x00, 0x00, 0x00 } },
     { name = "airCombo1B", address = ADDRESS.airCombo1B,
-        normal = 0xCC },
+        normal = 0xCC,
+        record = { 0xCC, 0x00, 0x05, 0xFF, 0x78, 0x4B, 0x00, 0x00,
+            0x00, 0x00, 0x70, 0x42, 0x00, 0x05, 0x06, 0x04,
+            0x00, 0x00, 0x00, 0x00 } },
     { name = "airComboHurricane", address = ADDRESS.airComboHurricane,
-        normal = 0xD1 },
+        normal = 0xD1,
+        record = { 0xD1, 0x00, 0x05, 0xFF, 0x48, 0x50, 0x00, 0x00,
+            0x00, 0x00, 0x20, 0x42, 0x1B, 0x05, 0x06, 0x05,
+            0x00, 0x00, 0x00, 0x00 } },
     { name = "airComboFinisher", address = ADDRESS.airComboFinisher,
-        normal = 0xCE },
+        normal = 0xCE,
+        record = { 0xCE, 0x00, 0x05, 0xFF, 0x58, 0x4C, 0x00, 0x00,
+            0x00, 0x00, 0x20, 0x42, 0x03, 0x05, 0x06, 0x05,
+            0x00, 0x00, 0x00, 0x00 } },
     { name = "airCombo2", address = ADDRESS.airCombo2,
-        normal = 0xCD },
+        normal = 0xCD,
+        record = { 0xCD, 0x00, 0x05, 0xFF, 0xE8, 0x4B, 0x00, 0x00,
+            0x00, 0x00, 0xA0, 0x41, 0x04, 0x05, 0x06, 0x04,
+            0x00, 0x00, 0x00, 0x00 } },
     { name = "airCombo1", address = ADDRESS.airCombo1,
-        normal = 0xCC },
+        normal = 0xCC,
+        record = { 0xCC, 0x00, 0x05, 0xFF, 0x78, 0x4B, 0x00, 0x00,
+            0x00, 0x00, 0xA0, 0x41, 0x00, 0x05, 0x06, 0x04,
+            0x00, 0x00, 0x00, 0x00 } },
     { name = "flyingCombo1", address = ADDRESS.flyingCombo1,
-        normal = 0xCC },
+        normal = 0xCC,
+        record = { 0xCC, 0x00, 0x05, 0xFF, 0x78, 0x4B, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x41, 0x00, 0x05, 0x06, 0x04,
+            0x00, 0x00, 0x00, 0x00 } },
 }
+
+-- Canonical complete records for the normal routed animations. Special Action
+-- Ability records were registered from ACTION_CATALOG above.
+ROUTE_RECORD_BY_ANIMATION[0xC8] = GROUND_ACTION_ROUTE[6].record
+ROUTE_RECORD_BY_ANIMATION[0xC9] = GROUND_ACTION_ROUTE[4].record
+ROUTE_RECORD_BY_ANIMATION[0xCA] = GROUND_ACTION_ROUTE[7].record
+ROUTE_RECORD_BY_ANIMATION[0xCB] = GROUND_ACTION_ROUTE[1].record
+ROUTE_RECORD_BY_ANIMATION[0xCC] = AIR_ACTION_ROUTE[7].record
+ROUTE_RECORD_BY_ANIMATION[0xCD] = AIR_ACTION_ROUTE[6].record
+ROUTE_RECORD_BY_ANIMATION[0xCE] = AIR_ACTION_ROUTE[5].record
 
 local NORMAL = {
     forceCircle = 0x74,
@@ -414,6 +538,12 @@ local airRouteSourceAnimation = nil
 local airRouteSourceTime = 0.0
 local syntheticAttackCommandOwned = false
 local syntheticAttackCommandHigh = false
+local actionPrimeComboOwned = false
+local actionPrimeComboKind = nil
+local actionPrimeOriginalComboPosition = nil
+local actionPrimeForcedComboPosition = nil
+local physicalPrimeAcceptedActionId = nil
+local clearActionPrimeCombo
 local queuedNormalInput = false
 local lastDpad = 0
 local loadout = {}
@@ -423,6 +553,8 @@ local loadoutMenuGroup = "l2"
 local loadoutMenuIndex = 1
 local loadoutPromptAvailable = false
 local loadoutPromptMismatchKey = nil
+local nativeFinisherSelectionActionId = nil
+local nativeFinisherOriginalAbilityBits = nil
 
 local function log(message)
     if CONFIG.debugLog then ConsolePrint("[JokCombat] " .. message) end
@@ -448,7 +580,7 @@ local function loadActionLoadout()
 
     local file = io.open(loadoutPath, "r")
     if file == nil then
-        log("loadout file not found; using v0.3.3 defaults.")
+        log("loadout file not found; using v0.3.6 defaults.")
         return
     end
 
@@ -476,7 +608,7 @@ local function saveActionLoadout()
         return false
     end
 
-    file:write("# JokCombat v0.3.3 Action Ability loadout\n")
+    file:write("# JokCombat v0.3.6 Action Ability loadout\n")
     file:write("# Guard remains fixed on L2+Circle; Dodge Roll on Square.\n")
     for _, slot in ipairs(ACTION_SLOTS) do
         file:write(slot.id, "=", loadout[slot.id] or "none", "\n")
@@ -663,6 +795,11 @@ local function clearSyntheticAttackCommand(forceWrite)
     end
     syntheticAttackCommandOwned = false
     syntheticAttackCommandHigh = false
+    actionPrimeComboOwned = false
+    actionPrimeComboKind = nil
+    actionPrimeOriginalComboPosition = nil
+    actionPrimeForcedComboPosition = nil
+    physicalPrimeAcceptedActionId = nil
 end
 
 local function isPlausiblePointer(value)
@@ -710,23 +847,233 @@ local function restoreIfKnown(address, normal, known)
     end
 end
 
-local function isGroundRouteValue(value, normal)
-    return value == normal or value == 0xC8 or value == 0xC9
-        or value == 0xCA or value == 0xCB
-        or ROUTABLE_ACTION_ANIMATION[value] == true
+local NATIVE_FINISHER_SELECTOR = {
+    stun_impact = {
+        abilityBit = STUN_IMPACT_ABILITY_BIT,
+        chanceBranch = ADDRESS.stunImpactChanceBranch,
+    },
+    zantetsuken = {
+        abilityBit = ZANTETSUKEN_ABILITY_BIT,
+        chanceBranch = ADDRESS.zantetsukenChanceBranch,
+    },
+}
+
+local NATIVE_FINISHER_ACTION_IDS = { "stun_impact", "zantetsuken" }
+
+local function kindTargetsAction(kind, actionId)
+    if type(kind) ~= "string" then return false end
+    if kind == ACTION_KIND_PREFIX .. actionId then return true end
+    return kind:sub(1, #ACTION_PRIME_PREFIX) == ACTION_PRIME_PREFIX
+        and kind:sub(-#actionId) == actionId
 end
 
-local function isAirRouteValue(value, normal)
-    return value == normal or value == 0xCC or value == 0xCD
-        or value == 0xCE or ROUTABLE_ACTION_ANIMATION[value] == true
+local function pendingNativeFinisherAction()
+    for _, actionId in ipairs(NATIVE_FINISHER_ACTION_IDS) do
+        if kindTargetsAction(transitionKind, actionId)
+            or kindTargetsAction(deferredLinkKind, actionId)
+            or kindTargetsAction(groundRouteKind, actionId) then
+            return ACTION_BY_ID[actionId]
+        end
+    end
+    return nil
+end
+
+local function chordNativeFinisherAction(buttons)
+    local modifierHeld = (buttons & SHOULDER_MASK) ~= 0
+    if not modifierHeld then return nil end
+
+    -- A held non-X face button is an explicit request and takes precedence over
+    -- the passive X pre-prime belonging to the same shoulder layer.
+    for _, slot in ipairs(ACTION_SLOTS) do
+        if slotModifierMatches(buttons, slot)
+            and (buttons & slot.face) ~= 0 then
+            local action = ACTION_BY_ID[loadout[slot.id]]
+            if action ~= nil and NATIVE_FINISHER_SELECTOR[action.id] ~= nil then
+                return action
+            end
+            return nil
+        end
+    end
+
+    -- X routes must be native one frame before the physical X edge arrives.
+    for _, slot in ipairs(ACTION_SLOTS) do
+        if slot.face == BUTTON.CROSS and slotModifierMatches(buttons, slot) then
+            local action = ACTION_BY_ID[loadout[slot.id]]
+            if action ~= nil and NATIVE_FINISHER_SELECTOR[action.id] ~= nil then
+                return action
+            end
+            return nil
+        end
+    end
+    return nil
+end
+
+local function restoreNativeFinisherSelection()
+    restoreIfKnown(ADDRESS.groundFinisherGateBranch, 0x72,
+        { 0x72, 0x90 })
+    restoreIfKnown(ADDRESS.groundFinisherGateBranch + 1, 0x71,
+        { 0x71, 0x90 })
+    restoreIfKnown(ADDRESS.stunImpactChanceBranch, 0x76,
+        { 0x76, 0x90 })
+    restoreIfKnown(ADDRESS.stunImpactChanceBranch + 1, 0x07,
+        { 0x07, 0x90 })
+    restoreIfKnown(ADDRESS.zantetsukenChanceBranch, 0x76,
+        { 0x76, 0x90 })
+    restoreIfKnown(ADDRESS.zantetsukenChanceBranch + 1, 0x07,
+        { 0x07, 0x90 })
+
+    if nativeFinisherOriginalAbilityBits ~= nil then
+        local current = ReadInt(ADDRESS.defenseAbilityFlags)
+        local restored = (current & 0xE7FFFFFF)
+            | nativeFinisherOriginalAbilityBits
+        if current ~= restored then
+            WriteInt(ADDRESS.defenseAbilityFlags,
+                restored)
+        end
+    end
+    nativeFinisherOriginalAbilityBits = nil
+    nativeFinisherSelectionActionId = nil
+end
+
+local function updateNativeFinisherSelection(buttons, player)
+    local action = pendingNativeFinisherAction()
+        or chordNativeFinisherAction(buttons)
+    local selector = action ~= nil and NATIVE_FINISHER_SELECTOR[action.id]
+        or nil
+    local enable = CONFIG.actionLoadout and selector ~= nil
+        and not player.airborne
+
+    if not enable then
+        if nativeFinisherSelectionActionId ~= nil
+            or nativeFinisherOriginalAbilityBits ~= nil then
+            restoreNativeFinisherSelection()
+        end
+        return true
+    end
+
+    if nativeFinisherSelectionActionId ~= nil
+        and nativeFinisherSelectionActionId ~= action.id then
+        restoreNativeFinisherSelection()
+    end
+
+    local abilities = ReadInt(ADDRESS.defenseAbilityFlags)
+    local newlyActive = nativeFinisherSelectionActionId == nil
+    if newlyActive then
+        nativeFinisherSelectionActionId = action.id
+        nativeFinisherOriginalAbilityBits = abilities
+            & NATIVE_FINISHER_ABILITY_MASK
+    end
+
+    local desiredAbilityBits = nativeFinisherOriginalAbilityBits
+    if action.id == "zantetsuken" then
+        -- Stun Impact is tested first by the native selector. Temporarily clear
+        -- its runtime bit so the guaranteed D9 branch cannot be pre-empted.
+        desiredAbilityBits = (desiredAbilityBits & 0xF7FFFFFF)
+            | ZANTETSUKEN_ABILITY_BIT
+    else
+        desiredAbilityBits = desiredAbilityBits | STUN_IMPACT_ABILITY_BIT
+    end
+    local desiredAbilities = (abilities & 0xE7FFFFFF) | desiredAbilityBits
+    if abilities ~= desiredAbilities then
+        WriteInt(ADDRESS.defenseAbilityFlags, desiredAbilities)
+    end
+
+    local valid = true
+    valid = setByte("groundFinisherGateOpcode",
+        ADDRESS.groundFinisherGateBranch, 0x90,
+        { 0x72, 0x90 }) and valid
+    valid = setByte("groundFinisherGateDisplacement",
+        ADDRESS.groundFinisherGateBranch + 1, 0x90,
+        { 0x71, 0x90 }) and valid
+    valid = setByte("stunImpactChanceOpcode",
+        ADDRESS.stunImpactChanceBranch,
+        action.id == "stun_impact" and 0x90 or 0x76,
+        { 0x76, 0x90 }) and valid
+    valid = setByte("stunImpactChanceDisplacement",
+        ADDRESS.stunImpactChanceBranch + 1,
+        action.id == "stun_impact" and 0x90 or 0x07,
+        { 0x07, 0x90 }) and valid
+    valid = setByte("zantetsukenChanceOpcode",
+        ADDRESS.zantetsukenChanceBranch,
+        action.id == "zantetsuken" and 0x90 or 0x76,
+        { 0x76, 0x90 }) and valid
+    valid = setByte("zantetsukenChanceDisplacement",
+        ADDRESS.zantetsukenChanceBranch + 1,
+        action.id == "zantetsuken" and 0x90 or 0x07,
+        { 0x07, 0x90 }) and valid
+
+    if valid and newlyActive then
+        log(action.name
+            .. " native selector armed: finisher gate + 100% roll.")
+    end
+    return valid
+end
+
+local function actionRecordMatches(address, expected, firstOffset)
+    if expected == nil or #expected ~= ACTION_RECORD_SIZE then return false end
+    for offset = firstOffset or 0, ACTION_RECORD_SIZE - 1 do
+        if ReadByte(address + offset) ~= expected[offset + 1] then
+            return false
+        end
+    end
+    return true
+end
+
+local function writeActionRecord(address, desired)
+    for offset = 0, ACTION_RECORD_SIZE - 1 do
+        local value = desired[offset + 1]
+        if ReadByte(address + offset) ~= value then
+            WriteByte(address + offset, value)
+        end
+    end
+end
+
+local function actionRecordHead(address)
+    return string.format("%02X %02X %02X %02X",
+        ReadByte(address), ReadByte(address + 1),
+        ReadByte(address + 2), ReadByte(address + 3))
+end
+
+local function routeEntryHasKnownRecord(entry)
+    if actionRecordMatches(entry.address, entry.record) then return true end
+
+    for _, record in pairs(ROUTE_RECORD_BY_ANIMATION) do
+        if actionRecordMatches(entry.address, record) then return true end
+    end
+
+    -- v0.3.3 and earlier changed only byte zero. Accept that legacy hybrid on
+    -- reload only when all remaining 19 bytes still match this entry's Steam
+    -- baseline, then normalize it to the complete baseline below.
+    local animation = ReadByte(entry.address)
+    return ROUTE_RECORD_BY_ANIMATION[animation] ~= nil
+        and actionRecordMatches(entry.address, entry.record, 1)
+end
+
+local function validateCanonicalActionRecords()
+    local validCount = 0
+    for _, action in ipairs(ACTION_CATALOG) do
+        if action.animation ~= nil then
+            action.recordAvailable = actionRecordMatches(
+                action.recordAddress, action.record)
+            if action.recordAvailable then
+                validCount = validCount + 1
+            else
+                ConsolePrint(string.format(
+                    "[JokCombat:route] %s canonical record mismatch at "
+                    .. "RVA=0x%X (%s); this action is disabled.",
+                    action.name, action.recordAddress,
+                    actionRecordHead(action.recordAddress)))
+            end
+        end
+    end
+    return validCount
 end
 
 local function restoreGroundActionRoute()
     for _, entry in ipairs(GROUND_ACTION_ROUTE) do
-        local current = ReadByte(entry.address)
-        if isGroundRouteValue(current, entry.normal)
-            and current ~= entry.normal then
-            WriteByte(entry.address, entry.normal)
+        if routeEntryHasKnownRecord(entry)
+            and not actionRecordMatches(entry.address, entry.record) then
+            writeActionRecord(entry.address, entry.record)
         end
     end
     groundRouteFrames = 0
@@ -739,16 +1086,15 @@ end
 local function normalizeGroundActionRoute()
     local valid = true
     for _, entry in ipairs(GROUND_ACTION_ROUTE) do
-        local current = ReadByte(entry.address)
-        if not isGroundRouteValue(current, entry.normal) then
+        if not routeEntryHasKnownRecord(entry) then
             ConsolePrint(string.format(
-                "[JokCombat:route] %s RVA=0x%X has unexpected byte 0x%02X; "
+                "[JokCombat:route] %s RVA=0x%X has unexpected record %s; "
                 .. "forced ground routing disabled.",
-                entry.name, entry.address, current))
+                entry.name, entry.address, actionRecordHead(entry.address)))
             valid = false
-        elseif current ~= entry.normal then
-            -- Clean up a route left active by a reload during its short window.
-            WriteByte(entry.address, entry.normal)
+        elseif not actionRecordMatches(entry.address, entry.record) then
+            -- Clean up a complete or legacy route left active by a reload.
+            writeActionRecord(entry.address, entry.record)
         end
     end
     groundRouteFrames = 0
@@ -762,14 +1108,21 @@ end
 
 local function beginGroundActionRoute(kind, desiredAnimation, player)
     if not groundRouteAvailable or desiredAnimation == nil then return false end
+    local desiredRecord = ROUTE_RECORD_BY_ANIMATION[desiredAnimation]
+    if desiredRecord == nil then
+        log(string.format(
+            "%s has no complete ground record for anim=0x%02X.",
+            kind, desiredAnimation))
+        return false
+    end
 
     restoreGroundActionRoute()
     for _, entry in ipairs(GROUND_ACTION_ROUTE) do
-        local current = ReadByte(entry.address)
-        if current ~= entry.normal then
+        if not actionRecordMatches(entry.address, entry.record) then
             ConsolePrint(string.format(
-                "[JokCombat:route] %s changed to 0x%02X before routing; "
-                .. "forced ground routing disabled.", entry.name, current))
+                "[JokCombat:route] %s changed before complete routing (%s); "
+                .. "forced ground routing disabled.", entry.name,
+                actionRecordHead(entry.address)))
             groundRouteAvailable = false
             restoreGroundActionRoute()
             return false
@@ -777,9 +1130,7 @@ local function beginGroundActionRoute(kind, desiredAnimation, player)
     end
 
     for _, entry in ipairs(GROUND_ACTION_ROUTE) do
-        if entry.normal ~= desiredAnimation then
-            WriteByte(entry.address, desiredAnimation)
-        end
+        writeActionRecord(entry.address, desiredRecord)
     end
     groundRouteFrames = CONFIG.groundRouteFrames
     groundRouteAnimation = desiredAnimation
@@ -787,7 +1138,7 @@ local function beginGroundActionRoute(kind, desiredAnimation, player)
     groundRouteSourceAnimation = player.animation
     groundRouteSourceTime = player.time
     log(string.format(
-        "%s route armed: all ground entries -> 0x%02X",
+        "%s route armed: all ground entries -> complete 0x%02X record",
         kind, desiredAnimation))
     return true
 end
@@ -818,10 +1169,9 @@ end
 
 local function restoreAirActionRoute()
     for _, entry in ipairs(AIR_ACTION_ROUTE) do
-        local current = ReadByte(entry.address)
-        if isAirRouteValue(current, entry.normal)
-            and current ~= entry.normal then
-            WriteByte(entry.address, entry.normal)
+        if routeEntryHasKnownRecord(entry)
+            and not actionRecordMatches(entry.address, entry.record) then
+            writeActionRecord(entry.address, entry.record)
         end
     end
     airRouteFrames = 0
@@ -834,15 +1184,14 @@ end
 local function normalizeAirActionRoute()
     local valid = true
     for _, entry in ipairs(AIR_ACTION_ROUTE) do
-        local current = ReadByte(entry.address)
-        if not isAirRouteValue(current, entry.normal) then
+        if not routeEntryHasKnownRecord(entry) then
             ConsolePrint(string.format(
-                "[JokCombat:route] %s RVA=0x%X has unexpected byte 0x%02X; "
+                "[JokCombat:route] %s RVA=0x%X has unexpected record %s; "
                 .. "forced aerial routing disabled.",
-                entry.name, entry.address, current))
+                entry.name, entry.address, actionRecordHead(entry.address)))
             valid = false
-        elseif current ~= entry.normal then
-            WriteByte(entry.address, entry.normal)
+        elseif not actionRecordMatches(entry.address, entry.record) then
+            writeActionRecord(entry.address, entry.record)
         end
     end
     airRouteFrames = 0
@@ -856,14 +1205,21 @@ end
 
 local function beginAirActionRoute(kind, desiredAnimation, player)
     if not airRouteAvailable or desiredAnimation == nil then return false end
+    local desiredRecord = ROUTE_RECORD_BY_ANIMATION[desiredAnimation]
+    if desiredRecord == nil then
+        log(string.format(
+            "%s has no complete aerial record for anim=0x%02X.",
+            kind, desiredAnimation))
+        return false
+    end
 
     restoreAirActionRoute()
     for _, entry in ipairs(AIR_ACTION_ROUTE) do
-        local current = ReadByte(entry.address)
-        if current ~= entry.normal then
+        if not actionRecordMatches(entry.address, entry.record) then
             ConsolePrint(string.format(
-                "[JokCombat:route] %s changed to 0x%02X before routing; "
-                .. "forced aerial routing disabled.", entry.name, current))
+                "[JokCombat:route] %s changed before complete routing (%s); "
+                .. "forced aerial routing disabled.", entry.name,
+                actionRecordHead(entry.address)))
             airRouteAvailable = false
             restoreAirActionRoute()
             return false
@@ -871,9 +1227,7 @@ local function beginAirActionRoute(kind, desiredAnimation, player)
     end
 
     for _, entry in ipairs(AIR_ACTION_ROUTE) do
-        if entry.normal ~= desiredAnimation then
-            WriteByte(entry.address, desiredAnimation)
-        end
+        writeActionRecord(entry.address, desiredRecord)
     end
     airRouteFrames = CONFIG.groundRouteFrames
     airRouteAnimation = desiredAnimation
@@ -881,7 +1235,7 @@ local function beginAirActionRoute(kind, desiredAnimation, player)
     airRouteSourceAnimation = player.animation
     airRouteSourceTime = player.time
     log(string.format(
-        "%s route armed: all aerial entries -> 0x%02X",
+        "%s route armed: all aerial entries -> complete 0x%02X record",
         kind, desiredAnimation))
     return true
 end
@@ -910,13 +1264,17 @@ local function updateAirActionRoute(player)
     return false
 end
 
-local function restoreActionRoutes()
+local function restoreActionRoutes(restorePrimeCombo)
     restoreGroundActionRoute()
     restoreAirActionRoute()
+    if restorePrimeCombo ~= false and clearActionPrimeCombo ~= nil then
+        clearActionPrimeCombo(true)
+    end
 end
 
 local function beginActionRoute(kind, action, player)
     if action == nil or action.animation == nil then return false end
+    if action.recordAvailable ~= true then return false end
     if action.context == "air" then
         return beginAirActionRoute(kind, action.animation, player)
     end
@@ -932,6 +1290,7 @@ end
 local function restoreAllPatches()
     clearSyntheticAttackCommand(false)
     restoreActionRoutes()
+    restoreNativeFinisherSelection()
     restoreIfKnown(ADDRESS.forceCircleBranch, NORMAL.forceCircle,
         { 0x74, 0x72 })
     restoreIfKnown(ADDRESS.forceSquareBranch, NORMAL.forceSquare,
@@ -1585,6 +1944,53 @@ local function promotePrimedActionRoute(action, kind, player)
     end
 end
 
+clearActionPrimeCombo = function(restoreOriginal)
+    if actionPrimeComboOwned and restoreOriginal then
+        local current = ReadByte(ADDRESS.comboPosition)
+        -- Never overwrite a value the game has already consumed or advanced.
+        -- Restore only while the exact value owned by this prime is still live.
+        if current == actionPrimeForcedComboPosition then
+            WriteByte(ADDRESS.comboPosition,
+                actionPrimeOriginalComboPosition)
+        end
+    end
+    actionPrimeComboOwned = false
+    actionPrimeComboKind = nil
+    actionPrimeOriginalComboPosition = nil
+    actionPrimeForcedComboPosition = nil
+end
+
+local function primeActionComboState(action, primeKind)
+    if action.context ~= "ground" or not action.finisher then
+        clearActionPrimeCombo(true)
+        return true
+    end
+
+    local position, maximum = readGroundComboState()
+    if position == nil then return false end
+    local desired = maximum + 1
+
+    if actionPrimeComboOwned and actionPrimeComboKind ~= primeKind then
+        clearActionPrimeCombo(true)
+        position, maximum = readGroundComboState()
+        if position == nil then return false end
+        desired = maximum + 1
+    end
+
+    if not actionPrimeComboOwned then
+        actionPrimeComboOwned = true
+        actionPrimeComboKind = primeKind
+        actionPrimeOriginalComboPosition = position
+        actionPrimeForcedComboPosition = desired
+        log(string.format(
+            "%s finisher context prearmed: combo=%d max=%d.",
+            action.name, desired, maximum))
+    end
+
+    WriteByte(ADDRESS.comboPosition, actionPrimeForcedComboPosition)
+    return true
+end
+
 local function requestActionAbility(player, slot, action, usesPhysicalInput)
     if action == nil or action.animation == nil then
         log(slot.label .. " has no Action Ability assigned.")
@@ -1603,6 +2009,14 @@ local function requestActionAbility(player, slot, action, usesPhysicalInput)
     local kind = actionKind(action)
     local currentRouteKind, currentRouteAnimation = actionRouteState(action)
     if player.animation == action.animation then
+        if usesPhysicalInput
+            and physicalPrimeAcceptedActionId == action.id then
+            physicalPrimeAcceptedActionId = nil
+            clearActionPrimeCombo(false)
+            log(action.name
+                .. " accepted by physical X with its complete action record.")
+            return true
+        end
         if transitionKind == kind then clearTransitionCheck() end
         if currentRouteKind == kind or isActionPrimeKind(currentRouteKind) then
             restoreActionRoutes()
@@ -1666,9 +2080,11 @@ local function requestActionAbility(player, slot, action, usesPhysicalInput)
         routeArmed = beginActionRoute(kind, action, player)
     end
     if not routeArmed then
+        if usesPhysicalInput then clearActionPrimeCombo(true) end
         log(action.name .. " ignored: its action route is unavailable.")
         return true
     end
+    if routeWasPrimed then clearActionPrimeCombo(false) end
 
     armTransitionCheck(player, kind, action.animation,
         comboPosition, usesPhysicalInput)
@@ -1717,6 +2133,7 @@ local function updateCrossActionPrime(player, buttons)
     end
 
     local canStayPrimed = CONFIG.actionLoadout and desiredPrime ~= nil
+        and action.recordAvailable == true
         and actionMatchesContext(action, player)
         and player.animation ~= action.animation
         and ReadByte(ADDRESS.commandMenuSlot) == 0
@@ -1724,9 +2141,21 @@ local function updateCrossActionPrime(player, buttons)
         and transitionKind == nil and deferredLinkKind == nil
 
     if currentPrimeKind ~= nil then
+        if currentPrimeKind == desiredPrime
+            and action ~= nil and player.animation == action.animation then
+            clearActionPrimeCombo(false)
+            physicalPrimeAcceptedActionId = action.id
+            restoreActionRoutes(false)
+            return false
+        end
         if currentPrimeKind ~= desiredPrime or not canStayPrimed then
             restoreActionRoutes()
             log("Action Ability X prime cancelled by state change.")
+            return false
+        end
+        if not primeActionComboState(action, currentPrimeKind) then
+            restoreActionRoutes()
+            log("Action Ability X prime cancelled: combo state unavailable.")
             return false
         end
         if action.context == "air" then
@@ -1744,9 +2173,14 @@ local function updateCrossActionPrime(player, buttons)
     -- the log asks the player to hold the modifier first.
     if not canStayPrimed or crossHeld
         or groundRouteKind ~= nil or airRouteKind ~= nil then
+        if desiredPrime == nil then clearActionPrimeCombo(true) end
         return false
     end
 
+    if not primeActionComboState(action, desiredPrime) then
+        log(action.name .. " prime ignored: combo state unavailable.")
+        return false
+    end
     local routeArmed = beginActionRoute(desiredPrime, action, player)
     if routeArmed then
         if action.context == "air" then
@@ -1758,6 +2192,8 @@ local function updateCrossActionPrime(player, buttons)
         end
         log(string.format("%s primed by %s; waiting for X.",
             action.name, slotModifierName(slot)))
+    else
+        clearActionPrimeCombo(true)
     end
     return routeArmed
 end
@@ -1982,6 +2418,8 @@ function _OnInit()
     loadoutMenuIndex = 1
     loadoutPromptAvailable = false
     loadoutPromptMismatchKey = nil
+    nativeFinisherSelectionActionId = nil
+    nativeFinisherOriginalAbilityBits = nil
     clearComboIntent()
     clearTransitionCheck()
     clearDeferredAttackCommand()
@@ -2035,6 +2473,24 @@ function _OnInit()
         0x74, { 0x74, 0xEB }) and valid
     valid = normalizeByte("dodgeAvailability", ADDRESS.dodgeAvailabilityBranch,
         0x84, { 0x84, 0x82 }) and valid
+    valid = normalizeByte("groundFinisherGateOpcode",
+        ADDRESS.groundFinisherGateBranch, 0x72,
+        { 0x72, 0x90 }) and valid
+    valid = normalizeByte("groundFinisherGateDisplacement",
+        ADDRESS.groundFinisherGateBranch + 1, 0x71,
+        { 0x71, 0x90 }) and valid
+    valid = normalizeByte("stunImpactChanceOpcode",
+        ADDRESS.stunImpactChanceBranch, 0x76,
+        { 0x76, 0x90 }) and valid
+    valid = normalizeByte("stunImpactChanceDisplacement",
+        ADDRESS.stunImpactChanceBranch + 1, 0x07,
+        { 0x07, 0x90 }) and valid
+    valid = normalizeByte("zantetsukenChanceOpcode",
+        ADDRESS.zantetsukenChanceBranch, 0x76,
+        { 0x76, 0x90 }) and valid
+    valid = normalizeByte("zantetsukenChanceDisplacement",
+        ADDRESS.zantetsukenChanceBranch + 1, 0x07,
+        { 0x07, 0x90 }) and valid
     valid = normalizeByte("dpadUpControlMap", ADDRESS.dpadUpControlMap,
         0xFF, { 0xFF, 0xFE }) and valid
     valid = normalizeByte("dpadRightControlMap", ADDRESS.dpadRightControlMap,
@@ -2055,6 +2511,7 @@ function _OnInit()
 
     local groundRouteValid = normalizeGroundActionRoute()
     local airRouteValid = normalizeAirActionRoute()
+    local validActionRecordCount = validateCanonicalActionRecords()
     loadActionLoadout()
     initializeLoadoutPrompt()
     hideOwnedLoadoutPrompt()
@@ -2067,7 +2524,10 @@ function _OnInit()
         "unavailable."))
     log("aerial action route " .. (airRouteValid and "ready." or
         "unavailable."))
+    log(string.format("complete action records ready: %d/%d.",
+        validActionRecordCount, #ACTION_CATALOG - 1))
     log("Action Loadout: L2+R2+D-pad Left=L2, Up=dual, Right=R2, Down=reset.")
+    log("native Stun Impact/Zantetsuken selectors ready: shortcut rolls forced to 100%.")
     if staleSyntheticAttack then
         log("cleared stale synthetic Attack flags during reload.")
     end
@@ -2089,6 +2549,8 @@ function _OnFrame()
         return
     end
 
+    physicalPrimeAcceptedActionId = nil
+
     local player = readPlayer()
     if player == nil then
         if loadoutMenuOpen then hideOwnedLoadoutPrompt() end
@@ -2106,6 +2568,11 @@ function _OnFrame()
 
     local buttons = ReadByte(ADDRESS.rawButtons)
     local dpad = ReadByte(ADDRESS.dpadButtons)
+    updateNativeFinisherSelection(buttons, player)
+    if faulted then
+        restoreAllPatches()
+        return
+    end
     updateLoadoutMenu(buttons, dpad)
     local editorChordArmed = (buttons & BUTTON.L2) ~= 0
         and (buttons & BUTTON.R2) ~= 0

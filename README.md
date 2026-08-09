@@ -51,7 +51,7 @@ vanilla.
 > v0.2.9. Non vengono emessi pulse di fallback; rilascio di L2, cambio stato,
 > Guard, Dodge, salto, reload e uscita ripristinano la route vanilla.
 >
-> **Implementazione v0.3.3 da validare live:** il comando speciale singolo e'
+> **Risultato live v0.3.4:** il comando speciale singolo e'
 > diventato un loadout di undici slot per le Action Ability di combo. L'editor
 > separa i due modificatori: `L2 + R2 + D-pad Sinistra` gestisce i tre slot L2,
 > `D-pad Su` i quattro slot L2+R2 e `D-pad Destra` i quattro slot R2.
@@ -62,6 +62,32 @@ vanilla.
 > La v0.3.3 corregge inoltre il prompt HUD dopo reload: la coppia puntatori
 > colore `0/0` e' uno slot vuoto valido e viene inizializzata soltanto alla
 > prima apertura dell'editor, invece di disabilitare il riquadro per la sessione.
+> La prova del record completo da `0x14` byte ha falsificato l'ipotesi iniziale:
+> da neutrale Stun Impact esegue ancora soltanto l'animazione, mentre dopo una
+> vera combo bolla, hitbox e danno compaiono con la probabilita' vanilla del 30%.
+> Il record viene sempre ripristinato, ma non determina da solo l'identita'
+> dell'azione scelta dal dispatcher.
+>
+> **Risultato live v0.3.5:** il disassemblato Steam conferma
+> due controlli distinti nel selettore nativo: `0x2A6F8A` richiede il contesto
+> finisher e `0x2A6FAF` scarta Stun Impact quando il valore casuale non e'
+> inferiore a `0.30`. Solo mentre una chord Croce assegnata a Stun Impact e'
+> armata, JokCombat abilita il relativo bit runtime e sostituisce entrambe le
+> branch a due byte con NOP. Il gioco puo' cosi' selezionare il vero Stun Impact
+> anche da neutrale e con esito 100%; al rilascio vengono ripristinate le quattro
+> istruzioni originali. Nessun byte di abilita', AP o progressione viene scritto
+> nel salvataggio. Il test in combattimento ha confermato bolla, hitbox, danno e
+> attivazione deterministica tramite chord senza una combo precedente.
+>
+> **Candidato v0.3.6:** la precedente voce Zantetsuken puntava per errore a
+> `0xDB`, identificato negli script Critical Mix come Horizontal Strike della
+> sequenza Limit/Shin Zantetsuken. Il record Action Ability nativo e' `0xD9` e
+> il selettore Steam lo collega al bit runtime 28 e alla branch probabilistica
+> `0x2A6FC5`. La scorciatoia ora forza temporaneamente quel ramo al 100%,
+> disabilitando soltanto la precedenza runtime di Stun Impact durante la
+> richiesta; tutti i bit e le istruzioni originali vengono poi ripristinati.
+> Animazione completa, hitbox, danno e ritorno al controllo attendono conferma
+> nel test live.
 
 La repository contiene due probe read-only e il primo prototipo combat:
 
@@ -70,7 +96,7 @@ La repository contiene due probe read-only e il primo prototipo combat:
   memoria;
 - `JokCombat_InputProbe.lua`: registra in sola lettura D-pad, L2/R2 e tasti
   faccia e valida gli indirizzi Steam portati prima che il prototipo scriva;
-- `JokCombat_CombatPrototype.lua`: prototipo v0.3.3 con combo terrestre completa
+- `JokCombat_CombatPrototype.lua`: prototipo v0.3.6 con combo terrestre completa
   e finisher su Croce, undici slot Action Ability configurabili,
   Triangolo non modificato lasciato nativo,
   jump-cancel terra -> aria, Guard universale su L2 + Cerchio e Dodge Roll
@@ -86,7 +112,7 @@ Requisito di design confermato: JokCombat fornisce dall'inizio un loadout
 runtime di sole Action Ability, indipendente dallo sblocco vanilla e senza
 inserirle nel salvataggio. Guard e Dodge Roll restano comandi fissi; abilita'
 passive, condivise, movimento, magia e Limit a consumo MP non compaiono
-nell'editor v0.3.3. Queste ultime richiedono un dispatcher diverso dalla route
+nell'editor v0.3.6. Queste ultime richiedono un dispatcher diverso dalla route
 Attack e verranno analizzate separatamente, senza fingere che siano gia'
 supportate.
 
@@ -112,9 +138,10 @@ pacchetto Critical Mix sono conservati, ma non caricati, nelle directory
 `C:\Users\<utente>\Documents\KH_mod\reference\CriticalMix`. Backup, log e
 copie runtime restano locali e non fanno parte del repository.
 
-Per verificare la v0.3.3, premi `F1` nella console LuaBackend. Il log iniziale
-deve mostrare `v0.3.3`, `ground action route ready`, `aerial action route ready`
-e l'istruzione `Action Loadout`. Tieni prima `L2 + R2`, quindi premi
+Per verificare la v0.3.6, premi `F1` nella console LuaBackend. Il log iniziale
+deve mostrare `v0.3.6`, `ground action route ready`, `aerial action route ready`,
+`complete action records ready: 11/11`
+e `native Stun Impact/Zantetsuken selectors ready`. Tieni prima `L2 + R2`, quindi premi
 `D-pad Sinistra` per gli slot L2, `D-pad Su` per gli slot L2+R2 oppure
 `D-pad Destra` per gli slot R2. Usa `Su/Giu` per scegliere lo slot e
 `Sinistra/Destra` senza shoulder per cambiare abilita'. Ripeti la combinazione
@@ -220,7 +247,13 @@ La v0.2.10 ha confermato la transizione diretta a `0xD8`, senza uno stato `0xC8`
 intermedio e senza pulse sintetici, quando L2 viene tenuto prima di Croce. La
 v0.3.3 generalizza lo stesso criterio alle route configurabili e aggiunge un
 dispatcher sintetico soltanto per i tasti faccia che vengono soppressi in
-anticipo dal modificatore. Prima di aggiungere Limit, movement o magic cancel,
-ogni voce del catalogo v0.3.3 deve essere validata live e le route devono
+anticipo dal modificatore. La v0.3.4 usa record completi al posto della sola
+animazione, ma il test ha dimostrato che gli effetti speciali dipendono anche
+dal selettore nativo. La v0.3.5 forza temporaneamente gate finisher e tiro del
+30% per Stun Impact, mantenendo vanilla il codice fuori dalla relativa chord.
+La v0.3.6 applica lo stesso percorso nativo a Zantetsuken `0xD9` e rimuove dal
+catalogo l'erronea route Limit `0xDB`.
+Prima di aggiungere Limit, movement o magic cancel, ogni voce del catalogo
+v0.3.6 deve essere validata live e le route devono
 risultare sempre ripristinate dopo successo, timeout, Guard, Dodge, salto,
 reload e perdita del player object.
