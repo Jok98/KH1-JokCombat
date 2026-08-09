@@ -2,7 +2,7 @@ LUAGUI_NAME = "JokCombat Combat Prototype"
 LUAGUI_AUTH = "Jok; Critical Mix reference by Xendra / KSX"
 LUAGUI_DESC = "Cross combo, configurable Action Ability loadout, universal Guard/Dodge cancels and jump branch."
 
--- JokCombat v0.3.6 prototype for the current Steam Global executable.
+-- JokCombat v0.4.0 prototype for the current Steam Global executable.
 -- Critical Mix was used as an authorized technical reference. This script is
 -- intentionally limited to combat/input state and does not touch save data,
 -- story flags, rewards, inventory, AP, levels, worlds, chests, or synthesis.
@@ -25,6 +25,7 @@ local CONFIG = {
     actionLoadout = true,
     actionLoadoutMenu = true,
     actionLoadoutPrompt = true,
+    actionLoadoutOverlay = true,
 
     -- Enabled for the first combat test so the requested bindings also work
     -- on an early save. This bypass is runtime-only and never edits the save.
@@ -52,7 +53,7 @@ local CONFIG = {
 
 local EXPECTED_GAME_ID = 0xAF71841E
 local FINGERPRINT = 0x7265737563697065 -- "epicures", little endian
-local VERSION = "v0.3.6"
+local VERSION = "v0.4.0"
 
 local ADDRESS = {
     fingerprint = 0x3B2271,
@@ -60,6 +61,10 @@ local ADDRESS = {
     dpadButtons = 0x22C9300,
     rawButtons = 0x22C9301,
     commandMenuSlot = 0x28527AC,
+    commandMenuObject = 0x2D539F0,
+    commandRecordBase = 0x2D36D50,
+    commandMessageTokens = 0x2D22F98,
+    compactPointerSegments = 0x2EE3980,
     triggerMenu1 = 0x23D3F80,
     triggerMenu2 = 0x232DDC4,
     defenseAbilityFlags = 0x2D5EC10,
@@ -126,9 +131,9 @@ local ADDRESS = {
     stunImpactChanceBranch = 0x2A6FAF,   -- 76 07 normal, 90 90 forced
     zantetsukenChanceBranch = 0x2A6FC5,  -- 76 07 normal, 90 90 forced
 
-    -- One native KH notification box is reused only while the loadout editor
-    -- is open. These Steam addresses and their color pointers were validated
-    -- read-only on the same fingerprint as the combat routes.
+    -- Native KH notification storage remains available to the loadout editor.
+    -- While the editor is closed, its four 0x20-byte line buffers feed the
+    -- original Command Menu text renderer; the notification boxes stay hidden.
     promptBoxCount = 0x283B380,
     promptBox = 0x283B390,
     promptText = 0x2DB7720,
@@ -148,6 +153,8 @@ local PLAYER = {
 local BUTTON = {
     L2 = 0x01,
     R2 = 0x02,
+    L1 = 0x04,
+    R1 = 0x08,
     CIRCLE = 0x20,
     CROSS = 0x40,
     SQUARE = 0x80,
@@ -155,6 +162,8 @@ local BUTTON = {
 }
 
 local SHOULDER_MASK = BUTTON.L2 | BUTTON.R2
+local FACE_BUTTON_MASK = BUTTON.CIRCLE | BUTTON.CROSS
+    | BUTTON.SQUARE | BUTTON.TRIANGLE
 
 local DPAD = {
     UP = 0x10,
@@ -548,11 +557,40 @@ local queuedNormalInput = false
 local lastDpad = 0
 local loadout = {}
 local loadoutPath = nil
-local loadoutMenuOpen = false
-local loadoutMenuGroup = "l2"
-local loadoutMenuIndex = 1
-local loadoutPromptAvailable = false
-local loadoutPromptMismatchKey = nil
+local HUD = {
+    available = false,
+    enabled = true,
+    mismatchKey = nil,
+    nativeFailureKey = nil,
+    overlayGroup = nil,
+    overlaySignature = nil,
+    nativeTokenBackups = {},
+    nativeCommandBackup = nil,
+    directEditGroup = nil,
+    directEditActive = false,
+    directEditDirty = false,
+    directEditIndex = { l2 = 1, r2 = 1, dual = 1 },
+    dpadReleaseLock = false,
+    controlChordHeld = false,
+    controlChordUsed = false,
+    -- Command 0 has no drawable record on early saves. While no face/D-pad
+    -- input can reach KH1, Summon's valid record temporarily carries only the
+    -- fourth JokCombat label; the original command byte is always restored.
+    nativeFallbackCommandId = 0x06,
+    nativeRecoveryAddress = 0x2DB7940,
+    nativeRecoverySignature = 0x31574F524E4B4F4A, -- "JOKNROW1"
+    nativeRecoveryCommandMarker = 0x4A4B0000,
+    nativeMessageTokenCount = 0x200,
+    moduleSize = 0x2F91000,
+    boxCount = 2,
+    boxStride = 0x3A20,
+    titleStride = 0x20,
+    bodyOffset = 0x70,
+    bodyStride = 0x140,
+    lineStride = 0x20,
+    colorStride = 0x10,
+    ownerSignature = "JokCombat",
+}
 local nativeFinisherSelectionActionId = nil
 local nativeFinisherOriginalAbilityBits = nil
 
@@ -580,7 +618,7 @@ local function loadActionLoadout()
 
     local file = io.open(loadoutPath, "r")
     if file == nil then
-        log("loadout file not found; using v0.3.6 defaults.")
+        log("loadout file not found; using v0.4.0 defaults.")
         return
     end
 
@@ -588,7 +626,10 @@ local function loadActionLoadout()
     for line in file:lines() do
         local slotId, actionId = line:match(
             "^%s*([%w_]+)%s*=%s*([%w_]+)%s*$")
-        if ACTION_SLOT_BY_ID[slotId] ~= nil
+        if slotId == "action_overlay"
+            and (actionId == "true" or actionId == "false") then
+            HUD.enabled = actionId == "true"
+        elseif ACTION_SLOT_BY_ID[slotId] ~= nil
             and ACTION_BY_ID[actionId] ~= nil then
             loadout[slotId] = actionId
             accepted = accepted + 1
@@ -608,8 +649,9 @@ local function saveActionLoadout()
         return false
     end
 
-    file:write("# JokCombat v0.3.6 Action Ability loadout\n")
+    file:write("# JokCombat v0.4.0 Action Ability loadout\n")
     file:write("# Guard remains fixed on L2+Circle; Dodge Roll on Square.\n")
+    file:write("action_overlay=", HUD.enabled and "true" or "false", "\n")
     for _, slot in ipairs(ACTION_SLOTS) do
         file:write(slot.id, "=", loadout[slot.id] or "none", "\n")
     end
@@ -655,128 +697,440 @@ local function getKHSCII(input, capacity)
     return result
 end
 
-local function initializeLoadoutPrompt(quiet)
-    loadoutPromptAvailable = false
-    if not CONFIG.actionLoadoutPrompt then return false end
+function HUD.countAddress(index)
+    return ADDRESS.promptBoxCount + 0x04 * (index - 1)
+end
 
-    local expectedBoxColor = BASE_ADDR + ADDRESS.promptColorBox
-    local expectedTextColor = BASE_ADDR + ADDRESS.promptColorText
-    local actualBoxColor = ReadLong(ADDRESS.promptBox + 0xB88)
-    local actualTextColor = ReadLong(ADDRESS.promptBox + 0xB90)
-    local hasSteamPointers = actualBoxColor == expectedBoxColor
-        and actualTextColor == expectedTextColor
-    local isUninitialized = actualBoxColor == 0 and actualTextColor == 0
-    if not hasSteamPointers and not isUninitialized then
-        local mismatchKey = string.format("%X:%X",
-            actualBoxColor, actualTextColor)
-        if loadoutPromptMismatchKey ~= mismatchKey then
-            ConsolePrint(string.format(
-                "[JokCombat:loadout] prompt slot is currently owned by "
-                .. "another layout; HUD deferred (box=0x%X text=0x%X).",
-                actualBoxColor, actualTextColor))
-            loadoutPromptMismatchKey = mismatchKey
+function HUD.boxAddress(index)
+    return ADDRESS.promptBox + HUD.boxStride * (index - 1)
+end
+
+function HUD.titleAddress(index)
+    return ADDRESS.promptText + HUD.titleStride * (index - 1)
+end
+
+function HUD.lineAddress(index, line)
+    return ADDRESS.promptText + HUD.bodyOffset
+        + HUD.bodyStride * (index - 1)
+        + HUD.lineStride * (line - 1)
+end
+
+function HUD.textStartsWith(address, value)
+    local encoded = getKHSCII(value, #value + 1)
+    for index = 1, #encoded - 1 do
+        if ReadByte(address + index - 1) ~= encoded[index] then
+            return false
         end
-        return false
-    end
-
-    loadoutPromptAvailable = true
-    loadoutPromptMismatchKey = nil
-    if isUninitialized and not quiet then
-        log("HUD prompt slot is empty; lazy initialization ready.")
     end
     return true
 end
 
-local function currentLoadoutMenuGroup()
-    return LOADOUT_MENU_GROUPS[loadoutMenuGroup]
-        or LOADOUT_MENU_GROUPS.l2
+function HUD.boxOwned(index)
+    local boxAddress = HUD.boxAddress(index)
+    local titleAddress = HUD.titleAddress(index)
+    if ReadLong(boxAddress + 0x30) ~= BASE_ADDR + titleAddress then
+        return false
+    end
+    if HUD.textStartsWith(titleAddress, HUD.ownerSignature) then
+        return true
+    end
+    -- Clean up an editor prompt left visible by a v0.3.6 reload.
+    return index == 1 and HUD.textStartsWith(titleAddress, "Action Loadout")
 end
 
-local function showLoadoutPrompt()
-    if not loadoutMenuOpen then return end
-    -- A freshly loaded area commonly leaves the reserved notification slot at
-    -- 0/0 until its first use. Revalidate here and initialize the known Steam
-    -- pointers only when the JokCombat editor actually needs the box.
-    if not initializeLoadoutPrompt(true) then return end
-    local group = currentLoadoutMenuGroup()
-    local slot = group.slots[loadoutMenuIndex]
-    local action = ACTION_BY_ID[loadout[slot.id]] or ACTION_BY_ID.none
-    local title = string.format("Action Loadout %s %d/%d",
-        group.label, loadoutMenuIndex, #group.slots)
+function HUD.initialize(quiet, requiredBoxes)
+    HUD.available = false
+    if not CONFIG.actionLoadoutPrompt then return false end
 
-    WriteArray(ADDRESS.promptText, getKHSCII(title, 0x20))
-    WriteArray(ADDRESS.promptText + 0x70,
-        getKHSCII(slot.label, 0x20))
-    WriteArray(ADDRESS.promptText + 0x90,
-        getKHSCII(action.name, 0x20))
-
-    WriteInt(ADDRESS.promptBoxCount, 1)
-    WriteLong(ADDRESS.promptBox + 0x30,
-        BASE_ADDR + ADDRESS.promptText)
-    WriteInt(ADDRESS.promptBox + 0x18, 2)
-    WriteLong(ADDRESS.promptBox + 0x20,
-        BASE_ADDR + ADDRESS.promptText + 0x70)
-    WriteLong(ADDRESS.promptBox + 0x28,
-        BASE_ADDR + ADDRESS.promptText + 0x90)
-    WriteInt(ADDRESS.promptBox + 0x0C, -30000)
-    WriteFloat(ADDRESS.promptBox + 0xB80, 1.0)
-    WriteLong(ADDRESS.promptBox + 0xB88,
-        BASE_ADDR + ADDRESS.promptColorBox)
-    WriteLong(ADDRESS.promptBox + 0xB90,
-        BASE_ADDR + ADDRESS.promptColorText)
-    WriteInt(ADDRESS.promptBox, 1)
-end
-
-local function hideLoadoutPrompt()
-    if not loadoutPromptAvailable then return end
-    WriteInt(ADDRESS.promptBox + 0x0C, 0)
-    WriteInt(ADDRESS.promptBox, 0)
-    WriteInt(ADDRESS.promptBoxCount, 0)
-end
-
-local function hideOwnedLoadoutPrompt()
-    if not loadoutPromptAvailable then return end
-    if ReadLong(ADDRESS.promptBox + 0x30)
-        ~= BASE_ADDR + ADDRESS.promptText then return end
-    local signature = getKHSCII("Action Loadout", 0x0F)
-    for index = 1, #signature - 1 do
-        if ReadByte(ADDRESS.promptText + index - 1) ~= signature[index] then
-            return
+    local sawUninitialized = false
+    for index = 1, requiredBoxes or HUD.boxCount do
+        local boxAddress = HUD.boxAddress(index)
+        local expectedBoxColor = BASE_ADDR + ADDRESS.promptColorBox
+            + HUD.colorStride * (index - 1)
+        local expectedTextColor = BASE_ADDR + ADDRESS.promptColorText
+            + HUD.colorStride * (index - 1)
+        local actualBoxColor = ReadLong(boxAddress + 0xB88)
+        local actualTextColor = ReadLong(boxAddress + 0xB90)
+        local hasSteamPointers = actualBoxColor == expectedBoxColor
+            and actualTextColor == expectedTextColor
+        local isUninitialized = actualBoxColor == 0 and actualTextColor == 0
+        sawUninitialized = sawUninitialized or isUninitialized
+        if not hasSteamPointers and not isUninitialized then
+            local mismatchKey = string.format("%d:%X:%X", index,
+                actualBoxColor, actualTextColor)
+            if HUD.mismatchKey ~= mismatchKey then
+                ConsolePrint(string.format(
+                    "[JokCombat:loadout] prompt box %d belongs to another "
+                    .. "layout; HUD deferred (box=0x%X text=0x%X).",
+                    index, actualBoxColor, actualTextColor))
+                HUD.mismatchKey = mismatchKey
+            end
+            return false
         end
     end
-    hideLoadoutPrompt()
-end
 
-local function printLoadoutMenu()
-    local group = currentLoadoutMenuGroup()
-    ConsolePrint("[JokCombat:loadout] ------------------------------")
-    ConsolePrint("[JokCombat:loadout] " .. group.label .. " slots")
-    for index, slot in ipairs(group.slots) do
-        local action = ACTION_BY_ID[loadout[slot.id]] or ACTION_BY_ID.none
-        ConsolePrint(string.format("[JokCombat:loadout] %s %d. %-14s -> %s",
-            index == loadoutMenuIndex and ">" or " ", index,
-            slot.label, action.name))
+    HUD.available = true
+    HUD.mismatchKey = nil
+    if sawUninitialized and not quiet then
+        log("HUD prompt boxes are empty; lazy initialization ready.")
     end
-    ConsolePrint(
-        "[JokCombat:loadout] D-pad Up/Down: slot; Left/Right: ability.")
-    ConsolePrint(string.format(
-        "[JokCombat:loadout] Repeat L2+R2+D-pad %s to save/close.",
-        group.openDirection))
-    ConsolePrint(
-        "[JokCombat:loadout] With L2+R2: Left/Up/Right switch; Down resets.")
+    return true
 end
 
-local function cycleLoadoutAction(delta)
-    local group = currentLoadoutMenuGroup()
-    local slot = group.slots[loadoutMenuIndex]
-    local currentIndex = ACTION_INDEX_BY_ID[loadout[slot.id]] or 1
-    local nextIndex = ((currentIndex - 1 + delta) % #ACTION_CATALOG) + 1
-    loadout[slot.id] = ACTION_CATALOG[nextIndex].id
-    saveActionLoadout()
-    showLoadoutPrompt()
-    local action = ACTION_CATALOG[nextIndex]
-    ConsolePrint(string.format("[JokCombat:loadout] %s -> %s",
-        slot.label, action.name))
+function HUD.boxesClaimable(count)
+    for index = 1, count do
+        if not HUD.boxOwned(index)
+            and ReadInt(HUD.boxAddress(index)) ~= 0 then
+            return false
+        end
+    end
+    return true
+end
+
+function HUD.showBox(index, title, firstLine, secondLine)
+    local boxAddress = HUD.boxAddress(index)
+    local titleAddress = HUD.titleAddress(index)
+    local firstLineAddress = HUD.lineAddress(index, 1)
+    local secondLineAddress = HUD.lineAddress(index, 2)
+
+    WriteArray(titleAddress, getKHSCII(title, 0x20))
+    WriteArray(firstLineAddress, getKHSCII(firstLine, 0x20))
+    WriteArray(secondLineAddress, getKHSCII(secondLine, 0x20))
+    WriteInt(HUD.countAddress(index), 1)
+    WriteLong(boxAddress + 0x30, BASE_ADDR + titleAddress)
+    WriteInt(boxAddress + 0x18, 2)
+    WriteLong(boxAddress + 0x20, BASE_ADDR + firstLineAddress)
+    WriteLong(boxAddress + 0x28, BASE_ADDR + secondLineAddress)
+    WriteInt(boxAddress + 0x0C, -30000)
+    WriteFloat(boxAddress + 0xB80, 1.0)
+    WriteLong(boxAddress + 0xB88, BASE_ADDR + ADDRESS.promptColorBox
+        + HUD.colorStride * (index - 1))
+    WriteLong(boxAddress + 0xB90, BASE_ADDR + ADDRESS.promptColorText
+        + HUD.colorStride * (index - 1))
+    WriteInt(boxAddress, 1)
+end
+
+function HUD.hideBoxIfOwned(index)
+    if not HUD.boxOwned(index) then return false end
+    local boxAddress = HUD.boxAddress(index)
+    WriteInt(boxAddress + 0x0C, 0)
+    WriteInt(boxAddress, 0)
+    WriteInt(HUD.countAddress(index), 0)
+    return true
+end
+
+function HUD.hideOwned()
+    HUD.restoreNativeRows()
+    for index = 1, HUD.boxCount do
+        HUD.hideBoxIfOwned(index)
+    end
+    HUD.overlayGroup = nil
+    HUD.overlaySignature = nil
+end
+
+function HUD.directSlotSelected(groupId, index)
+    return HUD.directEditActive and HUD.directEditGroup == groupId
+        and HUD.directEditIndex[groupId] == index
+end
+
+function HUD.actionLine(slot, selected)
+    local action = ACTION_BY_ID[loadout[slot.id]] or ACTION_BY_ID.none
+    return string.format("%s%s: %s", selected and "+ " or "",
+        slot.faceName, action.name)
+end
+
+function HUD.overlayEntries(groupId)
+    if groupId == "l2" then
+        return {
+            HUD.actionLine(ACTION_SLOT_BY_ID.l2_cross,
+                HUD.directSlotSelected("l2", 1)),
+            HUD.actionLine(ACTION_SLOT_BY_ID.l2_triangle,
+                HUD.directSlotSelected("l2", 2)),
+            "Circle: Guard",
+            HUD.actionLine(ACTION_SLOT_BY_ID.l2_square,
+                HUD.directSlotSelected("l2", 3)),
+        }
+    end
+
+    local group = LOADOUT_MENU_GROUPS[groupId]
+    if group == nil then return nil end
+    local entries = {}
+    for index, slot in ipairs(group.slots) do
+        table.insert(entries, HUD.actionLine(slot,
+            HUD.directSlotSelected(groupId, index)))
+    end
+    return entries
+end
+
+function HUD.pointerTokenForAbsolute(address)
+    local low = address & 0x1FFFFFF
+    for slot = 0, 0x3F do
+        local segment = ReadLong(ADDRESS.compactPointerSegments + slot * 8)
+        if segment > 0 and (segment | low) == address then
+            return (0x80000000 | (slot * 0x2000000) | low) & 0xFFFFFFFF
+        end
+    end
+    return nil
+end
+
+function HUD.commandMessageTokenAddress(commandId)
+    if commandId < 0 or commandId > 0xFF then return nil end
+    local recordBase = ReadLong(ADDRESS.commandRecordBase)
+    if recordBase < BASE_ADDR
+        or recordBase >= BASE_ADDR + HUD.moduleSize then
+        return nil
+    end
+
+    local messageIndex = ReadShort(
+        recordBase + commandId * 0x10 + 0x04, true)
+    if messageIndex < 0 or messageIndex >= HUD.nativeMessageTokenCount then
+        return nil
+    end
+    return ADDRESS.commandMessageTokens + messageIndex * 4, messageIndex
+end
+
+function HUD.clearNativeRecovery()
+    WriteLong(HUD.nativeRecoveryAddress, 0)
+    WriteInt(HUD.nativeRecoveryAddress + 0x08, 0)
+    WriteInt(HUD.nativeRecoveryAddress + 0x0C, 0)
+end
+
+function HUD.writeNativeRecovery(patches, commandPatch)
+    if patches == nil or #patches < 1 or #patches > 4 then return false end
+    HUD.clearNativeRecovery()
+    WriteInt(HUD.nativeRecoveryAddress + 0x08, #patches)
+    if commandPatch ~= nil then
+        local packedCommand = HUD.nativeRecoveryCommandMarker
+            | (commandPatch.original & 0xFF)
+            | ((commandPatch.patched & 0xFF) << 8)
+        WriteInt(HUD.nativeRecoveryAddress + 0x0C, packedCommand)
+    end
+    for index, patch in ipairs(patches) do
+        local address = HUD.nativeRecoveryAddress + 0x10
+            + (index - 1) * 0x0C
+        WriteInt(address, patch.address)
+        WriteInt(address + 0x04, patch.original)
+        WriteInt(address + 0x08, patch.patched)
+    end
+    -- Publish the marker last so a partial recovery record is never accepted.
+    WriteLong(HUD.nativeRecoveryAddress, HUD.nativeRecoverySignature)
+    return true
+end
+
+function HUD.recoverStaleNativeRows()
+    if ReadLong(HUD.nativeRecoveryAddress)
+        ~= HUD.nativeRecoverySignature then return false end
+
+    local count = ReadInt(HUD.nativeRecoveryAddress + 0x08)
+    local restored = 0
+    if count >= 1 and count <= 4 then
+        for index = 1, count do
+            local recovery = HUD.nativeRecoveryAddress + 0x10
+                + (index - 1) * 0x0C
+            local address = ReadInt(recovery) & 0xFFFFFFFF
+            local original = ReadInt(recovery + 0x04) & 0xFFFFFFFF
+            local patched = ReadInt(recovery + 0x08) & 0xFFFFFFFF
+            local inTokenTable = address >= ADDRESS.commandMessageTokens
+                and address < ADDRESS.commandMessageTokens
+                    + HUD.nativeMessageTokenCount * 4
+                and ((address - ADDRESS.commandMessageTokens) % 4) == 0
+            if inTokenTable
+                and (ReadInt(address) & 0xFFFFFFFF) == patched then
+                WriteInt(address, original)
+                restored = restored + 1
+            end
+        end
+    end
+
+    local packedCommand = ReadInt(HUD.nativeRecoveryAddress + 0x0C)
+        & 0xFFFFFFFF
+    local commandRestored = false
+    if (packedCommand & 0xFFFF0000)
+        == HUD.nativeRecoveryCommandMarker then
+        local original = packedCommand & 0xFF
+        local patched = (packedCommand >> 8) & 0xFF
+        local menuObject = ReadLong(ADDRESS.commandMenuObject)
+        if menuObject >= BASE_ADDR
+            and menuObject < BASE_ADDR + HUD.moduleSize
+            and ReadInt(menuObject, true) == 0
+            and ReadInt(menuObject + 0x10, true) == 4
+            and ReadByte(menuObject + 0x17, true) == patched then
+            WriteByte(menuObject + 0x17, original, true)
+            commandRestored = true
+        end
+    end
+    HUD.clearNativeRecovery()
+    if restored > 0 or commandRestored then
+        log(string.format(
+            "recovered %d stale native Command Menu label(s)%s.",
+            restored, commandRestored and " and its display carrier" or ""))
+    end
+    return restored > 0 or commandRestored
+end
+
+function HUD.restoreNativeRows()
+    local restored = 0
+    for _, patch in ipairs(HUD.nativeTokenBackups or {}) do
+        if (ReadInt(patch.address) & 0xFFFFFFFF) == patch.patched then
+            WriteInt(patch.address, patch.original)
+            restored = restored + 1
+        end
+    end
+    local commandRestored = false
+    local commandPatch = HUD.nativeCommandBackup
+    if commandPatch ~= nil
+        and ReadByte(commandPatch.address, true) == commandPatch.patched then
+        WriteByte(commandPatch.address, commandPatch.original, true)
+        commandRestored = true
+    end
+    HUD.nativeTokenBackups = {}
+    HUD.nativeCommandBackup = nil
+    HUD.clearNativeRecovery()
+    HUD.overlayGroup = nil
+    HUD.overlaySignature = nil
+    return restored > 0 or commandRestored
+end
+
+function HUD.nativeOverlayFailure(reason)
+    if HUD.nativeFailureKey ~= reason then
+        ConsolePrint("[JokCombat:loadout] native Command Menu overlay "
+            .. "deferred: " .. reason .. ".")
+        HUD.nativeFailureKey = reason
+    end
+    HUD.restoreNativeRows()
+    return false
+end
+
+function HUD.showOverlay(groupId)
+    if not CONFIG.actionLoadoutOverlay then return false end
+    if not HUD.initialize(true, HUD.boxCount) then
+        return HUD.nativeOverlayFailure("notification buffers unavailable")
+    end
+    local group = LOADOUT_MENU_GROUPS[groupId]
+    local entries = HUD.overlayEntries(groupId)
+    if group == nil or entries == nil or #entries ~= 4 then return false end
+
+    local menuObject = ReadLong(ADDRESS.commandMenuObject)
+    if menuObject < BASE_ADDR
+        or menuObject >= BASE_ADDR + HUD.moduleSize then
+        return HUD.nativeOverlayFailure("invalid menu object")
+    end
+    if ReadInt(menuObject, true) ~= 0
+        or ReadInt(menuObject + 0x10, true) ~= 4 then
+        return HUD.nativeOverlayFailure("root menu is not in four-row state")
+    end
+
+    local commands = {}
+    for index = 1, 4 do
+        commands[index] = ReadByte(menuObject + 0x13 + index, true)
+    end
+    -- During an already active overlay, reconstruct the original fourth ID
+    -- before calculating the signature. Otherwise the temporary display
+    -- carrier would look like a vanilla state change on every frame.
+    local activeCommandPatch = HUD.nativeCommandBackup
+    if activeCommandPatch ~= nil
+        and activeCommandPatch.address == menuObject + 0x17
+        and commands[4] == activeCommandPatch.patched then
+        commands[4] = activeCommandPatch.original
+    end
+    local displayCommands = {
+        commands[1], commands[2], commands[3], commands[4],
+    }
+    local commandPatch = nil
+    if displayCommands[4] == 0 then
+        displayCommands[4] = HUD.nativeFallbackCommandId
+        commandPatch = {
+            address = menuObject + 0x17,
+            original = commands[4],
+            patched = displayCommands[4],
+        }
+    end
+    local signature = string.format("%s|%X|%02X%02X%02X%02X|%s",
+        groupId, menuObject, commands[1], commands[2], commands[3],
+        commands[4], table.concat(entries, "|"))
+    if HUD.overlayGroup == groupId and HUD.overlaySignature == signature then
+        local stillPatched = #HUD.nativeTokenBackups == 4
+        for _, patch in ipairs(HUD.nativeTokenBackups) do
+            stillPatched = stillPatched
+                and (ReadInt(patch.address) & 0xFFFFFFFF) == patch.patched
+        end
+        if commandPatch ~= nil then
+            stillPatched = stillPatched and activeCommandPatch ~= nil
+                and activeCommandPatch.address == commandPatch.address
+                and activeCommandPatch.original == commandPatch.original
+                and activeCommandPatch.patched == commandPatch.patched
+                and ReadByte(commandPatch.address, true)
+                    == commandPatch.patched
+        else
+            stillPatched = stillPatched and activeCommandPatch == nil
+        end
+        if stillPatched then return true end
+    end
+
+    HUD.restoreNativeRows()
+    if not HUD.boxesClaimable(HUD.boxCount) then
+        HUD.hideBoxIfOwned(1)
+        HUD.hideBoxIfOwned(2)
+        return HUD.nativeOverlayFailure("notification box currently in use")
+    end
+
+    HUD.hideBoxIfOwned(1)
+    HUD.hideBoxIfOwned(2)
+    local lineAddresses = {
+        HUD.lineAddress(1, 1), HUD.lineAddress(1, 2),
+        HUD.lineAddress(2, 1), HUD.lineAddress(2, 2),
+    }
+    local patches = {}
+    local usedAddresses = {}
+    for index = 1, 4 do
+        local messageAddress, messageIndex =
+            HUD.commandMessageTokenAddress(displayCommands[index])
+        local textToken = HUD.pointerTokenForAbsolute(
+            BASE_ADDR + lineAddresses[index])
+        if messageAddress == nil or textToken == nil then
+            return HUD.nativeOverlayFailure(
+                "command/message pointer validation failed")
+        end
+        if usedAddresses[messageAddress] then
+            return HUD.nativeOverlayFailure(
+                "two rows share message index " .. tostring(messageIndex))
+        end
+        usedAddresses[messageAddress] = true
+        patches[index] = {
+            address = messageAddress,
+            original = ReadInt(messageAddress) & 0xFFFFFFFF,
+            patched = textToken,
+        }
+    end
+
+    for index = 1, 4 do
+        WriteArray(lineAddresses[index], getKHSCII(entries[index], 0x20))
+    end
+    if not HUD.writeNativeRecovery(patches, commandPatch) then
+        return HUD.nativeOverlayFailure("recovery record rejected")
+    end
+    for _, patch in ipairs(patches) do
+        WriteInt(patch.address, patch.patched)
+    end
+    if commandPatch ~= nil then
+        WriteByte(commandPatch.address, commandPatch.patched, true)
+    end
+    HUD.nativeTokenBackups = patches
+    HUD.nativeCommandBackup = commandPatch
+    HUD.nativeFailureKey = nil
+    HUD.overlayGroup = groupId
+    HUD.overlaySignature = signature
+    log(string.format(
+        "native Command Menu labels active: %s ids=%02X/%02X/%02X/%02X%s.",
+        group.label, commands[1], commands[2], commands[3], commands[4],
+        commandPatch ~= nil and " row4-carrier=06" or ""))
+    return true
+end
+
+function HUD.hideOverlay()
+    HUD.restoreNativeRows()
+    HUD.hideBoxIfOwned(1)
+    HUD.hideBoxIfOwned(2)
 end
 
 local function lowerSyntheticAttackCommand()
@@ -1291,6 +1645,7 @@ local function restoreAllPatches()
     clearSyntheticAttackCommand(false)
     restoreActionRoutes()
     restoreNativeFinisherSelection()
+    HUD.hideOverlay()
     restoreIfKnown(ADDRESS.forceCircleBranch, NORMAL.forceCircle,
         { 0x74, 0x72 })
     restoreIfKnown(ADDRESS.forceSquareBranch, NORMAL.forceSquare,
@@ -1354,6 +1709,162 @@ local function isAttackContext(player)
     return true
 end
 
+function HUD.shoulderGroup(buttons)
+    local modifier = buttons & SHOULDER_MASK
+    if modifier == BUTTON.L2 then return "l2" end
+    if modifier == BUTTON.R2 then return "r2" end
+    if modifier == SHOULDER_MASK then return "dual" end
+    return nil
+end
+
+function HUD.overlayEligible(buttons, player)
+    return CONFIG.actionLoadout and CONFIG.actionLoadoutPrompt
+        and CONFIG.actionLoadoutOverlay and HUD.enabled
+        and HUD.shoulderGroup(buttons) ~= nil
+        and ReadByte(ADDRESS.commandMenuSlot) == 0
+        and player.control == 0x03 and player.animation <= 0x07
+end
+
+function HUD.finishDirectEdit(reason, dpad)
+    local groupId = HUD.directEditGroup
+    if groupId == nil then
+        if dpad == 0 then HUD.dpadReleaseLock = false end
+        return false
+    end
+
+    if dpad ~= nil and dpad ~= 0 then HUD.dpadReleaseLock = true end
+    local dirty = HUD.directEditDirty
+    if dirty then
+        saveActionLoadout()
+        local group = LOADOUT_MENU_GROUPS[groupId]
+        log(string.format("%s direct loadout saved (%s).",
+            group ~= nil and group.label or groupId,
+            reason or "modifier released"))
+    end
+    HUD.directEditGroup = nil
+    HUD.directEditActive = false
+    HUD.directEditDirty = false
+    HUD.overlaySignature = nil
+    return dirty
+end
+
+function HUD.updateOverlayControls(buttons, dpad)
+    local toggleMask = BUTTON.L1 | BUTTON.R1 | BUTTON.L2 | BUTTON.R2
+    local toggleHeld = (buttons & toggleMask) == toggleMask
+    if toggleHeld and not HUD.controlChordHeld then
+        HUD.controlChordHeld = true
+        HUD.controlChordUsed = false
+    end
+
+    local dpadConsumed = toggleHeld and dpad ~= 0
+    if dpadConsumed then HUD.controlChordUsed = true end
+    local resetStarted = toggleHeld and (dpad & DPAD.DOWN) ~= 0
+        and (lastDpad & DPAD.DOWN) == 0
+    if resetStarted then
+        resetLoadoutToDefaults()
+        HUD.directEditDirty = false
+        HUD.directEditActive = false
+        HUD.overlaySignature = nil
+        saveActionLoadout()
+        ConsolePrint(
+            "[JokCombat:loadout] all 11 slots restored to JokCombat defaults.")
+    end
+
+    if not toggleHeld and HUD.controlChordHeld then
+        if not HUD.controlChordUsed then
+            HUD.finishDirectEdit("overlay toggle", dpad)
+            HUD.enabled = not HUD.enabled
+            HUD.hideOverlay()
+            saveActionLoadout()
+            log("native Command Menu overlay "
+                .. (HUD.enabled and "enabled" or "disabled")
+                .. " after releasing L1+R1+L2+R2.")
+        end
+        HUD.controlChordHeld = false
+        HUD.controlChordUsed = false
+    end
+    return toggleHeld, dpadConsumed
+end
+
+function HUD.updateDirectEditor(buttons, dpad, player, controlConsumed)
+    if dpad == 0 then HUD.dpadReleaseLock = false end
+    local groupId = HUD.shoulderGroup(buttons)
+    local eligible = CONFIG.actionLoadoutMenu
+        and HUD.overlayEligible(buttons, player)
+    if not eligible then
+        local reason = groupId == nil and "modifier released"
+            or "shortcut context ended"
+        HUD.finishDirectEdit(reason, dpad)
+        return HUD.dpadReleaseLock
+    end
+
+    if HUD.directEditGroup ~= groupId then
+        if HUD.directEditGroup ~= nil then
+            HUD.finishDirectEdit("modifier changed", dpad)
+        end
+        HUD.directEditGroup = groupId
+        HUD.directEditActive = false
+        HUD.directEditDirty = false
+        local group = LOADOUT_MENU_GROUPS[groupId]
+        local index = HUD.directEditIndex[groupId] or 1
+        HUD.directEditIndex[groupId] = math.max(1,
+            math.min(index, #group.slots))
+    end
+
+    if controlConsumed then return true end
+    local group = LOADOUT_MENU_GROUPS[groupId]
+    local index = HUD.directEditIndex[groupId]
+    local upStarted = (dpad & DPAD.UP) ~= 0
+        and (lastDpad & DPAD.UP) == 0
+    local downStarted = (dpad & DPAD.DOWN) ~= 0
+        and (lastDpad & DPAD.DOWN) == 0
+    local leftStarted = (dpad & DPAD.LEFT) ~= 0
+        and (lastDpad & DPAD.LEFT) == 0
+    local rightStarted = (dpad & DPAD.RIGHT) ~= 0
+        and (lastDpad & DPAD.RIGHT) == 0
+
+    if upStarted then
+        index = ((index - 2) % #group.slots) + 1
+    elseif downStarted then
+        index = (index % #group.slots) + 1
+    end
+    if upStarted or downStarted then
+        HUD.directEditIndex[groupId] = index
+        HUD.directEditActive = true
+        HUD.overlaySignature = nil
+        log(string.format("%s direct loadout selected %s.",
+            group.label, group.slots[index].label))
+    end
+
+    if leftStarted or rightStarted then
+        local slot = group.slots[index]
+        local currentIndex = ACTION_INDEX_BY_ID[loadout[slot.id]] or 1
+        local delta = leftStarted and -1 or 1
+        local nextIndex = ((currentIndex - 1 + delta)
+            % #ACTION_CATALOG) + 1
+        local action = ACTION_CATALOG[nextIndex]
+        loadout[slot.id] = action.id
+        HUD.directEditActive = true
+        HUD.directEditDirty = true
+        HUD.overlaySignature = nil
+        ConsolePrint(string.format("[JokCombat:loadout] %s -> %s",
+            slot.label, action.name))
+    end
+    return true
+end
+
+function HUD.updateOverlay(buttons, player)
+
+    local groupId = HUD.shoulderGroup(buttons)
+    local show = HUD.overlayEligible(buttons, player)
+        and (buttons & FACE_BUTTON_MASK) == 0
+    if not show then
+        HUD.hideOverlay()
+        return false
+    end
+    return HUD.showOverlay(groupId)
+end
+
 local function isCancelableAttack(player)
     return isAttackContext(player)
         and player.time >= CANCEL_WINDOW[player.animation]
@@ -1369,10 +1880,6 @@ end
 
 local function pressStarted(buttons, mask)
     return (buttons & mask) ~= 0 and (lastButtons & mask) == 0
-end
-
-local function dpadStarted(dpad, mask)
-    return (dpad & mask) ~= 0 and (lastDpad & mask) == 0
 end
 
 local function chordStarted(buttons, first, second)
@@ -2198,88 +2705,8 @@ local function updateCrossActionPrime(player, buttons)
     return routeArmed
 end
 
-local function updateLoadoutMenu(buttons, dpad)
-    if not CONFIG.actionLoadoutMenu then return false end
-    local bothShoulders = (buttons & BUTTON.L2) ~= 0
-        and (buttons & BUTTON.R2) ~= 0
-
-    if bothShoulders and dpadStarted(dpad, DPAD.DOWN) then
-        resetLoadoutToDefaults()
-        saveActionLoadout()
-        if loadoutMenuOpen then
-            loadoutMenuIndex = 1
-            showLoadoutPrompt()
-            printLoadoutMenu()
-        end
-        ConsolePrint(
-            "[JokCombat:loadout] all 11 slots restored to JokCombat defaults.")
-        return true
-    end
-
-    local requestedGroup = nil
-    if bothShoulders and dpadStarted(dpad, DPAD.LEFT) then
-        requestedGroup = "l2"
-    elseif bothShoulders and dpadStarted(dpad, DPAD.UP) then
-        requestedGroup = "dual"
-    elseif bothShoulders and dpadStarted(dpad, DPAD.RIGHT) then
-        requestedGroup = "r2"
-    end
-
-    if requestedGroup ~= nil then
-        if loadoutMenuOpen and loadoutMenuGroup == requestedGroup then
-            saveActionLoadout()
-            loadoutMenuOpen = false
-            hideLoadoutPrompt()
-            ConsolePrint("[JokCombat:loadout] saved; editor closed.")
-        else
-            if not loadoutMenuOpen then
-                clearComboIntent()
-                clearTransitionCheck()
-                clearDeferredAttackCommand()
-                restoreActionRoutes()
-                forceCircleFrames = 0
-                forceSquareFrames = 0
-                forceGuardFrames = 0
-            else
-                saveActionLoadout()
-            end
-            loadoutMenuGroup = requestedGroup
-            loadoutMenuIndex = 1
-            loadoutMenuOpen = true
-            showLoadoutPrompt()
-            ConsolePrint(string.format(
-                "[JokCombat:loadout] %s editor opened.",
-                currentLoadoutMenuGroup().label))
-            printLoadoutMenu()
-        end
-        return true
-    end
-
-    if not loadoutMenuOpen then return false end
-
-    local group = currentLoadoutMenuGroup()
-    local selectionChanged = false
-    if dpadStarted(dpad, DPAD.UP) then
-        loadoutMenuIndex = ((loadoutMenuIndex - 2) % #group.slots) + 1
-        selectionChanged = true
-    elseif dpadStarted(dpad, DPAD.DOWN) then
-        loadoutMenuIndex = (loadoutMenuIndex % #group.slots) + 1
-        selectionChanged = true
-    elseif dpadStarted(dpad, DPAD.LEFT) then
-        cycleLoadoutAction(-1)
-    elseif dpadStarted(dpad, DPAD.RIGHT) then
-        cycleLoadoutAction(1)
-    end
-
-    if selectionChanged then
-        showLoadoutPrompt()
-        printLoadoutMenu()
-    end
-    return true
-end
-
-local function updateLoadoutMenuRouting(menuOpen)
-    local map = menuOpen and 0xFE or 0xFF
+local function updateLoadoutMenuRouting(controlsOwned, dpadOwned)
+    local map = dpadOwned and 0xFE or 0xFF
     setByte("dpadUpControlMap", ADDRESS.dpadUpControlMap, map,
         { 0xFF, 0xFE })
     setByte("dpadRightControlMap", ADDRESS.dpadRightControlMap, map,
@@ -2289,7 +2716,7 @@ local function updateLoadoutMenuRouting(menuOpen)
     setByte("dpadLeftControlMap", ADDRESS.dpadLeftControlMap, map,
         { 0xFF, 0xFE })
 
-    if menuOpen then
+    if controlsOwned then
         setByte("triangleControlMap", ADDRESS.triangleControlMap, 0xFE,
             { 0xFF, 0xFE })
         setByte("circleControlMap", ADDRESS.circleControlMap, 0xFE,
@@ -2413,11 +2840,21 @@ function _OnInit()
     faulted = false
     lastButtons = 0
     lastDpad = 0
-    loadoutMenuOpen = false
-    loadoutMenuGroup = "l2"
-    loadoutMenuIndex = 1
-    loadoutPromptAvailable = false
-    loadoutPromptMismatchKey = nil
+    HUD.available = false
+    HUD.enabled = true
+    HUD.mismatchKey = nil
+    HUD.nativeFailureKey = nil
+    HUD.overlayGroup = nil
+    HUD.overlaySignature = nil
+    HUD.nativeTokenBackups = {}
+    HUD.nativeCommandBackup = nil
+    HUD.directEditGroup = nil
+    HUD.directEditActive = false
+    HUD.directEditDirty = false
+    HUD.directEditIndex = { l2 = 1, r2 = 1, dual = 1 }
+    HUD.dpadReleaseLock = false
+    HUD.controlChordHeld = false
+    HUD.controlChordUsed = false
     nativeFinisherSelectionActionId = nil
     nativeFinisherOriginalAbilityBits = nil
     clearComboIntent()
@@ -2509,12 +2946,13 @@ function _OnInit()
         0xFF, { 0xFF, 0x05, 0xFE }) and valid
     if not valid then return end
 
+    HUD.recoverStaleNativeRows()
     local groundRouteValid = normalizeGroundActionRoute()
     local airRouteValid = normalizeAirActionRoute()
     local validActionRecordCount = validateCanonicalActionRecords()
     loadActionLoadout()
-    initializeLoadoutPrompt()
-    hideOwnedLoadoutPrompt()
+    HUD.initialize()
+    HUD.hideOwned()
 
     canRun = true
     ConsolePrint(
@@ -2526,7 +2964,12 @@ function _OnInit()
         "unavailable."))
     log(string.format("complete action records ready: %d/%d.",
         validActionRecordCount, #ACTION_CATALOG - 1))
-    log("Action Loadout: L2+R2+D-pad Left=L2, Up=dual, Right=R2, Down=reset.")
+    log("direct Action Loadout ready: hold L2/R2/L2+R2; "
+        .. "D-pad Up/Down selects, Left/Right changes, release saves.")
+    log("native Command Menu overlay ready: L2=4, R2=4, L2+R2=4; "
+        .. "release L1+R1+L2+R2 to toggle it; add D-pad Down to reset "
+        .. "defaults; overlay is currently "
+        .. (HUD.enabled and "on." or "off."))
     log("native Stun Impact/Zantetsuken selectors ready: shortcut rolls forced to 100%.")
     if staleSyntheticAttack then
         log("cleared stale synthetic Attack flags during reload.")
@@ -2543,8 +2986,8 @@ end
 function _OnFrame()
     if not canRun then return end
     if faulted then
-        if loadoutMenuOpen then hideOwnedLoadoutPrompt() end
-        loadoutMenuOpen = false
+        HUD.finishDirectEdit("script fault", 0)
+        if HUD.overlayGroup ~= nil then HUD.hideOwned() end
         restoreAllPatches()
         return
     end
@@ -2553,8 +2996,11 @@ function _OnFrame()
 
     local player = readPlayer()
     if player == nil then
-        if loadoutMenuOpen then hideOwnedLoadoutPrompt() end
-        loadoutMenuOpen = false
+        HUD.finishDirectEdit("player unavailable", 0)
+        HUD.controlChordHeld = false
+        HUD.controlChordUsed = false
+        HUD.dpadReleaseLock = false
+        if HUD.overlayGroup ~= nil then HUD.hideOwned() end
         restoreAllPatches()
         clearComboIntent()
         clearTransitionCheck()
@@ -2568,25 +3014,41 @@ function _OnFrame()
 
     local buttons = ReadByte(ADDRESS.rawButtons)
     local dpad = ReadByte(ADDRESS.dpadButtons)
-    updateNativeFinisherSelection(buttons, player)
+    local controlDpadOwned, controlConsumed =
+        HUD.updateOverlayControls(buttons, dpad)
+    local directDpadOwned = HUD.updateDirectEditor(
+        buttons, dpad, player, controlConsumed)
+    local dpadOwned = controlDpadOwned or directDpadOwned
+        or HUD.dpadReleaseLock
+    local configurationInputActive = dpadOwned and dpad ~= 0
+    if configurationInputActive then
+        restoreNativeFinisherSelection()
+    else
+        updateNativeFinisherSelection(buttons, player)
+    end
     if faulted then
+        HUD.finishDirectEdit("script fault", dpad)
         restoreAllPatches()
         return
     end
-    updateLoadoutMenu(buttons, dpad)
-    local editorChordArmed = (buttons & BUTTON.L2) ~= 0
-        and (buttons & BUTTON.R2) ~= 0
-    updateLoadoutMenuRouting(loadoutMenuOpen or editorChordArmed)
+    updateLoadoutMenuRouting(configurationInputActive, dpadOwned)
+    HUD.updateOverlay(buttons, player)
     if faulted then
-        if loadoutMenuOpen then hideOwnedLoadoutPrompt() end
-        loadoutMenuOpen = false
+        HUD.finishDirectEdit("script fault", dpad)
+        if HUD.overlayGroup ~= nil then HUD.hideOwned() end
         restoreAllPatches()
         return
     end
 
-    if loadoutMenuOpen then
-        -- Keep every transient combat branch inert while the editor owns the
-        -- D-pad and face controls. Raw input remains readable by this script.
+    if configurationInputActive then
+        -- D-pad editing owns every mapped control for this frame. Keeping the
+        -- combat dispatcher inert prevents a selection input from priming or
+        -- executing an Action Ability; raw input remains readable here.
+        clearComboIntent()
+        clearTransitionCheck()
+        clearDeferredAttackCommand()
+        restoreActionRoutes()
+        restoreNativeFinisherSelection()
         setByte("forceCircle", ADDRESS.forceCircleBranch, NORMAL.forceCircle,
             { 0x74, 0x72 })
         setByte("forceSquare", ADDRESS.forceSquareBranch, NORMAL.forceSquare,
@@ -2876,11 +3338,8 @@ end
 -- hook additionally restores state on loaders that provide an exit callback.
 function _OnExit()
     if canRun then
-        if loadoutMenuOpen then
-            saveActionLoadout()
-            hideOwnedLoadoutPrompt()
-            loadoutMenuOpen = false
-        end
+        HUD.finishDirectEdit("script exit", 0)
+        HUD.hideOwned()
         restoreAllPatches()
     end
 end
