@@ -1,8 +1,8 @@
 LUAGUI_NAME = "JokCombat Combat Prototype"
 LUAGUI_AUTH = "Jok; Critical Mix reference by Xendra / KSX"
-LUAGUI_DESC = "Lenient buffered ground/air links, Triangle finisher, universal Guard cancel, jump branch and fixed Dodge."
+LUAGUI_DESC = "Cross-only full ground combo, buffered air links, universal Guard/Dodge cancels and jump branch."
 
--- JokCombat v0.2.5 prototype for the current Steam Global executable.
+-- JokCombat v0.2.8 prototype for the current Steam Global executable.
 -- Critical Mix was used as an authorized technical reference. This script is
 -- intentionally limited to combat/input state and does not touch save data,
 -- story flags, rewards, inventory, AP, levels, worlds, chests, or synthesis.
@@ -12,11 +12,14 @@ local CONFIG = {
     debugLog = true,
 
     attackBuffer = true,
-    infiniteGroundNormals = true,
-    triangleGroundFinisher = true,
+    crossGroundFinisher = true,
+    -- Parked until the Steam Attack dispatcher has a validated force branch.
+    -- Triangle remains completely native and never arms a delayed finisher.
+    triangleGroundFinisher = false,
     groundToAirJumpBranch = true,
     defensiveCancels = true,
     universalGuardCancel = true,
+    universalDodgeCancel = true,
     guardOnL2Circle = true,
     fixedDodgeOnSquare = true,
 
@@ -45,7 +48,7 @@ local CONFIG = {
 
 local EXPECTED_GAME_ID = 0xAF71841E
 local FINGERPRINT = 0x7265737563697065 -- "epicures", little endian
-local VERSION = "v0.2.5"
+local VERSION = "v0.2.8"
 
 local ADDRESS = {
     fingerprint = 0x3B2271,
@@ -73,6 +76,7 @@ local ADDRESS = {
     groundComboA2 = 0x2D2D848,
 
     circleControlMap = 0x22C9345,
+    attackControlMap = 0x22C9346,
     squareControlMap = 0x22C9347,
     forceCircleBranch = 0x2A7B74,       -- 74 normal, 72 forced
     forceSquareBranch = 0x2A7BD6,       -- 84 normal, 82 forced
@@ -99,6 +103,15 @@ local BUTTON = {
     TRIANGLE = 0x10,
 }
 
+-- The control-map table is action -> physical control. Its indices follow the
+-- face-button order used by Critical Mix: Triangle=04, Circle=05, Cross=06,
+-- Square=07. Only the Attack action is temporarily sourced from Triangle.
+local CONTROL_INDEX = {
+    TRIANGLE = 0x04,
+}
+
+local DODGE_ROLL_ANIMATION = 0xDC
+
 -- These are deliberately conservative first-pass windows, measured in the
 -- game's animation-time units. They are configuration data to tune from logs.
 local CANCEL_WINDOW = {
@@ -113,9 +126,11 @@ local CANCEL_WINDOW = {
     [0xD3] = 18.0, -- Impulse family
 }
 
--- Cycle every known vanilla ground-normal animation. The action-table route
--- makes this deterministic even when no target or hit-confirm exists.
+-- Cross cycles the complete ground string. CB deliberately remains outside
+-- isGroundNormalContext so the finisher ends the chain instead of linking back
+-- into another attack before Sora returns to neutral.
 local GROUND_NORMAL_SEQUENCE = { 0xC8, 0xC9, 0xCA }
+local GROUND_CROSS_SEQUENCE = { 0xC8, 0xC9, 0xCA, 0xCB }
 
 local GROUND_ACTION_ROUTE = {
     { name = "groundFinisherDefault", address = ADDRESS.groundFinisherDefault,
@@ -142,6 +157,7 @@ local NORMAL = {
     guardSelection = 0x74,
     dodgeAvailability = 0x84,
     circleControlMap = 0xFF,
+    attackControlMap = 0xFF,
     squareControlMap = 0xFF,
 }
 
@@ -160,6 +176,7 @@ local groundChainFrames = 0
 local forceCircleFrames = 0
 local forceSquareFrames = 0
 local forceGuardFrames = 0
+local forceTriangleAttackFrames = 0
 local comboWarningShown = false
 local transitionCheckFrames = 0
 local transitionSourceAnimation = nil
@@ -170,6 +187,7 @@ local transitionExpectedComboPosition = nil
 local transitionWasAirborne = false
 local transitionPulseCount = 0
 local transitionPulsePhaseFrames = 0
+local transitionUsesPhysicalInput = false
 local deferredLinkMinimumFrames = 0
 local deferredLinkTimeoutFrames = 0
 local deferredLinkKind = nil
@@ -372,6 +390,8 @@ local function restoreAllPatches()
         NORMAL.dodgeAvailability, { 0x84, 0x82 })
     restoreIfKnown(ADDRESS.circleControlMap, NORMAL.circleControlMap,
         { 0xFF, 0x07, 0xFE })
+    restoreIfKnown(ADDRESS.attackControlMap, NORMAL.attackControlMap,
+        { 0xFF, CONTROL_INDEX.TRIANGLE, 0xFE })
     restoreIfKnown(ADDRESS.squareControlMap, NORMAL.squareControlMap,
         { 0xFF, 0x05, 0xFE })
 end
@@ -458,6 +478,7 @@ end
 local function clearTransitionCheck()
     -- A transition owns any temporary ground route for its whole retry window.
     -- Restoring here also makes Guard, Dodge, jump and reload cancellation safe.
+    local restorePhysicalAttackMap = transitionUsesPhysicalInput
     if canRun then restoreGroundActionRoute() end
     clearSyntheticAttackCommand(false)
     transitionCheckFrames = 0
@@ -469,6 +490,12 @@ local function clearTransitionCheck()
     transitionWasAirborne = false
     transitionPulseCount = 0
     transitionPulsePhaseFrames = 0
+    transitionUsesPhysicalInput = false
+    if restorePhysicalAttackMap then
+        forceTriangleAttackFrames = 0
+        restoreIfKnown(ADDRESS.attackControlMap, NORMAL.attackControlMap,
+            { 0xFF, CONTROL_INDEX.TRIANGLE, 0xFE })
+    end
 end
 
 local function linkMatchesExpectation(player, kind, expectedAnimation,
@@ -487,7 +514,7 @@ local function linkMatchesExpectation(player, kind, expectedAnimation,
 end
 
 local function armTransitionCheck(player, kind, expectedAnimation,
-        comboPosition)
+        comboPosition, usesPhysicalInput)
     -- Always create a low frame before the first high edge. This also cleans a
     -- stale level left by an earlier rejected request or a script reload.
     clearSyntheticAttackCommand(true)
@@ -500,6 +527,7 @@ local function armTransitionCheck(player, kind, expectedAnimation,
     transitionWasAirborne = player.airborne
     transitionPulseCount = 0
     transitionPulsePhaseFrames = CONFIG.attackPulseLowFrames
+    transitionUsesPhysicalInput = usesPhysicalInput == true
 end
 
 local function clearDeferredAttackCommand()
@@ -572,8 +600,13 @@ local function updateDeferredAttackCommand(player)
     if deferredLinkMinimumFrames <= 0 and releaseAcknowledged then
         if deferredLinkComboPosition ~= nil then
             local maximum = ReadByte(ADDRESS.maxGroundComboLength)
+            local maximumRequest = maximum
+            if deferredLinkKind == "finisher"
+                or deferredLinkExpectedAnimation == 0xCB then
+                maximumRequest = maximum + 1
+            end
             if maximum < 2 or maximum > 12
-                or deferredLinkComboPosition > maximum then
+                or deferredLinkComboPosition > maximumRequest then
                 log(deferredLinkKind
                     .. " deferred command cancelled by combo sanity check.")
                 queuedNormalInput = false
@@ -654,7 +687,14 @@ local function updateTransitionCheck(player)
 
     transitionCheckFrames = transitionCheckFrames - 1
     if transitionCheckFrames <= 0 then
-        if transitionExpectedAnimation ~= nil then
+        if transitionUsesPhysicalInput then
+            log(string.format(
+                "%s physical input was not accepted: expected=0x%02X "
+                .. "desiredCombo=%d actualCombo=%d.",
+                transitionKind, transitionExpectedAnimation or -1,
+                transitionExpectedComboPosition or -1,
+                ReadByte(ADDRESS.comboPosition)))
+        elseif transitionExpectedAnimation ~= nil then
             log(string.format(
                 "%s transition was not observed: expected=0x%02X "
                 .. "desiredCombo=%d actualCombo=%d pulses=%d.",
@@ -677,8 +717,13 @@ local function updateTransitionCheck(player)
     -- wait for the matching animation instead of risking a duplicate attack.
     if transitionExpectedComboPosition ~= nil then
         local maximum = ReadByte(ADDRESS.maxGroundComboLength)
+        local maximumRequest = maximum
+        if transitionKind == "finisher"
+            or transitionExpectedAnimation == 0xCB then
+            maximumRequest = maximum + 1
+        end
         if maximum < 2 or maximum > 12
-            or transitionExpectedComboPosition > maximum then
+            or transitionExpectedComboPosition > maximumRequest then
             log(transitionKind
                 .. " persistent command cancelled by combo sanity check.")
             queuedNormalInput = false
@@ -687,6 +732,12 @@ local function updateTransitionCheck(player)
         end
         WriteByte(ADDRESS.comboPosition, transitionExpectedComboPosition)
     end
+
+    -- A direct finisher is emitted by temporarily sourcing the native Attack
+    -- action from the physical Triangle control. The transition monitor only
+    -- keeps comboPosition stable and observes CB; it must not also pulse the
+    -- command-menu integers, otherwise a later Cross can replay the request.
+    if transitionUsesPhysicalInput then return nil end
 
     -- v0.2.4 repeatedly wrote 1, leaving both trigger integers high after a
     -- rejected command. Alternate a bounded high phase with an explicit low
@@ -740,15 +791,16 @@ local function readGroundComboState()
     return position, maximum
 end
 
-local function nextGroundNormalAnimation(player, chainOpen)
+local function nextGroundCrossAnimation(player, chainOpen)
     if not chainOpen or player.airborne or not isAttackContext(player) then
         return GROUND_NORMAL_SEQUENCE[1]
     end
 
-    for index, animation in ipairs(GROUND_NORMAL_SEQUENCE) do
+    local sequence = CONFIG.crossGroundFinisher
+        and GROUND_CROSS_SEQUENCE or GROUND_NORMAL_SEQUENCE
+    for index, animation in ipairs(sequence) do
         if player.animation == animation then
-            return GROUND_NORMAL_SEQUENCE[
-                (index % #GROUND_NORMAL_SEQUENCE) + 1]
+            return sequence[(index % #sequence) + 1]
         end
     end
     return GROUND_NORMAL_SEQUENCE[1]
@@ -758,15 +810,16 @@ local function prepareNormalGroundAttack(player, chainOpen)
     local position, maximum = readGroundComboState()
     if position == nil then return false end
 
-    local desiredAnimation = nextGroundNormalAnimation(player, chainOpen)
+    local desiredAnimation = nextGroundCrossAnimation(player, chainOpen)
     local desiredPosition = 1
-    if desiredAnimation ~= GROUND_NORMAL_SEQUENCE[1] then
+    if desiredAnimation == 0xCB then
+        -- A real Cross edge now owns the finisher request. max+1 selects CB;
+        -- no Triangle mapping or latent command-menu pulse is involved.
+        desiredPosition = maximum + 1
+    elseif desiredAnimation ~= GROUND_NORMAL_SEQUENCE[1] then
         -- Keep every Cross request below the native finisher position. C9 and
         -- CA are routed explicitly, so they can share the last normal counter.
         desiredPosition = math.max(1, maximum - 1)
-    end
-    if not CONFIG.infiniteGroundNormals then
-        desiredPosition = math.min(maximum, position + 1)
     end
 
     if position ~= desiredPosition then
@@ -779,9 +832,9 @@ local function prepareGroundFinisher()
     local position, maximum = readGroundComboState()
     if position == nil then return false end
 
-    -- Critical Mix's counter route writes maxGroundComboLength to request a
-    -- finisher. v0.2.2 incorrectly used max-1, which is still a normal slot.
-    local finisherPosition = maximum
+    -- Dormant while triangleGroundFinisher=false. Kept only as a parked
+    -- research path until a native Steam Attack-force branch is validated.
+    local finisherPosition = maximum + 1
     if position ~= finisherPosition then
         WriteByte(ADDRESS.comboPosition, finisherPosition)
     end
@@ -913,11 +966,23 @@ local function cancelPlayer(player, label)
         label, player.animation, player.secondary, player.time))
 end
 
-local function updateDefenseRouting(buttons, guardAvailable)
+local function updateAttackControlRouting()
+    if not CONFIG.triangleGroundFinisher then
+        forceTriangleAttackFrames = 0
+        return true
+    end
+    return setByte("attackControlMap", ADDRESS.attackControlMap,
+        forceTriangleAttackFrames > 0 and CONTROL_INDEX.TRIANGLE
+            or NORMAL.attackControlMap,
+        { 0xFF, CONTROL_INDEX.TRIANGLE, 0xFE })
+end
+
+local function updateDefenseRouting(buttons, guardAvailable, dodgeActive)
     local l2Held = (buttons & BUTTON.L2) ~= 0
     local circleHeld = (buttons & BUTTON.CIRCLE) ~= 0
     local squareHeld = (buttons & BUTTON.SQUARE) ~= 0
     local guardChord = l2Held and circleHeld
+    local dodgeSquareHeld = squareHeld and not dodgeActive
 
     local circleMap = NORMAL.circleControlMap
     local squareMap = NORMAL.squareControlMap
@@ -930,6 +995,11 @@ local function updateDefenseRouting(buttons, guardAvailable)
             squareMap = guardAvailable and 0x05 or 0xFE
         end
     end
+    if dodgeActive and squareHeld and not guardChord then
+        -- Once DC has begun, physical Square must not feed the shared defense
+        -- action again. Guard remains available through its Circle mapping.
+        squareMap = 0xFE
+    end
     setByte("circleControlMap", ADDRESS.circleControlMap, circleMap,
         { 0xFF, 0x07, 0xFE })
     setByte("squareControlMap", ADDRESS.squareControlMap, squareMap,
@@ -940,12 +1010,17 @@ local function updateDefenseRouting(buttons, guardAvailable)
     setByte("guardSelection", ADDRESS.guardSelectionBranch,
         selectGuard and 0xEB or 0x74, { 0x74, 0xEB })
 
-    -- Only Guard receives the airborne bypass. Square/Dodge keeps the normal
-    -- ground restriction and its existing cancel windows.
+    -- Universal Guard and Dodge both receive the airborne bypass while their
+    -- own forced input is active. forceGuardFrames disambiguates the shared
+    -- virtual Square/defense action used by the two routes.
     local allowAirGuard = CONFIG.universalGuardCancel
         and (guardChord or forceGuardFrames > 0)
+    local allowAirDodge = CONFIG.universalDodgeCancel
+        and forceGuardFrames == 0
+        and (dodgeSquareHeld or forceSquareFrames > 0)
     setByte("airDefense", ADDRESS.airDefenseBranch,
-        allowAirGuard and 0x82 or 0x85, { 0x85, 0x82 })
+        (allowAirGuard or allowAirDodge) and 0x82 or 0x85,
+        { 0x85, 0x82 })
 
     local guardAvailability = CONFIG.unlockDefensiveActions and 0x72 or 0x74
     -- Keep the roll route armed before the first Square frame. Previously it
@@ -962,7 +1037,7 @@ local function updateDefenseRouting(buttons, guardAvailable)
     -- bypass itself is enabled after Circle/Square is physically present;
     -- enabling it on L2 alone caused the unwanted automatic Guard.
     if (CONFIG.guardOnL2Circle and guardChord)
-        or (CONFIG.fixedDodgeOnSquare and squareHeld)
+        or (CONFIG.fixedDodgeOnSquare and dodgeSquareHeld)
         or forceSquareFrames > 0 then
         setByte("forceSquare", ADDRESS.forceSquareBranch, 0x82,
             { 0x84, 0x82 })
@@ -983,8 +1058,10 @@ function _OnInit()
     forceCircleFrames = 0
     forceSquareFrames = 0
     forceGuardFrames = 0
+    forceTriangleAttackFrames = 0
     comboWarningShown = false
     transitionPulsePhaseFrames = 0
+    transitionUsesPhysicalInput = false
     syntheticAttackCommandOwned = false
     syntheticAttackCommandHigh = false
     groundRouteAvailable = false
@@ -1023,6 +1100,13 @@ function _OnInit()
         0x84, { 0x84, 0x82 }) and valid
     valid = normalizeByte("circleControlMap", ADDRESS.circleControlMap,
         0xFF, { 0xFF, 0x07, 0xFE }) and valid
+    if CONFIG.triangleGroundFinisher then
+        valid = normalizeByte("attackControlMap", ADDRESS.attackControlMap,
+            0xFF, { 0xFF, CONTROL_INDEX.TRIANGLE, 0xFE }) and valid
+    else
+        restoreIfKnown(ADDRESS.attackControlMap, NORMAL.attackControlMap,
+            { 0xFF, CONTROL_INDEX.TRIANGLE, 0xFE })
+    end
     valid = normalizeByte("squareControlMap", ADDRESS.squareControlMap,
         0xFF, { 0xFF, 0x05, 0xFE }) and valid
     if not valid then return end
@@ -1061,6 +1145,7 @@ function _OnFrame()
         clearTransitionCheck()
         clearDeferredAttackCommand()
         forceGuardFrames = 0
+        forceTriangleAttackFrames = 0
         lastButtons = 0
         return
     end
@@ -1080,7 +1165,14 @@ function _OnFrame()
             0x84, { 0x84, 0x82 })
     end
 
-    updateDefenseRouting(buttons, guardAvailable)
+    local dodgeActive = player.animation == DODGE_ROLL_ANIMATION
+    if dodgeActive then
+        -- The initial forced window is no longer needed after DC is visible;
+        -- retaining it would let a new Square edge restart the same roll.
+        forceSquareFrames = 0
+    end
+    updateDefenseRouting(buttons, guardAvailable, dodgeActive)
+    updateAttackControlRouting()
     if faulted then
         restoreAllPatches()
         return
@@ -1096,9 +1188,12 @@ function _OnFrame()
     local actionConsumed = false
     local chainWasArmed = groundChainFrames > 0
         or isGroundNormalContext(player)
+    local directFinisherContext = isGroundNormalContext(player)
+        or (groundChainFrames > 0 and not isAttackContext(player)
+            and player.control == 0x03 and player.animation <= 0x07)
 
-    -- Guard is the sole universal cancel. It can break any current action and,
-    -- through airDefenseBranch, is also allowed while Sora is airborne.
+    -- Guard keeps first priority and can break any current action, including a
+    -- Dodge Roll; Dodge itself cannot restart DC once the roll is active.
     if CONFIG.defensiveCancels and CONFIG.guardOnL2Circle and guardPressed
         and guardAvailable
         and (CONFIG.universalGuardCancel or cancelWindowOpen) then
@@ -1124,22 +1219,30 @@ function _OnFrame()
             forceCircleFrames = CONFIG.forcedInputFrames
         end
     elseif CONFIG.fixedDodgeOnSquare and squarePressed and dodgeAvailable then
-        -- Dodge keeps the conservative attack cancel window. From neutral the
-        -- native Square route handles it without an action-control write.
-        clearComboIntent()
-        clearTransitionCheck()
-        clearDeferredAttackCommand()
-        restoreGroundActionRoute()
         actionConsumed = true
-        if CONFIG.defensiveCancels and cancelWindowOpen then
-            cancelPlayer(player, "dodge")
+        if dodgeActive then
+            -- Dodge Roll is intentionally not self-cancellable: a second
+            -- Square cannot reset DC to frame zero or extend its invulnerability.
+            log("Dodge input ignored: Dodge Roll is already active.")
+        else
+            -- From every other state, universal Dodge can release the current
+            -- action. The forced Square window then selects Dodge Roll.
+            clearComboIntent()
+            clearTransitionCheck()
+            clearDeferredAttackCommand()
+            restoreGroundActionRoute()
+        end
+        if not dodgeActive and CONFIG.defensiveCancels
+            and (CONFIG.universalDodgeCancel or cancelWindowOpen) then
+            cancelPlayer(player, "dodge-universal")
             forceSquareFrames = CONFIG.forcedInputFrames
         end
     end
 
     -- Triangle has priority over a normal link that is buffered, waiting for
-    -- release, or being retried. This makes Cross -> Triangle deterministic
-    -- even if Triangle arrives during the few dispatcher frames between them.
+    -- release, or being retried. Unlike the target-free command-menu pulse,
+    -- the temporary Attack -> Triangle mapping creates a native Attack input
+    -- in the same frame, so CB no longer waits for a later physical Cross.
     local finisherRequested = false
     if not actionConsumed and CONFIG.triangleGroundFinisher and trianglePressed
         and not player.airborne
@@ -1150,17 +1253,35 @@ function _OnFrame()
         if finisherAlreadyPending then
             finisherRequested = true
             log("Triangle finisher already pending; repeated input ignored.")
-        elseif chainWasArmed then
+        elseif chainWasArmed and directFinisherContext then
             clearAttackBuffer()
+            clearFinisherBuffer()
             queuedNormalInput = false
             clearDeferredAttackCommand()
             clearTransitionCheck()
-            finisherBufferFrames = CONFIG.attackBufferFrames
-            groundChainFrames = CONFIG.groundChainMemoryFrames
             finisherRequested = true
-            log("Triangle finisher queued after a ground normal; normal request replaced.")
+            local prepared, finisherPosition, maximum =
+                prepareGroundFinisher()
+            if prepared then
+                local routeArmed = beginGroundActionRoute(
+                    "finisher", 0xCB, player)
+                armTransitionCheck(
+                    player, "finisher", 0xCB, finisherPosition, true)
+                forceTriangleAttackFrames = CONFIG.forcedInputFrames
+                if updateAttackControlRouting() then
+                    cancelPlayer(player, "finisher-direct")
+                    clearComboIntent()
+                    log(string.format(
+                        "Triangle finisher dispatched directly: "
+                        .. "combo=%d max=%d Attack<-Triangle route=%s",
+                        ReadByte(ADDRESS.comboPosition), maximum,
+                        tostring(routeArmed)))
+                else
+                    clearTransitionCheck()
+                end
+            end
         else
-            log("Triangle finisher ignored: no preceding ground normal.")
+            log("Triangle finisher ignored: no active ground-normal chain.")
         end
     end
 
@@ -1217,7 +1338,7 @@ function _OnFrame()
                 if comboPrepared then
                     groundChainFrames = CONFIG.groundChainMemoryFrames
                     log(string.format(
-                        "normal input accepted: combo=%d max=%d expected=0x%02X",
+                        "Cross input accepted: combo=%d max=%d expected=0x%02X",
                         desiredPosition, maximum, expectedAnimation))
                 end
             end
@@ -1240,6 +1361,11 @@ function _OnFrame()
     forceCircleFrames = math.max(0, forceCircleFrames - 1)
     forceSquareFrames = math.max(0, forceSquareFrames - 1)
     forceGuardFrames = math.max(0, forceGuardFrames - 1)
+    forceTriangleAttackFrames = math.max(
+        0, forceTriangleAttackFrames - 1)
+    if forceTriangleAttackFrames == 0 then
+        updateAttackControlRouting()
+    end
     if player.airborne then
         groundChainFrames = 0
     else

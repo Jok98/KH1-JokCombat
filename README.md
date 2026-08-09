@@ -18,10 +18,27 @@ vanilla.
 > live ha mostrato entrambi i trigger Attack ancora a `1` dopo i timeout: le
 > riscritture non erano nuovi impulsi e potevano lasciare un comando pendente.
 >
-> **Candidata v0.2.5 da validare live:** genera fronti reali `0 -> 1`, azzera
-> sempre entrambi i trigger e conserva una sola Croce premuta mentre il link
-> precedente e' in attesa. Pressioni Triangle ripetute non riavviano piu' una
-> finisher gia' pendente.
+> **Risultato live v0.2.5:** il ciclo `C9 -> CA -> C8` e `CB` vengono accettati
+> senza timeout. I fronti reali e il cleanup risolvono la perdita intermittente
+> dei normali. La finisher resta pero' sospesa finche' una nuova Croce porta il
+> contatore dal valore `max` alla posizione finisher effettiva.
+>
+> **Risultato live v0.2.6:** `max+1` viene applicato correttamente (`4/3`) e la
+> route attende `CB`, ma i pulse del command menu non generano un vero evento
+> Attacco: `CB` coincide ancora con la Croce fisica successiva. Dodge e'
+> universale, ma un nuovo Quadrato durante `DC` riapplica il cancel e riavvia il
+> roll da frame zero.
+>
+> **Risultato live v0.2.7:** il lock di `DC` e' validato: Quadrato viene
+> ignorato durante il roll e non ne riavvia piu' il tempo. La finisher diretta
+> resta invece strutturalmente dipendente da Croce: `Attack<-Triangle`, `4/3`
+> e route `CB` sono corretti, ma ogni `CB` osservato coincide ancora con un
+> nuovo input Croce.
+>
+> **Candidata v0.2.8 da validare live:** la finisher su Triangolo e' parcheggiata
+> e non puo' armare richieste ritardate. La sola Croce percorre la stringa
+> terrestre completa `C8 -> C9 -> CA -> CB`; dopo `CB` la combo termina e una
+> nuova Croce da neutrale riparte da `C8`.
 
 La repository contiene due probe read-only e il primo prototipo combat:
 
@@ -30,8 +47,8 @@ La repository contiene due probe read-only e il primo prototipo combat:
   memoria;
 - `JokCombat_InputProbe.lua`: valida i bit fisici L2/Cerchio/Croce/Quadrato e
   gli indirizzi Steam portati prima che il prototipo possa scrivere memoria;
-- `JokCombat_CombatPrototype.lua`: prototipo v0.2.5 con controller sperimentale
-  dei normali su Croce, richiesta contestuale della finisher su Triangolo,
+- `JokCombat_CombatPrototype.lua`: prototipo v0.2.8 con combo terrestre completa
+  e finisher su Croce, Triangolo lasciato nativo,
   jump-cancel terra -> aria, Guard universale su L2 + Cerchio e Dodge Roll
   fisso su Quadrato;
 - `docs/CMix_AnimCancel_AbilityHandler_analysis.md`: analisi tecnica dei primi
@@ -70,24 +87,27 @@ pacchetto Critical Mix sono conservati, ma non caricati, nelle directory
 `C:\Users\<utente>\Documents\KH_mod\reference\CriticalMix`. Backup, log e
 copie runtime restano locali e non fanno parte del repository.
 
-Per provare la candidata v0.2.5, premi `F1` nella console LuaBackend per
+Per provare la candidata v0.2.8, premi `F1` nella console LuaBackend per
 ricaricare gli script. Il log iniziale deve mostrare `ground action route
 ready`. Premi Croce con pressioni separate, anche molto prima della fine del
-colpo: lo State Probe deve mostrare il
-ciclo `C8 -> C9 -> CA -> C8`. Dopo almeno un normale, premi Triangolo: deve
-entrare in `CB`; Triangolo da solo deve restare ignorato. Ripeti senza target e
-poi contro un bersaglio. Durante un attacco, L2 + Cerchio deve continuare a
-interrompere l'azione con Guard; Quadrato resta Dodge Roll. `F2` mostra o
+colpo: il log deve mostrare gli expected `C9`, `CA`, quindi `CB` con
+`combo=4/3`, mentre lo State Probe deve osservare
+`C8 -> C9 -> CA -> CB`. Non premere Triangolo durante il primo test; in una
+prova separata deve conservare soltanto il comportamento vanilla e non deve
+comparire `Attack<-Triangle`. Ripeti senza target e poi contro un bersaglio.
+Durante `DC`, Quadrato deve continuare a produrre `Dodge input ignored` senza
+riavviare il roll. L2 + Cerchio deve continuare a dare Guard. `F2` mostra o
 nasconde la console.
 
 Il ramo Dodge viene armato prima del primo frame di Quadrato, mentre L2
 disabilita il salto e prepara il mapping dell'azione difensiva sul Cerchio:
-Guard parte esclusivamente con la chord completa. Il Guard e' l'unica azione
-che puo' scrivere il cancel state in qualunque momento, anche in aria; Dodge,
-salto e link d'attacco rispettano ancora le proprie finestre. Il controller
-combo usa il contatore nativo: Croce avvolge la posizione prima della soglia
-finisher, mentre Triangolo la porta alla soglia soltanto se una pressione
-Croce precedente ha aperto la catena. Se il gioco non consuma da solo il link,
+Guard parte esclusivamente con la chord completa. Guard e Dodge possono
+scrivere il cancel state in qualunque altro momento, anche in aria; una volta
+iniziato `DC`, Dodge non e' autocancellabile. Guard mantiene invece priorita'
+e puo' ancora interromperlo. Salto e link d'attacco rispettano ancora le
+proprie finestre. Il controller combo usa il contatore nativo: Croce percorre
+i tre normali e porta a `max+1` soltanto il quarto ingresso destinato a `CB`.
+Triangolo non partecipa al controller JokCombat. Se il gioco non consuma da solo il link,
 il fallback rilascia l'attacco esclusivamente dopo la sua finestra. La Steam
 richiede due fasi: il comando Attack viene inviato nel frame successivo, dopo
 che `control=0x03` ha confermato il rilascio; la posizione combo viene
@@ -102,6 +122,18 @@ after N pulse(s)` conta ora fronti alti reali. Se Croce viene premuta durante
 un link pendente, `normal input buffered behind the pending link` e poi
 `buffered normal input replayed on the new attack` confermano il buffer
 one-deep: una pressione produce ancora un solo colpo.
+La v0.2.6 porta la posizione finisher a `max+1`: `max` e' ancora l'ultimo stato
+prima della selezione, motivo per cui nella v0.2.5 una Croce successiva sembrava
+necessaria ad avviare `CB`. Il test ha pero' dimostrato che i due interi del
+command menu non equivalgono a un ingresso Attacco autonomo. La v0.2.7 usa
+quindi il byte `xControl` adiacente ai mapping Circle/Square gia' validati e
+associa temporaneamente l'azione Attacco al Triangolo fisico; il monitor della
+finisher osserva `CB` senza emettere anche i vecchi pulse sintetici. Il test
+live dimostra pero' che neppure quel mapping genera un fronte Attacco: `CB`
+resta associato alla Croce successiva. La v0.2.8 disattiva quindi l'intero
+percorso custom di Triangolo e aggiunge `CB` alla sequenza esplicita di Croce;
+il valore `max+1` e' ammesso dai sanity check soltanto quando l'animazione attesa
+e' proprio `CB`.
 
 Non installare il probe nella cartella Critical Mix EGS indicata come fonte di
 analisi: le due installazioni usano base address e script path diversi.
@@ -121,8 +153,8 @@ Le finestre iniziali sono intenzionalmente conservative e configurabili. La
 prima transizione terra -> aria e' un jump-cancel, non ancora un
 launcher/aerial chase. Per il primo test Guard e Dodge vengono resi disponibili
 solo in RAM anche prima dello sblocco vanilla; il save non viene modificato.
-La v0.2.5 deve essere confermata da una cattura live completa. Il criterio di
-successo non accetta piu' un semplice restart di `C8`: richiede l'animazione
-instradata esatta e `CB` per la finisher. Se il test riesce, il passo seguente
-e' trasformare la sequenza fissa in un controller configurabile per action
-ability, launcher e collegamento terra -> aria.
+La v0.2.8 deve confermare la sequenza completa `C8 -> C9 -> CA -> CB` usando
+soltanto Croce, sia con sia senza bersaglio, senza richieste ritardate dopo una
+pressione Triangolo. Dopo la validazione il lavoro puo' spostarsi su action
+ability, launcher e collegamento terra -> aria; il dispatcher nativo necessario
+alla finisher dedicata restera' una fase separata di reverse engineering.

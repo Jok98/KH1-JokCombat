@@ -536,14 +536,16 @@ Mix sono traslate di `+0x3980` nella sezione dati di questa build:
 
 La v0.2.2 commetteva due errori di routing: conservava `comboPosition=1` per
 ogni normale senza target, quindi il dispatcher ricreava `C8`, e impostava la
-finisher a `max-1` invece che a `max`. La candidata v0.2.3:
+finisher a `max-1`; la candidata v0.2.3 provo' inizialmente `max`. La successiva
+validazione v0.2.5 ha mostrato che la posizione autonoma corretta e' `max+1`.
+La candidata v0.2.3:
 
 1. mantiene Croce sotto la soglia finisher e cicla esplicitamente
    `C8 -> C9 -> CA -> C8`;
 2. prima del comando sostitutivo instrada temporaneamente tutte le entry ground
    verso l'animazione desiderata, tecnica gia' usata dallo script autorizzato
    `CMix_AirRollGuardItem_Plus.lua` per gli attacchi forzati;
-3. per Triangolo scrive `comboPosition=max` e instrada le entry verso `CB`;
+3. per Triangolo scriveva `comboPosition=max` e instradava le entry verso `CB`;
 4. ripristina i sette byte vanilla appena osserva l'animazione attesa o dopo
    otto frame; un fingerprint inatteso disabilita il routing;
 5. accetta come successo soltanto l'ID richiesto, eliminando il falso positivo
@@ -613,3 +615,102 @@ La candidata v0.2.5:
 Il test v0.2.5 deve verificare fluidita' premendo Croce sia molto presto sia
 molto tardi, una sola esecuzione per pressione, finisher con un solo Triangolo
 e assenza di attacchi ritardati dopo un timeout o una reazione nemica.
+
+### Risultato live v0.2.5 e correzione candidata v0.2.6
+
+Il log v0.2.5 contiene transizioni accettate `C9`, `CA`, `C8` e `CB`, senza
+timeout. Il giocatore ha pero' confermato che `CB` compare soltanto dopo una
+nuova Croce. La sequenza spiega il comportamento: Triangolo arma la route con
+`combo=3/3`; `CB` viene osservato nello stesso frame di un nuovo
+`normal input accepted`. Il gestore autorizzato `CMix_MovesetHandler.lua`
+seleziona invece il basic finisher quando `comboPosition >=
+maxGroundComboLength + 1`. `max` non e' dunque la posizione finisher autonoma:
+e' lo stato che attende il successivo avanzamento del comando Attack.
+
+La candidata v0.2.6 scrive `max+1`, estende a quel singolo valore i sanity
+check del solo percorso finisher e continua a instradare tutte le entry verso
+`CB`. Il valore e' transitorio e non modifica il save. Inoltre introduce
+`universalDodgeCancel`: Quadrato scrive immediatamente `actionControl=0x03`,
+forza la route Dodge e abilita temporaneamente il bypass aereo, con lo stesso
+modello di cancellazione universale gia' usato dal Guard. Guard resta separato
+sulla chord L2 + Cerchio.
+
+Il test deve premere una sola volta Triangolo dopo un normale e non premere
+Croce fino alla comparsa di `CB`; lo State Probe dovrebbe mostrare `combo=4/3`.
+Quadrato deve produrre `dodge-universal cancel` e `DC` da inizio/fine attacco,
+finisher e stato aereo, senza trasformarsi in Guard.
+
+### Risultato live v0.2.6 e correzione candidata v0.2.7
+
+Il log v0.2.6 conferma che Triangolo arma la route `CB` e mantiene
+`comboPosition=4` con `maxGroundComboLength=3`. I pulse sintetici continuano
+pero' per molti frame senza transizione; `CB` viene osservato soltanto nello
+stesso frame di una nuova pressione fisica Croce. La posizione e il routing
+sono quindi corretti, mentre gli interi `triggerMenu1/2` non costituiscono da
+soli un ingresso nativo Attacco nel dispatcher Steam.
+
+Nello script Critical Mix autorizzato, la tabella dei controlli contiene in
+sequenza `circleControl`, `xControl` e `squareControl`. I due estremi erano gia'
+stati portati e validati live a `0x22C9345` e `0x22C9347`; il byte intermedio
+Steam e' dunque `xControl=0x22C9346`. Una lettura live dei 16 byte circostanti
+lo ha confermato al valore vanilla `0xFF`. L'indice fisico `0x04` rappresenta
+Triangolo (`0x05` Cerchio, `0x06` Croce, `0x07` Quadrato).
+
+La candidata v0.2.7, solo dopo una catena normale valida e in assenza di una
+reaction command:
+
+1. scrive la posizione finisher `max+1` e instrada le entry a `CB`;
+2. associa temporaneamente la sola azione Attacco al controllo fisico
+   Triangolo (`xControl=0x04`);
+3. rilascia l'azione corrente nello stesso frame, cosi' il Triangolo gia'
+   premuto entra nel normale dispatcher Attack;
+4. osserva `CB` senza emettere anche i vecchi pulse `triggerMenu1/2`;
+5. ripristina `xControl=0xFF` dopo quattro frame, alla transizione, al cancel,
+   al timeout, al reload o all'uscita.
+
+Il log v0.2.6 mostra inoltre piu' sequenze `dodge-universal cancel` mentre
+l'animazione e' gia' `DC`, seguite da un ritorno del tempo a zero. In v0.2.7,
+quando `DC` e' visibile, la finestra forzata viene chiusa, l'ingresso fisico
+Quadrato viene disabilitato per l'azione difensiva e una nuova pressione viene
+soltanto registrata come `Dodge input ignored`. Guard conserva priorita' sulla
+chord L2 + Cerchio e puo' ancora interrompere il roll.
+
+Il test v0.2.7 deve verificare `Attack<-Triangle` seguito da `CB` senza alcuna
+Croce successiva e deve premere ripetutamente Quadrato durante `DC`: il tempo
+dell'animazione deve avanzare senza ripartire da zero.
+
+### Risultato live v0.2.7 e fallback candidata v0.2.8
+
+Il lock del Dodge e' validato: durante `DC`, Quadrato produce
+`Dodge input ignored` e il tempo dell'animazione avanza fino alla conclusione
+senza essere riavviato dal cancel universale.
+
+La finisher dedicata non supera invece il limite del dispatcher. In piu'
+tentativi il log mostra `Attack<-Triangle`, route `CB=true` e `combo=4/3`, poi
+il ritorno a neutrale; ogni transizione `CB` coincide ancora con un nuovo
+`Cross input accepted`. La rimappatura di `xControl` non genera dunque un
+fronte logico Attacco.
+
+La causa e' coerente con lo script pubblico `1fmAutoattack.lua`: i due stessi
+interi `fireState1/2` vengono scritti soltanto dopo aver verificato anche il bit
+fisico Croce in `attInp`. Sono un meccanismo di autofire per un Attacco gia'
+presente, non un generatore autonomo dell'input. LuaBackend espone `WriteExec`,
+quindi un futuro branch force specifico per Attacco resta tecnicamente
+possibile, ma richiede prima reverse engineering e validazione dell'opcode
+Steam; non va simulato con ulteriori timing o valori del contatore.
+
+Per non bloccare gli altri slice di combattimento, la candidata v0.2.8:
+
+1. imposta `triangleGroundFinisher=false`; Triangolo resta interamente vanilla;
+2. non aggiorna piu' `xControl` durante il gameplay e non puo' lasciare una
+   finisher custom pendente;
+3. estende la sequenza di Croce a `C8 -> C9 -> CA -> CB`;
+4. usa `comboPosition=max+1` soltanto sul quarto ingresso Croce, quando
+   `expectedAnimation==CB`;
+5. estende allo stesso caso i sanity check del comando differito e persistente;
+6. lascia `CB` fuori da `isGroundNormalContext`, cosi' la finisher chiude la
+   combo e la stringa successiva riparte da `C8` soltanto dopo il neutrale.
+
+Il test v0.2.8 deve usare esclusivamente Croce e osservare l'intera sequenza
+sia con sia senza target. Una pressione Triangolo separata non deve produrre
+`Attack<-Triangle`, `4/3` o una successiva finisher ritardata.
