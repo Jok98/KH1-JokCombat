@@ -6,11 +6,22 @@ vanilla.
 
 ## Stato attuale
 
-> **Prototipo di ricerca v0.2.2:** Guard e Dodge Roll sono validati in gioco.
-> La catena aerea senza target avanza tra `0xCC` e `0xCD`, ma la catena a
-> terra continua a riavviare il solo `0xC8` e la finisher non raggiunge ancora
-> `0xCB`. I messaggi `command issued` indicano una scrittura tentata, non il
-> successo della transizione.
+> **Risultato live v0.2.3:** Guard e Dodge Roll restano validati. La route
+> terrestre e' corretta: nel log sono state osservate transizioni reali
+> `0xC8 -> 0xC9 -> 0xCA -> 0xC8`, anche senza target. Tuttavia molte richieste
+> scadono perche' il dispatcher perde il trigger Attack inviato per un solo
+> frame. Triangolo viene rilevato e prepara `0xCB`, ma la richiesta finisher
+> viene persa nello stesso modo.
+>
+> **Risultato live v0.2.4:** la persistenza rende piu' facile il ciclo a terra
+> e valida anche la finisher `0xCB`, ma il timing resta irregolare. Una lettura
+> live ha mostrato entrambi i trigger Attack ancora a `1` dopo i timeout: le
+> riscritture non erano nuovi impulsi e potevano lasciare un comando pendente.
+>
+> **Candidata v0.2.5 da validare live:** genera fronti reali `0 -> 1`, azzera
+> sempre entrambi i trigger e conserva una sola Croce premuta mentre il link
+> precedente e' in attesa. Pressioni Triangle ripetute non riavviano piu' una
+> finisher gia' pendente.
 
 La repository contiene due probe read-only e il primo prototipo combat:
 
@@ -19,7 +30,7 @@ La repository contiene due probe read-only e il primo prototipo combat:
   memoria;
 - `JokCombat_InputProbe.lua`: valida i bit fisici L2/Cerchio/Croce/Quadrato e
   gli indirizzi Steam portati prima che il prototipo possa scrivere memoria;
-- `JokCombat_CombatPrototype.lua`: prototipo v0.2.2 con controller sperimentale
+- `JokCombat_CombatPrototype.lua`: prototipo v0.2.5 con controller sperimentale
   dei normali su Croce, richiesta contestuale della finisher su Triangolo,
   jump-cancel terra -> aria, Guard universale su L2 + Cerchio e Dodge Roll
   fisso su Quadrato;
@@ -59,15 +70,17 @@ pacchetto Critical Mix sono conservati, ma non caricati, nelle directory
 `C:\Users\<utente>\Documents\KH_mod\reference\CriticalMix`. Backup, log e
 copie runtime restano locali e non fanno parte del repository.
 
-Per riprodurre lo stato v0.2.2, premi `F1` nella console LuaBackend per
-ricaricare gli script. Croce ripetuto a terra riavvia attualmente il primo
-normale `0xC8`; Croce -> Triangolo emette la richiesta di finisher ma non entra
-in `0xCB`; in aria sono state osservate transizioni `0xCC` <-> `0xCD`. Durante
-un attacco, L2 + Cerchio deve interrompere l'azione con Guard. Quadrato resta
-Dodge Roll e non riceve la cancellazione universale. `F2` mostra o nasconde la
-console.
+Per provare la candidata v0.2.5, premi `F1` nella console LuaBackend per
+ricaricare gli script. Il log iniziale deve mostrare `ground action route
+ready`. Premi Croce con pressioni separate, anche molto prima della fine del
+colpo: lo State Probe deve mostrare il
+ciclo `C8 -> C9 -> CA -> C8`. Dopo almeno un normale, premi Triangolo: deve
+entrare in `CB`; Triangolo da solo deve restare ignorato. Ripeti senza target e
+poi contro un bersaglio. Durante un attacco, L2 + Cerchio deve continuare a
+interrompere l'azione con Guard; Quadrato resta Dodge Roll. `F2` mostra o
+nasconde la console.
 
-In v0.2.2 il ramo Dodge viene armato prima del primo frame di Quadrato, mentre L2
+Il ramo Dodge viene armato prima del primo frame di Quadrato, mentre L2
 disabilita il salto e prepara il mapping dell'azione difensiva sul Cerchio:
 Guard parte esclusivamente con la chord completa. Il Guard e' l'unica azione
 che puo' scrivere il cancel state in qualunque momento, anche in aria; Dodge,
@@ -80,10 +93,15 @@ richiede due fasi: il comando Attack viene inviato nel frame successivo, dopo
 che `control=0x03` ha confermato il rilascio; la posizione combo viene
 riapplicata immediatamente prima del comando. Il percorso non legge lock-on,
 distanza o hit-confirm ed e' progettato per funzionare anche senza bersaglio.
-La prova live conferma questo comportamento soltanto per parte della catena
-aerea: a terra il motore seleziona ancora il primo attacco. I log distinguono
-rilascio e comando `issued`; il criterio `observed` della v0.2.2 considera
-anche un restart di `0xC8`, che non equivale all'avanzamento verso `0xC9/CA`.
+La v0.2.3 ha confermato che il routing esplicito seleziona davvero `C9` e `CA`;
+la v0.2.4 ha confermato `CB` e che una richiesta piu' lunga aiuta, ma chiamava
+"pulse" ripetute scritture del valore `1`. La v0.2.5 alterna due frame alti e
+un frame basso, mantiene route e osservazione per una finestra massima
+controllata e riporta i trigger a zero su ogni uscita. Il log `command accepted
+after N pulse(s)` conta ora fronti alti reali. Se Croce viene premuta durante
+un link pendente, `normal input buffered behind the pending link` e poi
+`buffered normal input replayed on the new attack` confermano il buffer
+one-deep: una pressione produce ancora un solo colpo.
 
 Non installare il probe nella cartella Critical Mix EGS indicata come fonte di
 analisi: le due installazioni usano base address e script path diversi.
@@ -103,6 +121,8 @@ Le finestre iniziali sono intenzionalmente conservative e configurabili. La
 prima transizione terra -> aria e' un jump-cancel, non ancora un
 launcher/aerial chase. Per il primo test Guard e Dodge vengono resi disponibili
 solo in RAM anche prima dello sblocco vanilla; il save non viene modificato.
-La prossima iterazione deve identificare il comando o il contesto nativo che
-seleziona il link a terra e deve accettare come successo soltanto `0xC9/CA` per
-un normale successivo o `0xCB` per la finisher.
+La v0.2.5 deve essere confermata da una cattura live completa. Il criterio di
+successo non accetta piu' un semplice restart di `C8`: richiede l'animazione
+instradata esatta e `CB` per la finisher. Se il test riesce, il passo seguente
+e' trasformare la sequenza fissa in un controller configurabile per action
+ability, launcher e collegamento terra -> aria.

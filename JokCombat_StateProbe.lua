@@ -19,6 +19,8 @@ local STEAM_GL = {
     -- Validated on Steam Global through a live read-only gameplay capture on
     -- 2026-08-09. The resolved absolute pointer remains session-specific.
     playerPointerAddress = 0x2537E48,
+    comboPositionAddress = 0x296B221,
+    maxGroundComboAddress = 0x2D5CCE4,
 }
 
 local PLAYER = {
@@ -79,6 +81,8 @@ local function readSnapshot(playerPointer)
         airborneRaw = airborneRaw,
         airborne = airborneRaw ~= 0,
         slotReference = slotReference,
+        comboPosition = ReadByte(STEAM_GL.comboPositionAddress),
+        maxGroundCombo = ReadByte(STEAM_GL.maxGroundComboAddress),
     }
 end
 
@@ -104,7 +108,7 @@ local function logSnapshot(snapshot, reason)
     ConsolePrint(string.format(
         "[state:%s] ptr=0x%X control=0x%02X anim=0x%02X "
         .. "secondary=0x%02X time=%.2f airborne=%s raw70=0x%08X "
-        .. "slotRef=0x%04X",
+        .. "slotRef=0x%04X combo=%d/%d",
         reason,
         snapshot.pointer,
         snapshot.actionControl,
@@ -113,7 +117,9 @@ local function logSnapshot(snapshot, reason)
         snapshot.animationTime,
         tostring(snapshot.airborne),
         snapshot.airborneRaw,
-        snapshot.slotReference))
+        snapshot.slotReference,
+        snapshot.comboPosition,
+        snapshot.maxGroundCombo))
 end
 
 function _OnInit()
@@ -172,11 +178,13 @@ function _OnFrame()
     waitingWasLogged = false
 
     local stateKey = string.format(
-        "%X:%X:%X:%s",
+        "%X:%X:%X:%s:%X:%X",
         snapshot.actionControl,
         snapshot.animationId,
         snapshot.secondaryAnimationId,
-        tostring(snapshot.airborne))
+        tostring(snapshot.airborne),
+        snapshot.comboPosition,
+        snapshot.maxGroundCombo)
 
     local pointerChanged = playerPointer ~= lastPlayerPointer
     local stateChanged = stateKey ~= lastStateKey
