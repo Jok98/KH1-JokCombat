@@ -50,17 +50,29 @@ vanilla.
 > e passa direttamente a Stun Impact senza l'attacco base `C8` osservato nella
 > v0.2.9. Non vengono emessi pulse di fallback; rilascio di L2, cambio stato,
 > Guard, Dodge, salto, reload e uscita ripristinano la route vanilla.
+>
+> **Implementazione v0.3.3 da validare live:** il comando speciale singolo e'
+> diventato un loadout di undici slot per le Action Ability di combo. L'editor
+> separa i due modificatori: `L2 + R2 + D-pad Sinistra` gestisce i tre slot L2,
+> `D-pad Su` i quattro slot L2+R2 e `D-pad Destra` i quattro slot R2.
+> `L2 + R2 + D-pad Giu` ripristina tutti i default. Non modifica lista abilita',
+> AP o save e salva soltanto `JokCombat_ActionLoadout.cfg` accanto allo script.
+> Le route terra e aria vengono applicate per la singola richiesta e ripristinate
+> appena l'animazione attesa viene osservata o la richiesta scade.
+> La v0.3.3 corregge inoltre il prompt HUD dopo reload: la coppia puntatori
+> colore `0/0` e' uno slot vuoto valido e viene inizializzata soltanto alla
+> prima apertura dell'editor, invece di disabilitare il riquadro per la sessione.
 
 La repository contiene due probe read-only e il primo prototipo combat:
 
 - `JokCombat_StateProbe.lua`: rileva la build Steam Global, usa il player
   pointer Steam verificato e registra lo stato action/animation senza scrivere
   memoria;
-- `JokCombat_InputProbe.lua`: valida i bit fisici L2/Cerchio/Croce/Quadrato e
-  gli indirizzi Steam portati prima che il prototipo possa scrivere memoria;
-- `JokCombat_CombatPrototype.lua`: prototipo v0.2.10 con combo terrestre completa
-  e finisher su Croce, Stun Impact deterministico su L2 + Croce,
-  Triangolo lasciato nativo,
+- `JokCombat_InputProbe.lua`: registra in sola lettura D-pad, L2/R2 e tasti
+  faccia e valida gli indirizzi Steam portati prima che il prototipo scriva;
+- `JokCombat_CombatPrototype.lua`: prototipo v0.3.3 con combo terrestre completa
+  e finisher su Croce, undici slot Action Ability configurabili,
+  Triangolo non modificato lasciato nativo,
   jump-cancel terra -> aria, Guard universale su L2 + Cerchio e Dodge Roll
   fisso su Quadrato;
 - `docs/CMix_AnimCancel_AbilityHandler_analysis.md`: analisi tecnica dei primi
@@ -70,12 +82,13 @@ Il prototipo combat e' stato attivato dopo la conferma live della probe input.
 Perfect Guard, counter, launcher del nemico e aerial chase non sono ancora
 implementati.
 
-Requisito di design confermato: JokCombat deve fornire dall'inizio un proprio
-loadout completo di azioni/mobilita' di Sora, indipendente dallo sblocco
-vanilla, mantenendo pero' intatti save, reward e progressione della storia.
-Guard e Dodge Roll sono il primo slice; High Jump, Glide e le altre action
-ability verranno aggiunte tramite stato runtime validato, non inserendole nel
-salvataggio.
+Requisito di design confermato: JokCombat fornisce dall'inizio un loadout
+runtime di sole Action Ability, indipendente dallo sblocco vanilla e senza
+inserirle nel salvataggio. Guard e Dodge Roll restano comandi fissi; abilita'
+passive, condivise, movimento, magia e Limit a consumo MP non compaiono
+nell'editor v0.3.3. Queste ultime richiedono un dispatcher diverso dalla route
+Attack e verranno analizzate separatamente, senza fingere che siano gia'
+supportate.
 
 ## Directory runtime prevista
 
@@ -99,23 +112,47 @@ pacchetto Critical Mix sono conservati, ma non caricati, nelle directory
 `C:\Users\<utente>\Documents\KH_mod\reference\CriticalMix`. Backup, log e
 copie runtime restano locali e non fanno parte del repository.
 
-Per verificare la v0.2.10, premi `F1` nella console LuaBackend per
-ricaricare gli script. Il log iniziale deve mostrare `v0.2.10` e `ground action
-route ready`. Da fermo e a terra tieni prima L2, quindi premi Croce: devono
-comparire `stun-impact-prime route armed`, `Stun Impact route primed by L2`,
-`Stun Impact requested by L2+Cross` e poi `stun-impact transition observed:
-anim=0xD8`. Lo State Probe deve passare direttamente a `anim=0xD8`: non deve
-piu' comparire `anim=0xC8` fra la richiesta e la finisher, e il log deve
-riportare `command accepted after 0 pulse(s)`. Ripeti almeno dieci volte, prima
-senza target e poi contro gruppi di nemici: ogni pressione valida deve eseguire
-la mossa; contro i nemici vanno verificati anche hitbox, danno ad area e stato
-stun, non soltanto l'animazione.
-Durante `0xD8`, una nuova L2 + Croce deve produrre `Stun Impact input ignored`
-senza riavviare il tempo della mossa. In aria L2 + Croce resta un normale
-attacco aereo. Controlla infine la regressione: Croce deve conservare
-`C8 -> C9 -> CA -> CB`, durante `DC` Quadrato deve produrre `Dodge input
-ignored`, L2 + Cerchio deve dare Guard e Triangolo deve restare vanilla. `F2`
-mostra o nasconde la console.
+Per verificare la v0.3.3, premi `F1` nella console LuaBackend. Il log iniziale
+deve mostrare `v0.3.3`, `ground action route ready`, `aerial action route ready`
+e l'istruzione `Action Loadout`. Tieni prima `L2 + R2`, quindi premi
+`D-pad Sinistra` per gli slot L2, `D-pad Su` per gli slot L2+R2 oppure
+`D-pad Destra` per gli slot R2. Usa `Su/Giu` per scegliere lo slot e
+`Sinistra/Destra` senza shoulder per cambiare abilita'. Ripeti la combinazione
+di apertura dello stesso gruppo
+per salvare e chiudere; usa quella opposta per passare direttamente all'altro
+gruppo. `L2 + R2 + D-pad Giu` ripristina e salva immediatamente tutti gli
+undici default JokCombat.
+
+Gli undici default sono tutti differenti:
+
+| Slot | Action Ability |
+| --- | --- |
+| `L2 + Croce` | Stun Impact |
+| `L2 + Triangolo` | Slapshot |
+| `L2 + Quadrato` | Sliding Dash |
+| `R2 + Croce` | Gravity Break |
+| `R2 + Triangolo` | Ripple Drive |
+| `R2 + Cerchio` | Hurricane Blast, solo in aria |
+| `R2 + Quadrato` | Zantetsuken |
+| `L2 + R2 + Croce` | Blitz |
+| `L2 + R2 + Triangolo` | Vortex |
+| `L2 + R2 + Cerchio` | Aerial Sweep |
+| `L2 + R2 + Quadrato` | Counterattack, contestuale |
+
+Il catalogo include tutte le azioni della tabella e anche `None`. Per eseguire
+uno slot, tieni il modificatore almeno un frame prima del tasto faccia. Questo
+e' obbligatorio per gli slot Croce: permette al dispatcher nativo di vedere la
+route selezionata prima del fronte fisico ed evita l'attacco base intermedio.
+Gli slot assegnati a un contesto incompatibile non forzano l'animazione: Croce
+ricade sulla combo normale, mentre gli altri tasti restano consumati dalla
+chord. Testare ogni azione prima senza target e poi su nemici, verificando
+animazione, hitbox, danno e stati applicati.
+
+Controlla infine la regressione: Croce senza modificatori deve conservare
+`C8 -> C9 -> CA -> CB`; durante `DC`, Quadrato senza modificatori deve produrre
+`Dodge input ignored`; `L2 + Cerchio` deve dare Guard; Cerchio senza
+modificatori deve saltare e Triangolo senza modificatori deve restare vanilla.
+`F2` mostra o nasconde la console.
 
 Il ramo Dodge viene armato prima del primo frame di Quadrato, mentre L2
 disabilita il salto e prepara il mapping dell'azione difensiva sul Cerchio:
@@ -180,7 +217,10 @@ prima transizione terra -> aria e' un jump-cancel, non ancora un
 launcher/aerial chase. Per il primo test Guard e Dodge vengono resi disponibili
 solo in RAM anche prima dello sblocco vanilla; il save non viene modificato.
 La v0.2.10 ha confermato la transizione diretta a `0xD8`, senza uno stato `0xC8`
-intermedio e senza pulse sintetici, quando L2 viene tenuto prima di Croce. Il
-sistema puo' ora essere esteso ad altre action ability, launcher e collegamenti
-aerei mantenendo lo stesso criterio: route preparata prima del fronte fisico e
-cleanup completo su ogni uscita.
+intermedio e senza pulse sintetici, quando L2 viene tenuto prima di Croce. La
+v0.3.3 generalizza lo stesso criterio alle route configurabili e aggiunge un
+dispatcher sintetico soltanto per i tasti faccia che vengono soppressi in
+anticipo dal modificatore. Prima di aggiungere Limit, movement o magic cancel,
+ogni voce del catalogo v0.3.3 deve essere validata live e le route devono
+risultare sempre ripristinate dopo successo, timeout, Guard, Dodge, salto,
+reload e perdita del player object.
