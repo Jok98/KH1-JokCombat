@@ -51,7 +51,7 @@ vanilla.
 > v0.2.9. Non vengono emessi pulse di fallback; rilascio di L2, cambio stato,
 > Guard, Dodge, salto, reload e uscita ripristinano la route vanilla.
 >
-> **Implementazione v0.3.3 da validare live:** il comando speciale singolo e'
+> **Risultato live v0.3.4:** il comando speciale singolo e'
 > diventato un loadout di undici slot per le Action Ability di combo. L'editor
 > separa i due modificatori: `L2 + R2 + D-pad Sinistra` gestisce i tre slot L2,
 > `D-pad Su` i quattro slot L2+R2 e `D-pad Destra` i quattro slot R2.
@@ -62,15 +62,68 @@ vanilla.
 > La v0.3.3 corregge inoltre il prompt HUD dopo reload: la coppia puntatori
 > colore `0/0` e' uno slot vuoto valido e viene inizializzata soltanto alla
 > prima apertura dell'editor, invece di disabilitare il riquadro per la sessione.
+> La prova del record completo da `0x14` byte ha falsificato l'ipotesi iniziale:
+> da neutrale Stun Impact esegue ancora soltanto l'animazione, mentre dopo una
+> vera combo bolla, hitbox e danno compaiono con la probabilita' vanilla del 30%.
+> Il record viene sempre ripristinato, ma non determina da solo l'identita'
+> dell'azione scelta dal dispatcher.
+>
+> **Risultato live v0.3.5:** il disassemblato Steam conferma
+> due controlli distinti nel selettore nativo: `0x2A6F8A` richiede il contesto
+> finisher e `0x2A6FAF` scarta Stun Impact quando il valore casuale non e'
+> inferiore a `0.30`. Solo mentre una chord Croce assegnata a Stun Impact e'
+> armata, JokCombat abilita il relativo bit runtime e sostituisce entrambe le
+> branch a due byte con NOP. Il gioco puo' cosi' selezionare il vero Stun Impact
+> anche da neutrale e con esito 100%; al rilascio vengono ripristinate le quattro
+> istruzioni originali. Nessun byte di abilita', AP o progressione viene scritto
+> nel salvataggio. Il test in combattimento ha confermato bolla, hitbox, danno e
+> attivazione deterministica tramite chord senza una combo precedente.
+>
+> **Candidato v0.3.6:** la precedente voce Zantetsuken puntava per errore a
+> `0xDB`, identificato negli script Critical Mix come Horizontal Strike della
+> sequenza Limit/Shin Zantetsuken. Il record Action Ability nativo e' `0xD9` e
+> il selettore Steam lo collega al bit runtime 28 e alla branch probabilistica
+> `0x2A6FC5`. La scorciatoia ora forza temporaneamente quel ramo al 100%,
+> disabilitando soltanto la precedenza runtime di Stun Impact durante la
+> richiesta; tutti i bit e le istruzioni originali vengono poi ripristinati.
+> Animazione completa, hitbox, danno e ritorno al controllo attendono conferma
+> nel test live.
+>
+> **Candidato v0.3.8:** tenere `L2`, `R2` oppure `L2 + R2` sostituisce
+> temporaneamente le quattro etichette del Command Menu nativo in basso a
+> sinistra. L2 presenta le tre Action Ability e `Cerchio: Guard`; R2 e L2+R2
+> presentano i rispettivi quattro slot. Comandi, selezione ed effetti vanilla
+> non vengono modificati: soltanto i quattro puntatori testuali sono deviati ai
+> buffer JokCombat e ripristinati al rilascio. `L1 + R1 + L2 + R2` abilita o
+> disabilita persistentemente il riepilogo.
+>
+> **Candidato v0.3.9:** sui salvataggi iniziali la quarta voce vanilla ha ID
+> `0x00` e non possiede un record grafico disegnabile. Durante il solo
+> riepilogo, e finche' D-pad e tasti faccia sono neutralizzati, JokCombat usa
+> temporaneamente il record `Summon` come supporto grafico della quarta
+> etichetta e ripristina l'ID originale al rilascio, al reload e all'uscita.
+> Il D-pad viene ora isolato dal cursore vanilla: nasconde le etichette solo
+> mentre e' premuto e queste ricompaiono al rilascio senza lasciare il menu in
+> uno stato invalido.
+>
+> **Candidato v0.4.0:** il riepilogo nativo diventa anche l'editor. Tenendo
+> `L2`, `R2` oppure `L2 + R2`, `D-pad Su/Giu` seleziona una delle righe
+> configurabili e `D-pad Sinistra/Destra` scorre il catalogo Action Ability.
+> La riga attiva e' marcata con `+` e il file viene salvato automaticamente al
+> rilascio o al cambio del modificatore. `L2 + Circle: Guard` rimane visibile
+> ma fisso e viene saltato dalla selezione. Durante ogni input D-pad, cursore
+> vanilla, route Attack e tasti faccia restano neutralizzati.
 
-La repository contiene due probe read-only e il primo prototipo combat:
+La repository contiene tre probe read-only e il primo prototipo combat:
 
 - `JokCombat_StateProbe.lua`: rileva la build Steam Global, usa il player
   pointer Steam verificato e registra lo stato action/animation senza scrivere
   memoria;
 - `JokCombat_InputProbe.lua`: registra in sola lettura D-pad, L2/R2 e tasti
   faccia e valida gli indirizzi Steam portati prima che il prototipo scriva;
-- `JokCombat_CombatPrototype.lua`: prototipo v0.3.3 con combo terrestre completa
+- `JokCombat_CommandMenuProbe.lua`: confronta in sola lettura controller,
+  transizioni e strutture delle quattro righe native del Command Menu;
+- `JokCombat_CombatPrototype.lua`: prototipo v0.4.0 con combo terrestre completa
   e finisher su Croce, undici slot Action Ability configurabili,
   Triangolo non modificato lasciato nativo,
   jump-cancel terra -> aria, Guard universale su L2 + Cerchio e Dodge Roll
@@ -86,7 +139,7 @@ Requisito di design confermato: JokCombat fornisce dall'inizio un loadout
 runtime di sole Action Ability, indipendente dallo sblocco vanilla e senza
 inserirle nel salvataggio. Guard e Dodge Roll restano comandi fissi; abilita'
 passive, condivise, movimento, magia e Limit a consumo MP non compaiono
-nell'editor v0.3.3. Queste ultime richiedono un dispatcher diverso dalla route
+nell'editor v0.4.0. Queste ultime richiedono un dispatcher diverso dalla route
 Attack e verranno analizzate separatamente, senza fingere che siano gia'
 supportate.
 
@@ -112,16 +165,33 @@ pacchetto Critical Mix sono conservati, ma non caricati, nelle directory
 `C:\Users\<utente>\Documents\KH_mod\reference\CriticalMix`. Backup, log e
 copie runtime restano locali e non fanno parte del repository.
 
-Per verificare la v0.3.3, premi `F1` nella console LuaBackend. Il log iniziale
-deve mostrare `v0.3.3`, `ground action route ready`, `aerial action route ready`
-e l'istruzione `Action Loadout`. Tieni prima `L2 + R2`, quindi premi
-`D-pad Sinistra` per gli slot L2, `D-pad Su` per gli slot L2+R2 oppure
-`D-pad Destra` per gli slot R2. Usa `Su/Giu` per scegliere lo slot e
-`Sinistra/Destra` senza shoulder per cambiare abilita'. Ripeti la combinazione
-di apertura dello stesso gruppo
-per salvare e chiudere; usa quella opposta per passare direttamente all'altro
-gruppo. `L2 + R2 + D-pad Giu` ripristina e salva immediatamente tutti gli
-undici default JokCombat.
+Per verificare la v0.4.0, premi `F1` nella console LuaBackend. Il log iniziale
+deve mostrare `v0.4.0`, `ground action route ready`, `aerial action route ready`,
+`complete action records ready: 11/11`
+`native Command Menu overlay ready` e
+`native Stun Impact/Zantetsuken selectors ready`.
+
+Tieni un modificatore per visualizzare e configurare il relativo gruppo: `L2`,
+`R2` oppure entrambi per `L2+R2`. Il riepilogo mostra sempre un massimo di
+quattro righe nel Command Menu originale in basso a sinistra. Premi `Su/Giu`
+per selezionare lo slot; la riga attiva riceve il prefisso `+`. Premi
+`Sinistra/Destra` per scegliere l'Action Ability precedente o successiva. Le
+righe cambiano immediatamente e vengono salvate una sola volta quando rilasci
+il modificatore o passi a un altro gruppo. Nel gruppo L2, Su/Giu attraversa
+soltanto X, Triangolo e Quadrato: `Circle: Guard` non viene modificato.
+
+Il D-pad non deve muovere il cursore vanilla e, mentre una direzione e' tenuta,
+nessuna mossa o tasto faccia deve raggiungere il dispatcher di combattimento.
+Rilasciare prima il modificatore mantiene questo blocco fino al rilascio del
+D-pad. Premere invece un tasto faccia senza D-pad nasconde il riepilogo ed
+esegue normalmente la mossa assegnata. Se la quarta voce vanilla non e' ancora
+sbloccata, il log aggiunge `row4-carrier=06`.
+
+Premi e rilascia `L1 + R1 + L2 + R2` senza D-pad per alternare persistentemente
+il riepilogo. Per ripristinare gli undici default, tieni gli stessi quattro
+shoulder, premi `D-pad Giu` e poi rilascia: il reset viene salvato e non cambia
+lo stato on/off del riepilogo. Il precedente editor nei box di notifica e' stato
+rimosso.
 
 Gli undici default sono tutti differenti:
 
@@ -220,7 +290,23 @@ La v0.2.10 ha confermato la transizione diretta a `0xD8`, senza uno stato `0xC8`
 intermedio e senza pulse sintetici, quando L2 viene tenuto prima di Croce. La
 v0.3.3 generalizza lo stesso criterio alle route configurabili e aggiunge un
 dispatcher sintetico soltanto per i tasti faccia che vengono soppressi in
-anticipo dal modificatore. Prima di aggiungere Limit, movement o magic cancel,
-ogni voce del catalogo v0.3.3 deve essere validata live e le route devono
+anticipo dal modificatore. La v0.3.4 usa record completi al posto della sola
+animazione, ma il test ha dimostrato che gli effetti speciali dipendono anche
+dal selettore nativo. La v0.3.5 forza temporaneamente gate finisher e tiro del
+30% per Stun Impact, mantenendo vanilla il codice fuori dalla relativa chord.
+La v0.3.6 applica lo stesso percorso nativo a Zantetsuken `0xD9` e rimuove dal
+catalogo l'erronea route Limit `0xDB`.
+La v0.3.7 aggiunge il primo riepilogo contestuale usando due box HUD. La v0.3.8
+segue il renderer originale: preserva i quattro command ID e devia soltanto i
+relativi token testuali verso quattro buffer da 0x20 byte, con record di recupero
+per reload inattesi e toggle persistente.
+La v0.3.9 gestisce anche la quarta riga assente sui salvataggi iniziali mediante
+un command ID grafico temporaneo incluso nello stesso recupero e impedisce al
+D-pad di alterare lo slot nativo mentre il riepilogo e' attivo.
+La v0.4.0 elimina il precedente editor a box e modifica direttamente il
+loadout nelle quattro righe native, con selezione marcata, isolamento completo
+degli input durante il D-pad e salvataggio automatico alla chiusura del gruppo.
+Prima di aggiungere Limit, movement o magic cancel, ogni voce del catalogo
+v0.4.0 deve essere validata live e le route devono
 risultare sempre ripristinate dopo successo, timeout, Guard, Dodge, salto,
 reload e perdita del player object.

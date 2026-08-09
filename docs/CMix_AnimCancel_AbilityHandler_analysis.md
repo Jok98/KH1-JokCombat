@@ -167,7 +167,8 @@ essere considerate definitive per JokCombat:
 | `0xD6` | Aerial Rush/Ars context, dipendente dal moveset |
 | `0xD7` | Ripple Slide |
 | `0xD8` | Stun Impact |
-| `0xDB` | Horizontal Strike |
+| `0xD9` | Zantetsuken Action Ability nativa (confermato dal selettore Steam) |
+| `0xDB` | Horizontal Strike della sequenza Limit/Shin Zantetsuken Critical Mix |
 | `0xDC` | Dodge/Roll |
 | `0xE6`-`0xEE` | fasi di Strike Raid, Judgement e recovery |
 | `0xF0`-`0xF5` | Ragnarok |
