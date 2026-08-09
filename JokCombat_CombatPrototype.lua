@@ -1,8 +1,8 @@
 LUAGUI_NAME = "JokCombat Combat Prototype"
 LUAGUI_AUTH = "Jok; Critical Mix reference by Xendra / KSX"
-LUAGUI_DESC = "Cross-only combo, deterministic L2+Cross Stun Impact, universal Guard/Dodge cancels and jump branch."
+LUAGUI_DESC = "Cross combo, configurable Action Ability loadout, universal Guard/Dodge cancels and jump branch."
 
--- JokCombat v0.2.10 prototype for the current Steam Global executable.
+-- JokCombat v0.3.3 prototype for the current Steam Global executable.
 -- Critical Mix was used as an authorized technical reference. This script is
 -- intentionally limited to combat/input state and does not touch save data,
 -- story flags, rewards, inventory, AP, levels, worlds, chests, or synthesis.
@@ -22,7 +22,9 @@ local CONFIG = {
     universalDodgeCancel = true,
     guardOnL2Circle = true,
     fixedDodgeOnSquare = true,
-    stunImpactOnL2Cross = true,
+    actionLoadout = true,
+    actionLoadoutMenu = true,
+    actionLoadoutPrompt = true,
 
     -- Enabled for the first combat test so the requested bindings also work
     -- on an early save. This bypass is runtime-only and never edits the save.
@@ -44,17 +46,18 @@ local CONFIG = {
     attackPulseLowFrames = 1,
     groundRouteFrames = 104,
     transitionCheckFrames = 96,
-    stunImpactRequestFrames = 120,
+    actionRequestFrames = 120,
     forcedInputFrames = 4,
 }
 
 local EXPECTED_GAME_ID = 0xAF71841E
 local FINGERPRINT = 0x7265737563697065 -- "epicures", little endian
-local VERSION = "v0.2.10"
+local VERSION = "v0.3.3"
 
 local ADDRESS = {
     fingerprint = 0x3B2271,
     playerPointer = 0x2537E48,
+    dpadButtons = 0x22C9300,
     rawButtons = 0x22C9301,
     commandMenuSlot = 0x28527AC,
     triggerMenu1 = 0x23D3F80,
@@ -77,6 +80,22 @@ local ADDRESS = {
     groundComboA1 = 0x2D2D834,
     groundComboA2 = 0x2D2D848,
 
+    -- Steam ports of the aerial action entries. Their vanilla values were
+    -- verified read-only against the supported executable before v0.3.0.
+    airComboAerialSweep = 0x2D2D730,
+    airCombo1C = 0x2D2D744,
+    airCombo1B = 0x2D2D758,
+    airComboHurricane = 0x2D2D85C,
+    airComboFinisher = 0x2D2D870,
+    airCombo2 = 0x2D2D884,
+    airCombo1 = 0x2D2D898,
+    flyingCombo1 = 0x2D2D8D4,
+
+    dpadUpControlMap = 0x22C933C,
+    dpadRightControlMap = 0x22C933D,
+    dpadDownControlMap = 0x22C933E,
+    dpadLeftControlMap = 0x22C933F,
+    triangleControlMap = 0x22C9344,
     circleControlMap = 0x22C9345,
     attackControlMap = 0x22C9346,
     squareControlMap = 0x22C9347,
@@ -86,6 +105,15 @@ local ADDRESS = {
     guardAvailabilityBranch = 0x2A7BFD, -- 74 normal, 72 enabled, EB choose roll
     guardSelectionBranch = 0x2A7C01,    -- 74 normal, EB choose guard
     dodgeAvailabilityBranch = 0x2A7C1F, -- 84 normal, 82 enabled
+
+    -- One native KH notification box is reused only while the loadout editor
+    -- is open. These Steam addresses and their color pointers were validated
+    -- read-only on the same fingerprint as the combat routes.
+    promptBoxCount = 0x283B380,
+    promptBox = 0x283B390,
+    promptText = 0x2DB7720,
+    promptColorBox = 0x527A10,
+    promptColorText = 0x527A50,
 }
 
 local PLAYER = {
@@ -99,10 +127,20 @@ local PLAYER = {
 
 local BUTTON = {
     L2 = 0x01,
+    R2 = 0x02,
     CIRCLE = 0x20,
     CROSS = 0x40,
     SQUARE = 0x80,
     TRIANGLE = 0x10,
+}
+
+local SHOULDER_MASK = BUTTON.L2 | BUTTON.R2
+
+local DPAD = {
+    UP = 0x10,
+    RIGHT = 0x20,
+    DOWN = 0x40,
+    LEFT = 0x80,
 }
 
 -- The control-map table is action -> physical control. Its indices follow the
@@ -110,12 +148,149 @@ local BUTTON = {
 -- Square=07. Only the Attack action is temporarily sourced from Triangle.
 local CONTROL_INDEX = {
     TRIANGLE = 0x04,
+    CIRCLE = 0x05,
+    CROSS = 0x06,
+    SQUARE = 0x07,
 }
 
 local DODGE_ROLL_ANIMATION = 0xDC
-local STUN_IMPACT_ANIMATION = 0xD8
-local STUN_IMPACT_KIND = "stun-impact"
-local STUN_IMPACT_PRIME_KIND = "stun-impact-prime"
+local ACTION_KIND_PREFIX = "action:"
+local ACTION_PRIME_PREFIX = "action-prime:"
+
+-- Only Sora combat Action Abilities are exposed. Guard and Dodge Roll stay on
+-- their fixed controls; support, shared and special/Limit abilities never enter
+-- this catalog. The animation map is adapted from the authorized Critical Mix
+-- action dictionary and the Steam action tables. Stun Impact is already live-
+-- validated; the remaining entries deliberately log their first transitions so
+-- their hitboxes and contextual requirements can be verified one by one.
+local ACTION_CATALOG = {
+    { id = "none", name = "None", context = "none" },
+    { id = "slapshot", name = "Slapshot", context = "ground",
+        animation = 0xCF, finisher = false },
+    { id = "sliding_dash", name = "Sliding Dash", context = "ground",
+        animation = 0xD0, finisher = false },
+    { id = "vortex", name = "Vortex", context = "ground",
+        animation = 0xD3, finisher = false },
+    { id = "aerial_sweep", name = "Aerial Sweep", context = "ground",
+        animation = 0xD6, finisher = false },
+    { id = "counterattack", name = "Counterattack", context = "ground",
+        animation = 0xD5, finisher = false, contextual = true },
+    { id = "blitz", name = "Blitz", context = "ground",
+        animation = 0xD2, finisher = true },
+    { id = "hurricane_blast", name = "Hurricane Blast", context = "air",
+        animation = 0xD1, finisher = true },
+    { id = "ripple_drive", name = "Ripple Drive", context = "ground",
+        animation = 0xD7, finisher = true },
+    { id = "stun_impact", name = "Stun Impact", context = "ground",
+        animation = 0xD8, finisher = true, validated = true },
+    { id = "gravity_break", name = "Gravity Break", context = "ground",
+        animation = 0xDA, finisher = true },
+    { id = "zantetsuken", name = "Zantetsuken", context = "ground",
+        animation = 0xDB, finisher = true },
+}
+
+local ACTION_BY_ID = {}
+local ACTION_INDEX_BY_ID = {}
+local ROUTABLE_ACTION_ANIMATION = {}
+local FINISHER_ACTION_ANIMATION = {}
+for index, action in ipairs(ACTION_CATALOG) do
+    ACTION_BY_ID[action.id] = action
+    ACTION_INDEX_BY_ID[action.id] = index
+    if action.animation ~= nil then
+        ROUTABLE_ACTION_ANIMATION[action.animation] = true
+        if action.finisher then
+            FINISHER_ACTION_ANIMATION[action.animation] = true
+        end
+    end
+end
+
+local ACTION_SLOTS = {
+    { id = "l2_cross", label = "L2 + X", modifier = BUTTON.L2,
+        face = BUTTON.CROSS, faceName = "X" },
+    { id = "l2_triangle", label = "L2 + Triangle", modifier = BUTTON.L2,
+        face = BUTTON.TRIANGLE, faceName = "Triangle" },
+    { id = "l2_square", label = "L2 + Square", modifier = BUTTON.L2,
+        face = BUTTON.SQUARE, faceName = "Square" },
+    { id = "r2_cross", label = "R2 + X", modifier = BUTTON.R2,
+        face = BUTTON.CROSS, faceName = "X" },
+    { id = "r2_triangle", label = "R2 + Triangle", modifier = BUTTON.R2,
+        face = BUTTON.TRIANGLE, faceName = "Triangle" },
+    { id = "r2_circle", label = "R2 + Circle", modifier = BUTTON.R2,
+        face = BUTTON.CIRCLE, faceName = "Circle" },
+    { id = "r2_square", label = "R2 + Square", modifier = BUTTON.R2,
+        face = BUTTON.SQUARE, faceName = "Square" },
+    { id = "dual_cross", label = "L2 + R2 + X",
+        modifier = SHOULDER_MASK, face = BUTTON.CROSS, faceName = "X" },
+    { id = "dual_triangle", label = "L2 + R2 + Triangle",
+        modifier = SHOULDER_MASK, face = BUTTON.TRIANGLE,
+        faceName = "Triangle" },
+    { id = "dual_circle", label = "L2 + R2 + Circle",
+        modifier = SHOULDER_MASK, face = BUTTON.CIRCLE, faceName = "Circle" },
+    { id = "dual_square", label = "L2 + R2 + Square",
+        modifier = SHOULDER_MASK, face = BUTTON.SQUARE, faceName = "Square" },
+}
+
+local ACTION_SLOT_BY_ID = {}
+for _, slot in ipairs(ACTION_SLOTS) do ACTION_SLOT_BY_ID[slot.id] = slot end
+
+local function slotModifierMatches(buttons, slot)
+    return (buttons & SHOULDER_MASK) == slot.modifier
+end
+
+local function slotModifierName(slot)
+    if slot.modifier == SHOULDER_MASK then return "L2+R2" end
+    if slot.modifier == BUTTON.L2 then return "L2" end
+    return "R2"
+end
+
+local LOADOUT_MENU_GROUPS = {
+    l2 = {
+        id = "l2",
+        label = "L2",
+        openDirection = "Left",
+        slots = {
+            ACTION_SLOT_BY_ID.l2_cross,
+            ACTION_SLOT_BY_ID.l2_triangle,
+            ACTION_SLOT_BY_ID.l2_square,
+        },
+    },
+    r2 = {
+        id = "r2",
+        label = "R2",
+        openDirection = "Right",
+        slots = {
+            ACTION_SLOT_BY_ID.r2_cross,
+            ACTION_SLOT_BY_ID.r2_triangle,
+            ACTION_SLOT_BY_ID.r2_circle,
+            ACTION_SLOT_BY_ID.r2_square,
+        },
+    },
+    dual = {
+        id = "dual",
+        label = "L2+R2",
+        openDirection = "Up",
+        slots = {
+            ACTION_SLOT_BY_ID.dual_cross,
+            ACTION_SLOT_BY_ID.dual_triangle,
+            ACTION_SLOT_BY_ID.dual_circle,
+            ACTION_SLOT_BY_ID.dual_square,
+        },
+    },
+}
+
+local DEFAULT_LOADOUT = {
+    l2_cross = "stun_impact",
+    l2_triangle = "slapshot",
+    l2_square = "sliding_dash",
+    r2_cross = "gravity_break",
+    r2_triangle = "ripple_drive",
+    r2_circle = "hurricane_blast",
+    r2_square = "zantetsuken",
+    dual_cross = "blitz",
+    dual_triangle = "vortex",
+    dual_circle = "aerial_sweep",
+    dual_square = "counterattack",
+}
 
 -- These are deliberately conservative first-pass windows, measured in the
 -- game's animation-time units. They are configuration data to tune from logs.
@@ -154,6 +329,25 @@ local GROUND_ACTION_ROUTE = {
         normal = 0xCA },
 }
 
+local AIR_ACTION_ROUTE = {
+    { name = "airComboAerialSweep", address = ADDRESS.airComboAerialSweep,
+        normal = 0xD6 },
+    { name = "airCombo1C", address = ADDRESS.airCombo1C,
+        normal = 0xCD },
+    { name = "airCombo1B", address = ADDRESS.airCombo1B,
+        normal = 0xCC },
+    { name = "airComboHurricane", address = ADDRESS.airComboHurricane,
+        normal = 0xD1 },
+    { name = "airComboFinisher", address = ADDRESS.airComboFinisher,
+        normal = 0xCE },
+    { name = "airCombo2", address = ADDRESS.airCombo2,
+        normal = 0xCD },
+    { name = "airCombo1", address = ADDRESS.airCombo1,
+        normal = 0xCC },
+    { name = "flyingCombo1", address = ADDRESS.flyingCombo1,
+        normal = 0xCC },
+}
+
 local NORMAL = {
     forceCircle = 0x74,
     forceSquare = 0x84,
@@ -161,6 +355,11 @@ local NORMAL = {
     guardAvailability = 0x74,
     guardSelection = 0x74,
     dodgeAvailability = 0x84,
+    dpadUpControlMap = 0xFF,
+    dpadRightControlMap = 0xFF,
+    dpadDownControlMap = 0xFF,
+    dpadLeftControlMap = 0xFF,
+    triangleControlMap = 0xFF,
     circleControlMap = 0xFF,
     attackControlMap = 0xFF,
     squareControlMap = 0xFF,
@@ -207,12 +406,245 @@ local groundRouteAnimation = nil
 local groundRouteKind = nil
 local groundRouteSourceAnimation = nil
 local groundRouteSourceTime = 0.0
+local airRouteAvailable = false
+local airRouteFrames = 0
+local airRouteAnimation = nil
+local airRouteKind = nil
+local airRouteSourceAnimation = nil
+local airRouteSourceTime = 0.0
 local syntheticAttackCommandOwned = false
 local syntheticAttackCommandHigh = false
 local queuedNormalInput = false
+local lastDpad = 0
+local loadout = {}
+local loadoutPath = nil
+local loadoutMenuOpen = false
+local loadoutMenuGroup = "l2"
+local loadoutMenuIndex = 1
+local loadoutPromptAvailable = false
+local loadoutPromptMismatchKey = nil
 
 local function log(message)
     if CONFIG.debugLog then ConsolePrint("[JokCombat] " .. message) end
+end
+
+local function joinPath(root, name)
+    if type(root) ~= "string" or root == "" then return name end
+    local last = root:sub(-1)
+    if last == "\\" or last == "/" then return root .. name end
+    return root .. "\\" .. name
+end
+
+local function resetLoadoutToDefaults()
+    loadout = {}
+    for _, slot in ipairs(ACTION_SLOTS) do
+        loadout[slot.id] = DEFAULT_LOADOUT[slot.id] or "none"
+    end
+end
+
+local function loadActionLoadout()
+    resetLoadoutToDefaults()
+    loadoutPath = joinPath(SCRIPT_PATH, "JokCombat_ActionLoadout.cfg")
+
+    local file = io.open(loadoutPath, "r")
+    if file == nil then
+        log("loadout file not found; using v0.3.3 defaults.")
+        return
+    end
+
+    local accepted = 0
+    for line in file:lines() do
+        local slotId, actionId = line:match(
+            "^%s*([%w_]+)%s*=%s*([%w_]+)%s*$")
+        if ACTION_SLOT_BY_ID[slotId] ~= nil
+            and ACTION_BY_ID[actionId] ~= nil then
+            loadout[slotId] = actionId
+            accepted = accepted + 1
+        end
+    end
+    file:close()
+    log(string.format("loaded Action Ability loadout: %d valid slot(s).",
+        accepted))
+end
+
+local function saveActionLoadout()
+    if loadoutPath == nil then return false end
+    local file, errorMessage = io.open(loadoutPath, "w")
+    if file == nil then
+        ConsolePrint("[JokCombat:loadout] unable to save " .. loadoutPath
+            .. ": " .. tostring(errorMessage))
+        return false
+    end
+
+    file:write("# JokCombat v0.3.3 Action Ability loadout\n")
+    file:write("# Guard remains fixed on L2+Circle; Dodge Roll on Square.\n")
+    for _, slot in ipairs(ACTION_SLOTS) do
+        file:write(slot.id, "=", loadout[slot.id] or "none", "\n")
+    end
+    file:close()
+    log("Action Ability loadout saved to " .. loadoutPath)
+    return true
+end
+
+-- Minimal KHSCII encoder adapted from the authorized Critical Mix prompt
+-- helper. The loadout UI deliberately uses only this small ASCII subset.
+local KHSCII_PUNCTUATION = {
+    [" "] = 0x01,
+    ["-"] = 0x6E,
+    ["!"] = 0x5F,
+    ["?"] = 0x60,
+    ["+"] = 0x63,
+    ["/"] = 0x66,
+    ["."] = 0x68,
+    [","] = 0x69,
+    [":"] = 0x6B,
+    ["("] = 0x74,
+    [")"] = 0x75,
+}
+
+local function getKHSCII(input, capacity)
+    local result = {}
+    local maximum = math.max(1, capacity) - 1
+    for index = 1, math.min(#input, maximum) do
+        local character = input:sub(index, index)
+        local byte = string.byte(character)
+        local encoded = KHSCII_PUNCTUATION[character]
+        if character >= "a" and character <= "z" then
+            encoded = byte - 0x1C
+        elseif character >= "A" and character <= "Z" then
+            encoded = byte - 0x16
+        elseif character >= "0" and character <= "9" then
+            encoded = byte - 0x0F
+        end
+        table.insert(result, encoded or 0x01)
+    end
+    table.insert(result, 0x00)
+    while #result < capacity do table.insert(result, 0x00) end
+    return result
+end
+
+local function initializeLoadoutPrompt(quiet)
+    loadoutPromptAvailable = false
+    if not CONFIG.actionLoadoutPrompt then return false end
+
+    local expectedBoxColor = BASE_ADDR + ADDRESS.promptColorBox
+    local expectedTextColor = BASE_ADDR + ADDRESS.promptColorText
+    local actualBoxColor = ReadLong(ADDRESS.promptBox + 0xB88)
+    local actualTextColor = ReadLong(ADDRESS.promptBox + 0xB90)
+    local hasSteamPointers = actualBoxColor == expectedBoxColor
+        and actualTextColor == expectedTextColor
+    local isUninitialized = actualBoxColor == 0 and actualTextColor == 0
+    if not hasSteamPointers and not isUninitialized then
+        local mismatchKey = string.format("%X:%X",
+            actualBoxColor, actualTextColor)
+        if loadoutPromptMismatchKey ~= mismatchKey then
+            ConsolePrint(string.format(
+                "[JokCombat:loadout] prompt slot is currently owned by "
+                .. "another layout; HUD deferred (box=0x%X text=0x%X).",
+                actualBoxColor, actualTextColor))
+            loadoutPromptMismatchKey = mismatchKey
+        end
+        return false
+    end
+
+    loadoutPromptAvailable = true
+    loadoutPromptMismatchKey = nil
+    if isUninitialized and not quiet then
+        log("HUD prompt slot is empty; lazy initialization ready.")
+    end
+    return true
+end
+
+local function currentLoadoutMenuGroup()
+    return LOADOUT_MENU_GROUPS[loadoutMenuGroup]
+        or LOADOUT_MENU_GROUPS.l2
+end
+
+local function showLoadoutPrompt()
+    if not loadoutMenuOpen then return end
+    -- A freshly loaded area commonly leaves the reserved notification slot at
+    -- 0/0 until its first use. Revalidate here and initialize the known Steam
+    -- pointers only when the JokCombat editor actually needs the box.
+    if not initializeLoadoutPrompt(true) then return end
+    local group = currentLoadoutMenuGroup()
+    local slot = group.slots[loadoutMenuIndex]
+    local action = ACTION_BY_ID[loadout[slot.id]] or ACTION_BY_ID.none
+    local title = string.format("Action Loadout %s %d/%d",
+        group.label, loadoutMenuIndex, #group.slots)
+
+    WriteArray(ADDRESS.promptText, getKHSCII(title, 0x20))
+    WriteArray(ADDRESS.promptText + 0x70,
+        getKHSCII(slot.label, 0x20))
+    WriteArray(ADDRESS.promptText + 0x90,
+        getKHSCII(action.name, 0x20))
+
+    WriteInt(ADDRESS.promptBoxCount, 1)
+    WriteLong(ADDRESS.promptBox + 0x30,
+        BASE_ADDR + ADDRESS.promptText)
+    WriteInt(ADDRESS.promptBox + 0x18, 2)
+    WriteLong(ADDRESS.promptBox + 0x20,
+        BASE_ADDR + ADDRESS.promptText + 0x70)
+    WriteLong(ADDRESS.promptBox + 0x28,
+        BASE_ADDR + ADDRESS.promptText + 0x90)
+    WriteInt(ADDRESS.promptBox + 0x0C, -30000)
+    WriteFloat(ADDRESS.promptBox + 0xB80, 1.0)
+    WriteLong(ADDRESS.promptBox + 0xB88,
+        BASE_ADDR + ADDRESS.promptColorBox)
+    WriteLong(ADDRESS.promptBox + 0xB90,
+        BASE_ADDR + ADDRESS.promptColorText)
+    WriteInt(ADDRESS.promptBox, 1)
+end
+
+local function hideLoadoutPrompt()
+    if not loadoutPromptAvailable then return end
+    WriteInt(ADDRESS.promptBox + 0x0C, 0)
+    WriteInt(ADDRESS.promptBox, 0)
+    WriteInt(ADDRESS.promptBoxCount, 0)
+end
+
+local function hideOwnedLoadoutPrompt()
+    if not loadoutPromptAvailable then return end
+    if ReadLong(ADDRESS.promptBox + 0x30)
+        ~= BASE_ADDR + ADDRESS.promptText then return end
+    local signature = getKHSCII("Action Loadout", 0x0F)
+    for index = 1, #signature - 1 do
+        if ReadByte(ADDRESS.promptText + index - 1) ~= signature[index] then
+            return
+        end
+    end
+    hideLoadoutPrompt()
+end
+
+local function printLoadoutMenu()
+    local group = currentLoadoutMenuGroup()
+    ConsolePrint("[JokCombat:loadout] ------------------------------")
+    ConsolePrint("[JokCombat:loadout] " .. group.label .. " slots")
+    for index, slot in ipairs(group.slots) do
+        local action = ACTION_BY_ID[loadout[slot.id]] or ACTION_BY_ID.none
+        ConsolePrint(string.format("[JokCombat:loadout] %s %d. %-14s -> %s",
+            index == loadoutMenuIndex and ">" or " ", index,
+            slot.label, action.name))
+    end
+    ConsolePrint(
+        "[JokCombat:loadout] D-pad Up/Down: slot; Left/Right: ability.")
+    ConsolePrint(string.format(
+        "[JokCombat:loadout] Repeat L2+R2+D-pad %s to save/close.",
+        group.openDirection))
+    ConsolePrint(
+        "[JokCombat:loadout] With L2+R2: Left/Up/Right switch; Down resets.")
+end
+
+local function cycleLoadoutAction(delta)
+    local group = currentLoadoutMenuGroup()
+    local slot = group.slots[loadoutMenuIndex]
+    local currentIndex = ACTION_INDEX_BY_ID[loadout[slot.id]] or 1
+    local nextIndex = ((currentIndex - 1 + delta) % #ACTION_CATALOG) + 1
+    loadout[slot.id] = ACTION_CATALOG[nextIndex].id
+    saveActionLoadout()
+    showLoadoutPrompt()
+    local action = ACTION_CATALOG[nextIndex]
+    ConsolePrint(string.format("[JokCombat:loadout] %s -> %s",
+        slot.label, action.name))
 end
 
 local function lowerSyntheticAttackCommand()
@@ -281,7 +713,12 @@ end
 local function isGroundRouteValue(value, normal)
     return value == normal or value == 0xC8 or value == 0xC9
         or value == 0xCA or value == 0xCB
-        or value == STUN_IMPACT_ANIMATION
+        or ROUTABLE_ACTION_ANIMATION[value] == true
+end
+
+local function isAirRouteValue(value, normal)
+    return value == normal or value == 0xCC or value == 0xCD
+        or value == 0xCE or ROUTABLE_ACTION_ANIMATION[value] == true
 end
 
 local function restoreGroundActionRoute()
@@ -379,9 +816,122 @@ local function updateGroundActionRoute(player)
     return false
 end
 
+local function restoreAirActionRoute()
+    for _, entry in ipairs(AIR_ACTION_ROUTE) do
+        local current = ReadByte(entry.address)
+        if isAirRouteValue(current, entry.normal)
+            and current ~= entry.normal then
+            WriteByte(entry.address, entry.normal)
+        end
+    end
+    airRouteFrames = 0
+    airRouteAnimation = nil
+    airRouteKind = nil
+    airRouteSourceAnimation = nil
+    airRouteSourceTime = 0.0
+end
+
+local function normalizeAirActionRoute()
+    local valid = true
+    for _, entry in ipairs(AIR_ACTION_ROUTE) do
+        local current = ReadByte(entry.address)
+        if not isAirRouteValue(current, entry.normal) then
+            ConsolePrint(string.format(
+                "[JokCombat:route] %s RVA=0x%X has unexpected byte 0x%02X; "
+                .. "forced aerial routing disabled.",
+                entry.name, entry.address, current))
+            valid = false
+        elseif current ~= entry.normal then
+            WriteByte(entry.address, entry.normal)
+        end
+    end
+    airRouteFrames = 0
+    airRouteAnimation = nil
+    airRouteKind = nil
+    airRouteSourceAnimation = nil
+    airRouteSourceTime = 0.0
+    airRouteAvailable = valid
+    return valid
+end
+
+local function beginAirActionRoute(kind, desiredAnimation, player)
+    if not airRouteAvailable or desiredAnimation == nil then return false end
+
+    restoreAirActionRoute()
+    for _, entry in ipairs(AIR_ACTION_ROUTE) do
+        local current = ReadByte(entry.address)
+        if current ~= entry.normal then
+            ConsolePrint(string.format(
+                "[JokCombat:route] %s changed to 0x%02X before routing; "
+                .. "forced aerial routing disabled.", entry.name, current))
+            airRouteAvailable = false
+            restoreAirActionRoute()
+            return false
+        end
+    end
+
+    for _, entry in ipairs(AIR_ACTION_ROUTE) do
+        if entry.normal ~= desiredAnimation then
+            WriteByte(entry.address, desiredAnimation)
+        end
+    end
+    airRouteFrames = CONFIG.groundRouteFrames
+    airRouteAnimation = desiredAnimation
+    airRouteKind = kind
+    airRouteSourceAnimation = player.animation
+    airRouteSourceTime = player.time
+    log(string.format(
+        "%s route armed: all aerial entries -> 0x%02X",
+        kind, desiredAnimation))
+    return true
+end
+
+local function updateAirActionRoute(player)
+    if airRouteFrames <= 0 or airRouteAnimation == nil then return false end
+
+    local accepted = player.animation == airRouteAnimation
+        and (player.animation ~= airRouteSourceAnimation
+            or player.time + 0.5 < airRouteSourceTime)
+    if accepted then
+        log(string.format(
+            "%s route accepted: anim=0x%02X time=%.2f",
+            airRouteKind, player.animation, player.time))
+        restoreAirActionRoute()
+        return true
+    end
+
+    airRouteFrames = airRouteFrames - 1
+    if airRouteFrames <= 0 then
+        log(string.format(
+            "%s route timed out before anim=0x%02X was observed.",
+            airRouteKind, airRouteAnimation))
+        restoreAirActionRoute()
+    end
+    return false
+end
+
+local function restoreActionRoutes()
+    restoreGroundActionRoute()
+    restoreAirActionRoute()
+end
+
+local function beginActionRoute(kind, action, player)
+    if action == nil or action.animation == nil then return false end
+    if action.context == "air" then
+        return beginAirActionRoute(kind, action.animation, player)
+    end
+    return beginGroundActionRoute(kind, action.animation, player)
+end
+
+local function updateActionRoutes(player)
+    local groundAccepted = updateGroundActionRoute(player)
+    local airAccepted = updateAirActionRoute(player)
+    return groundAccepted or airAccepted
+end
+
 local function restoreAllPatches()
     clearSyntheticAttackCommand(false)
-    restoreGroundActionRoute()
+    restoreActionRoutes()
     restoreIfKnown(ADDRESS.forceCircleBranch, NORMAL.forceCircle,
         { 0x74, 0x72 })
     restoreIfKnown(ADDRESS.forceSquareBranch, NORMAL.forceSquare,
@@ -394,6 +944,16 @@ local function restoreAllPatches()
         { 0x74, 0xEB })
     restoreIfKnown(ADDRESS.dodgeAvailabilityBranch,
         NORMAL.dodgeAvailability, { 0x84, 0x82 })
+    restoreIfKnown(ADDRESS.dpadUpControlMap, NORMAL.dpadUpControlMap,
+        { 0xFF, 0xFE })
+    restoreIfKnown(ADDRESS.dpadRightControlMap, NORMAL.dpadRightControlMap,
+        { 0xFF, 0xFE })
+    restoreIfKnown(ADDRESS.dpadDownControlMap, NORMAL.dpadDownControlMap,
+        { 0xFF, 0xFE })
+    restoreIfKnown(ADDRESS.dpadLeftControlMap, NORMAL.dpadLeftControlMap,
+        { 0xFF, 0xFE })
+    restoreIfKnown(ADDRESS.triangleControlMap, NORMAL.triangleControlMap,
+        { 0xFF, 0xFE })
     restoreIfKnown(ADDRESS.circleControlMap, NORMAL.circleControlMap,
         { 0xFF, 0x07, 0xFE })
     restoreIfKnown(ADDRESS.attackControlMap, NORMAL.attackControlMap,
@@ -452,6 +1012,10 @@ local function pressStarted(buttons, mask)
     return (buttons & mask) ~= 0 and (lastButtons & mask) == 0
 end
 
+local function dpadStarted(dpad, mask)
+    return (dpad & mask) ~= 0 and (lastDpad & mask) == 0
+end
+
 local function chordStarted(buttons, first, second)
     local chordHeld = (buttons & first) ~= 0 and (buttons & second) ~= 0
     local chordWasHeld = (lastButtons & first) ~= 0
@@ -482,10 +1046,10 @@ local function clearFinisherBuffer()
 end
 
 local function clearTransitionCheck()
-    -- A transition owns any temporary ground route for its whole retry window.
+    -- A transition owns any temporary action route for its whole retry window.
     -- Restoring here also makes Guard, Dodge, jump and reload cancellation safe.
     local restorePhysicalAttackMap = transitionUsesPhysicalInput
-    if canRun then restoreGroundActionRoute() end
+    if canRun then restoreActionRoutes() end
     clearSyntheticAttackCommand(false)
     transitionCheckFrames = 0
     transitionSourceAnimation = nil
@@ -520,9 +1084,9 @@ local function linkMatchesExpectation(player, kind, expectedAnimation,
 end
 
 local function usesFinisherComboPosition(kind, expectedAnimation)
-    return kind == "finisher" or kind == STUN_IMPACT_KIND
+    return kind == "finisher"
         or expectedAnimation == 0xCB
-        or expectedAnimation == STUN_IMPACT_ANIMATION
+        or FINISHER_ACTION_ANIMATION[expectedAnimation] == true
 end
 
 local function armTransitionCheck(player, kind, expectedAnimation,
@@ -667,14 +1231,6 @@ end
 local function updateTransitionCheck(player)
     if transitionCheckFrames <= 0 or transitionKind == nil then return nil end
 
-    if player.airborne ~= transitionWasAirborne
-        or ReadByte(ADDRESS.commandMenuSlot) ~= 0 then
-        log(transitionKind .. " persistent command cancelled by state change.")
-        queuedNormalInput = false
-        clearTransitionCheck()
-        return nil
-    end
-
     local accepted = linkMatchesExpectation(
         player, transitionKind, transitionExpectedAnimation,
         transitionSourceAnimation, transitionSourceTime)
@@ -695,6 +1251,17 @@ local function updateTransitionCheck(player)
             transitionKind, transitionPulseCount))
         clearTransitionCheck()
         return acceptedKind
+    end
+
+    -- Evaluate the expected animation before the ground/air guard. Aerial
+    -- Sweep legitimately starts on the ground and becomes airborne as D6 is
+    -- accepted; rejecting the state change first would hide a valid dispatch.
+    if player.airborne ~= transitionWasAirborne
+        or ReadByte(ADDRESS.commandMenuSlot) ~= 0 then
+        log(transitionKind .. " persistent command cancelled by state change.")
+        queuedNormalInput = false
+        clearTransitionCheck()
+        return nil
     end
 
     transitionCheckFrames = transitionCheckFrames - 1
@@ -745,10 +1312,9 @@ local function updateTransitionCheck(player)
         WriteByte(ADDRESS.comboPosition, transitionExpectedComboPosition)
     end
 
-    -- A direct request that already owns a physical Attack edge only needs the
-    -- transition monitor. Triangle's parked path sources that edge from its
-    -- control mapping; Stun Impact uses a pre-armed physical Cross. Neither
-    -- path may also pulse the command-menu integers, or the request can replay.
+    -- A request that already owns a physical X edge only needs the transition
+    -- monitor. Configurable X slots use a pre-armed action table and must never
+    -- also pulse the command-menu integers, or one input can replay twice.
     if transitionUsesPhysicalInput then return nil end
 
     -- v0.2.4 repeatedly wrote 1, leaving both trigger integers high after a
@@ -851,113 +1417,6 @@ local function prepareGroundFinisher()
         WriteByte(ADDRESS.comboPosition, finisherPosition)
     end
     return true, finisherPosition, maximum
-end
-
-local function requestStunImpact(player)
-    if player.airborne then return false end
-
-    if player.animation == STUN_IMPACT_ANIMATION then
-        -- Close the accepted request immediately if a second chord arrives on
-        -- D8. Restoring the table here prevents that same Cross from routing a
-        -- second Stun Impact while the first one is still active.
-        if transitionKind == STUN_IMPACT_KIND then
-            clearTransitionCheck()
-        elseif groundRouteKind == STUN_IMPACT_KIND
-            or groundRouteKind == STUN_IMPACT_PRIME_KIND then
-            restoreGroundActionRoute()
-        end
-        log("Stun Impact input ignored: Stun Impact is already active.")
-        return true
-    end
-
-    if transitionKind == STUN_IMPACT_KIND
-        or groundRouteKind == STUN_IMPACT_KIND then
-        log("Stun Impact input ignored: request already pending.")
-        return true
-    end
-
-    local position, maximum = readGroundComboState()
-    if position == nil then
-        log("Stun Impact request ignored: combo state is unavailable.")
-        return true
-    end
-
-    local routeWasPrimed = groundRouteKind == STUN_IMPACT_PRIME_KIND
-        and groundRouteAnimation == STUN_IMPACT_ANIMATION
-    if not routeWasPrimed then
-        -- LuaBackend observes a new Cross after the native dispatcher has
-        -- already selected its action. Never append D8 to that already-chosen
-        -- C8: require L2 to have primed the table on an earlier frame instead.
-        log("Stun Impact input ignored: hold L2 before pressing Cross.")
-        return true
-    end
-
-    -- The chord owns the current attack intent. It does not globally change
-    -- Stun Impact's vanilla 30 percent selector: the table was routed to D8 on
-    -- an earlier L2-only frame, before this physical Cross reached the native
-    -- dispatcher. Promote that bounded prime into the observed request without
-    -- restoring the table between the two phases.
-    clearComboIntent()
-    clearDeferredAttackCommand()
-    groundRouteKind = STUN_IMPACT_KIND
-    groundRouteSourceAnimation = player.animation
-    groundRouteSourceTime = player.time
-
-    local finisherPosition = maximum + 1
-    WriteByte(ADDRESS.comboPosition, finisherPosition)
-    groundRouteFrames = math.max(
-        groundRouteFrames, CONFIG.stunImpactRequestFrames)
-    armTransitionCheck(player, STUN_IMPACT_KIND,
-        STUN_IMPACT_ANIMATION, finisherPosition, true)
-    transitionCheckFrames = math.max(
-        transitionCheckFrames, CONFIG.stunImpactRequestFrames)
-    log(string.format(
-        "Stun Impact requested by L2+Cross: combo=%d max=%d route=prearmed",
-        finisherPosition, maximum))
-    return true
-end
-
-local function updateStunImpactPrime(player, buttons)
-    local l2Held = (buttons & BUTTON.L2) ~= 0
-    local crossHeld = (buttons & BUTTON.CROSS) ~= 0
-    local circleHeld = (buttons & BUTTON.CIRCLE) ~= 0
-    local squareHeld = (buttons & BUTTON.SQUARE) ~= 0
-    local canStayPrimed = CONFIG.stunImpactOnL2Cross
-        and l2Held and not player.airborne
-        and player.animation ~= STUN_IMPACT_ANIMATION
-        and ReadByte(ADDRESS.commandMenuSlot) == 0
-        and not circleHeld and not squareHeld
-
-    if groundRouteKind == STUN_IMPACT_PRIME_KIND then
-        if not canStayPrimed or transitionKind ~= nil
-            or deferredLinkKind ~= nil then
-            restoreGroundActionRoute()
-            log("Stun Impact L2 prime cancelled by state change.")
-            return false
-        end
-        groundRouteFrames = math.max(
-            groundRouteFrames, CONFIG.stunImpactRequestFrames)
-        return true
-    end
-
-    -- A route created on the same frame as Cross is too late: C8 has already
-    -- been selected. Initial priming therefore requires an L2-only frame. This
-    -- also prevents pressing L2 while Cross is already held from converting a
-    -- vanilla attack into a delayed special.
-    if not canStayPrimed or crossHeld
-        or transitionKind ~= nil or deferredLinkKind ~= nil
-        or groundRouteKind ~= nil then
-        return false
-    end
-
-    local routeArmed = beginGroundActionRoute(
-        STUN_IMPACT_PRIME_KIND, STUN_IMPACT_ANIMATION, player)
-    if routeArmed then
-        groundRouteFrames = math.max(
-            groundRouteFrames, CONFIG.stunImpactRequestFrames)
-        log("Stun Impact route primed by L2; waiting for Cross.")
-    end
-    return routeArmed
 end
 
 local function queueAttackBuffer(player, comboPosition, expectedAnimation)
@@ -1085,10 +1544,345 @@ local function cancelPlayer(player, label)
         label, player.animation, player.secondary, player.time))
 end
 
+local function actionKind(action)
+    return ACTION_KIND_PREFIX .. action.id
+end
+
+local function actionPrimeKind(slot, action)
+    return ACTION_PRIME_PREFIX .. slot.id .. ":" .. action.id
+end
+
+local function isActionPrimeKind(kind)
+    return type(kind) == "string"
+        and kind:sub(1, #ACTION_PRIME_PREFIX) == ACTION_PRIME_PREFIX
+end
+
+local function actionMatchesContext(action, player)
+    if action == nil or action.animation == nil then return false end
+    if action.context == "air" then return player.airborne end
+    return action.context == "ground" and not player.airborne
+end
+
+local function actionRouteState(action)
+    if action.context == "air" then
+        return airRouteKind, airRouteAnimation
+    end
+    return groundRouteKind, groundRouteAnimation
+end
+
+local function promotePrimedActionRoute(action, kind, player)
+    if action.context == "air" then
+        airRouteKind = kind
+        airRouteSourceAnimation = player.animation
+        airRouteSourceTime = player.time
+        airRouteFrames = math.max(airRouteFrames, CONFIG.actionRequestFrames)
+    else
+        groundRouteKind = kind
+        groundRouteSourceAnimation = player.animation
+        groundRouteSourceTime = player.time
+        groundRouteFrames = math.max(
+            groundRouteFrames, CONFIG.actionRequestFrames)
+    end
+end
+
+local function requestActionAbility(player, slot, action, usesPhysicalInput)
+    if action == nil or action.animation == nil then
+        log(slot.label .. " has no Action Ability assigned.")
+        return false
+    end
+    if not actionMatchesContext(action, player) then
+        log(string.format("%s ignored: %s is %s-only.",
+            slot.label, action.name, action.context))
+        return false
+    end
+    if ReadByte(ADDRESS.commandMenuSlot) ~= 0 then
+        log(slot.label .. " ignored: reaction command is active.")
+        return true
+    end
+
+    local kind = actionKind(action)
+    local currentRouteKind, currentRouteAnimation = actionRouteState(action)
+    if player.animation == action.animation then
+        if transitionKind == kind then clearTransitionCheck() end
+        if currentRouteKind == kind or isActionPrimeKind(currentRouteKind) then
+            restoreActionRoutes()
+        end
+        log(action.name .. " input ignored: the same action is already active.")
+        return true
+    end
+    if transitionKind == kind or currentRouteKind == kind then
+        log(action.name .. " input ignored: request already pending.")
+        return true
+    end
+
+    local neutral = player.control == 0x03 and not isAttackContext(player)
+    local canCancel = isCancelableAttack(player)
+    if not usesPhysicalInput and not neutral and not canCancel then
+        log(string.format(
+            "%s ignored: current action is outside its link window (0x%02X %.2f).",
+            action.name, player.animation, player.time))
+        return true
+    end
+
+    local primeKind = actionPrimeKind(slot, action)
+    local routeWasPrimed = currentRouteKind == primeKind
+        and currentRouteAnimation == action.animation
+    if usesPhysicalInput and not routeWasPrimed then
+        log(slot.label .. " ignored: hold the modifier before pressing X.")
+        return true
+    end
+
+    local comboPosition = nil
+    local maximum = nil
+    if action.context == "ground" then
+        local position
+        position, maximum = readGroundComboState()
+        if position == nil then
+            log(action.name .. " ignored: combo state is unavailable.")
+            return true
+        end
+        if action.finisher then
+            comboPosition = maximum + 1
+        else
+            comboPosition = math.min(math.max(position, 1), maximum)
+        end
+    end
+
+    clearComboIntent()
+    clearDeferredAttackCommand()
+    if not usesPhysicalInput then
+        clearTransitionCheck()
+        if canCancel then cancelPlayer(player, "action-" .. action.id) end
+    end
+
+    if comboPosition ~= nil then
+        WriteByte(ADDRESS.comboPosition, comboPosition)
+    end
+
+    local routeArmed = routeWasPrimed
+    if routeWasPrimed then
+        promotePrimedActionRoute(action, kind, player)
+    else
+        routeArmed = beginActionRoute(kind, action, player)
+    end
+    if not routeArmed then
+        log(action.name .. " ignored: its action route is unavailable.")
+        return true
+    end
+
+    armTransitionCheck(player, kind, action.animation,
+        comboPosition, usesPhysicalInput)
+    transitionCheckFrames = math.max(
+        transitionCheckFrames, CONFIG.actionRequestFrames)
+    if action.context == "air" then
+        airRouteFrames = math.max(airRouteFrames, CONFIG.actionRequestFrames)
+    else
+        groundRouteFrames = math.max(
+            groundRouteFrames, CONFIG.actionRequestFrames)
+    end
+    log(string.format(
+        "%s requested by %s: anim=0x%02X context=%s route=%s%s",
+        action.name, slot.label, action.animation, action.context,
+        routeWasPrimed and "prearmed" or "synthetic",
+        action.context == "ground"
+            and string.format(" combo=%d max=%d", comboPosition, maximum)
+            or ""))
+    return true
+end
+
+local function updateCrossActionPrime(player, buttons)
+    local l2Held = (buttons & BUTTON.L2) ~= 0
+    local r2Held = (buttons & BUTTON.R2) ~= 0
+    local crossHeld = (buttons & BUTTON.CROSS) ~= 0
+    local otherFaceHeld = (buttons & (BUTTON.TRIANGLE
+        | BUTTON.CIRCLE | BUTTON.SQUARE)) ~= 0
+    local slot = nil
+    if l2Held and not r2Held then
+        slot = ACTION_SLOT_BY_ID.l2_cross
+    elseif r2Held and not l2Held then
+        slot = ACTION_SLOT_BY_ID.r2_cross
+    elseif l2Held and r2Held then
+        slot = ACTION_SLOT_BY_ID.dual_cross
+    end
+    local action = slot ~= nil
+        and ACTION_BY_ID[loadout[slot.id]] or nil
+    local desiredPrime = action ~= nil and action.animation ~= nil
+        and actionPrimeKind(slot, action) or nil
+
+    local currentPrimeKind = nil
+    if isActionPrimeKind(groundRouteKind) then
+        currentPrimeKind = groundRouteKind
+    elseif isActionPrimeKind(airRouteKind) then
+        currentPrimeKind = airRouteKind
+    end
+
+    local canStayPrimed = CONFIG.actionLoadout and desiredPrime ~= nil
+        and actionMatchesContext(action, player)
+        and player.animation ~= action.animation
+        and ReadByte(ADDRESS.commandMenuSlot) == 0
+        and not otherFaceHeld
+        and transitionKind == nil and deferredLinkKind == nil
+
+    if currentPrimeKind ~= nil then
+        if currentPrimeKind ~= desiredPrime or not canStayPrimed then
+            restoreActionRoutes()
+            log("Action Ability X prime cancelled by state change.")
+            return false
+        end
+        if action.context == "air" then
+            airRouteFrames = math.max(
+                airRouteFrames, CONFIG.actionRequestFrames)
+        else
+            groundRouteFrames = math.max(
+                groundRouteFrames, CONFIG.actionRequestFrames)
+        end
+        return true
+    end
+
+    -- The physical X route must exist one frame before X reaches KH1's action
+    -- dispatcher. Pressing modifier and X together therefore stays native and
+    -- the log asks the player to hold the modifier first.
+    if not canStayPrimed or crossHeld
+        or groundRouteKind ~= nil or airRouteKind ~= nil then
+        return false
+    end
+
+    local routeArmed = beginActionRoute(desiredPrime, action, player)
+    if routeArmed then
+        if action.context == "air" then
+            airRouteFrames = math.max(
+                airRouteFrames, CONFIG.actionRequestFrames)
+        else
+            groundRouteFrames = math.max(
+                groundRouteFrames, CONFIG.actionRequestFrames)
+        end
+        log(string.format("%s primed by %s; waiting for X.",
+            action.name, slotModifierName(slot)))
+    end
+    return routeArmed
+end
+
+local function updateLoadoutMenu(buttons, dpad)
+    if not CONFIG.actionLoadoutMenu then return false end
+    local bothShoulders = (buttons & BUTTON.L2) ~= 0
+        and (buttons & BUTTON.R2) ~= 0
+
+    if bothShoulders and dpadStarted(dpad, DPAD.DOWN) then
+        resetLoadoutToDefaults()
+        saveActionLoadout()
+        if loadoutMenuOpen then
+            loadoutMenuIndex = 1
+            showLoadoutPrompt()
+            printLoadoutMenu()
+        end
+        ConsolePrint(
+            "[JokCombat:loadout] all 11 slots restored to JokCombat defaults.")
+        return true
+    end
+
+    local requestedGroup = nil
+    if bothShoulders and dpadStarted(dpad, DPAD.LEFT) then
+        requestedGroup = "l2"
+    elseif bothShoulders and dpadStarted(dpad, DPAD.UP) then
+        requestedGroup = "dual"
+    elseif bothShoulders and dpadStarted(dpad, DPAD.RIGHT) then
+        requestedGroup = "r2"
+    end
+
+    if requestedGroup ~= nil then
+        if loadoutMenuOpen and loadoutMenuGroup == requestedGroup then
+            saveActionLoadout()
+            loadoutMenuOpen = false
+            hideLoadoutPrompt()
+            ConsolePrint("[JokCombat:loadout] saved; editor closed.")
+        else
+            if not loadoutMenuOpen then
+                clearComboIntent()
+                clearTransitionCheck()
+                clearDeferredAttackCommand()
+                restoreActionRoutes()
+                forceCircleFrames = 0
+                forceSquareFrames = 0
+                forceGuardFrames = 0
+            else
+                saveActionLoadout()
+            end
+            loadoutMenuGroup = requestedGroup
+            loadoutMenuIndex = 1
+            loadoutMenuOpen = true
+            showLoadoutPrompt()
+            ConsolePrint(string.format(
+                "[JokCombat:loadout] %s editor opened.",
+                currentLoadoutMenuGroup().label))
+            printLoadoutMenu()
+        end
+        return true
+    end
+
+    if not loadoutMenuOpen then return false end
+
+    local group = currentLoadoutMenuGroup()
+    local selectionChanged = false
+    if dpadStarted(dpad, DPAD.UP) then
+        loadoutMenuIndex = ((loadoutMenuIndex - 2) % #group.slots) + 1
+        selectionChanged = true
+    elseif dpadStarted(dpad, DPAD.DOWN) then
+        loadoutMenuIndex = (loadoutMenuIndex % #group.slots) + 1
+        selectionChanged = true
+    elseif dpadStarted(dpad, DPAD.LEFT) then
+        cycleLoadoutAction(-1)
+    elseif dpadStarted(dpad, DPAD.RIGHT) then
+        cycleLoadoutAction(1)
+    end
+
+    if selectionChanged then
+        showLoadoutPrompt()
+        printLoadoutMenu()
+    end
+    return true
+end
+
+local function updateLoadoutMenuRouting(menuOpen)
+    local map = menuOpen and 0xFE or 0xFF
+    setByte("dpadUpControlMap", ADDRESS.dpadUpControlMap, map,
+        { 0xFF, 0xFE })
+    setByte("dpadRightControlMap", ADDRESS.dpadRightControlMap, map,
+        { 0xFF, 0xFE })
+    setByte("dpadDownControlMap", ADDRESS.dpadDownControlMap, map,
+        { 0xFF, 0xFE })
+    setByte("dpadLeftControlMap", ADDRESS.dpadLeftControlMap, map,
+        { 0xFF, 0xFE })
+
+    if menuOpen then
+        setByte("triangleControlMap", ADDRESS.triangleControlMap, 0xFE,
+            { 0xFF, 0xFE })
+        setByte("circleControlMap", ADDRESS.circleControlMap, 0xFE,
+            { 0xFF, 0x07, 0xFE })
+        setByte("attackControlMap", ADDRESS.attackControlMap, 0xFE,
+            { 0xFF, CONTROL_INDEX.TRIANGLE, 0xFE })
+        setByte("squareControlMap", ADDRESS.squareControlMap, 0xFE,
+            { 0xFF, 0x05, 0xFE })
+    end
+    return not faulted
+end
+
+local function updateModifierFaceRouting(buttons)
+    local l2Held = (buttons & BUTTON.L2) ~= 0
+    local r2Held = (buttons & BUTTON.R2) ~= 0
+    local actionModifierHeld = l2Held or r2Held
+    local reactionActive = ReadByte(ADDRESS.commandMenuSlot) ~= 0
+    return setByte("triangleControlMap", ADDRESS.triangleControlMap,
+        actionModifierHeld and not reactionActive and 0xFE
+            or NORMAL.triangleControlMap,
+        { 0xFF, 0xFE })
+end
+
 local function updateAttackControlRouting()
     if not CONFIG.triangleGroundFinisher then
         forceTriangleAttackFrames = 0
-        return true
+        return setByte("attackControlMap", ADDRESS.attackControlMap,
+            NORMAL.attackControlMap,
+            { 0xFF, CONTROL_INDEX.TRIANGLE, 0xFE })
     end
     return setByte("attackControlMap", ADDRESS.attackControlMap,
         forceTriangleAttackFrames > 0 and CONTROL_INDEX.TRIANGLE
@@ -1098,23 +1892,36 @@ end
 
 local function updateDefenseRouting(buttons, guardAvailable, dodgeActive)
     local l2Held = (buttons & BUTTON.L2) ~= 0
+    local r2Held = (buttons & BUTTON.R2) ~= 0
     local circleHeld = (buttons & BUTTON.CIRCLE) ~= 0
     local squareHeld = (buttons & BUTTON.SQUARE) ~= 0
-    local guardChord = l2Held and circleHeld
+    local anyModifierHeld = l2Held or r2Held
+    local guardChord = l2Held and not r2Held and circleHeld
     local dodgeSquareHeld = squareHeld and not dodgeActive
+        and not anyModifierHeld
 
     local circleMap = NORMAL.circleControlMap
     local squareMap = NORMAL.squareControlMap
-    if CONFIG.guardOnL2Circle and l2Held then
+    if l2Held and r2Held then
+        -- Both shoulders belong to the editor chord; no face action leaks into
+        -- gameplay while the player prepares either loadout editor chord.
+        circleMap = 0xFE
+        squareMap = 0xFE
+    elseif CONFIG.guardOnL2Circle and l2Held then
         -- The override table is action -> physical control. Disable the native
         -- Circle/jump action and source the virtual Square/defense action from
         -- physical Circle (control index 0x05).
         circleMap = 0xFE
+        squareMap = 0xFE
         if circleHeld then
             squareMap = guardAvailable and 0x05 or 0xFE
         end
+    elseif r2Held then
+        -- R2+Circle and R2+Square are configurable Action Ability slots.
+        circleMap = 0xFE
+        squareMap = 0xFE
     end
-    if dodgeActive and squareHeld and not guardChord then
+    if dodgeActive and squareHeld and not anyModifierHeld then
         -- Once DC has begun, physical Square must not feed the shared defense
         -- action again. Guard remains available through its Circle mapping.
         squareMap = 0xFE
@@ -1124,8 +1931,7 @@ local function updateDefenseRouting(buttons, guardAvailable, dodgeActive)
     setByte("squareControlMap", ADDRESS.squareControlMap, squareMap,
         { 0xFF, 0x05, 0xFE })
 
-    local selectGuard = (CONFIG.guardOnL2Circle and l2Held
-        and not (squareHeld and not circleHeld)) or forceGuardFrames > 0
+    local selectGuard = guardChord or forceGuardFrames > 0
     setByte("guardSelection", ADDRESS.guardSelectionBranch,
         selectGuard and 0xEB or 0x74, { 0x74, 0xEB })
 
@@ -1146,7 +1952,7 @@ local function updateDefenseRouting(buttons, guardAvailable, dodgeActive)
     -- was selected only after Square was observed, so a stationary first press
     -- could already have entered Guard and a second press appeared to roll.
     if CONFIG.fixedDodgeOnSquare and forceGuardFrames == 0
-        and (not l2Held or (squareHeld and not circleHeld)) then
+        and (not anyModifierHeld or forceSquareFrames > 0) then
         guardAvailability = 0xEB
     end
     setByte("guardAvailability", ADDRESS.guardAvailabilityBranch,
@@ -1170,6 +1976,12 @@ function _OnInit()
     canRun = false
     faulted = false
     lastButtons = 0
+    lastDpad = 0
+    loadoutMenuOpen = false
+    loadoutMenuGroup = "l2"
+    loadoutMenuIndex = 1
+    loadoutPromptAvailable = false
+    loadoutPromptMismatchKey = nil
     clearComboIntent()
     clearTransitionCheck()
     clearDeferredAttackCommand()
@@ -1189,6 +2001,12 @@ function _OnInit()
     groundRouteKind = nil
     groundRouteSourceAnimation = nil
     groundRouteSourceTime = 0.0
+    airRouteAvailable = false
+    airRouteFrames = 0
+    airRouteAnimation = nil
+    airRouteKind = nil
+    airRouteSourceAnimation = nil
+    airRouteSourceTime = 0.0
 
     if not CONFIG.enabled then
         ConsolePrint("JokCombat Combat Prototype is disabled in CONFIG.")
@@ -1217,27 +2035,39 @@ function _OnInit()
         0x74, { 0x74, 0xEB }) and valid
     valid = normalizeByte("dodgeAvailability", ADDRESS.dodgeAvailabilityBranch,
         0x84, { 0x84, 0x82 }) and valid
+    valid = normalizeByte("dpadUpControlMap", ADDRESS.dpadUpControlMap,
+        0xFF, { 0xFF, 0xFE }) and valid
+    valid = normalizeByte("dpadRightControlMap", ADDRESS.dpadRightControlMap,
+        0xFF, { 0xFF, 0xFE }) and valid
+    valid = normalizeByte("dpadDownControlMap", ADDRESS.dpadDownControlMap,
+        0xFF, { 0xFF, 0xFE }) and valid
+    valid = normalizeByte("dpadLeftControlMap", ADDRESS.dpadLeftControlMap,
+        0xFF, { 0xFF, 0xFE }) and valid
+    valid = normalizeByte("triangleControlMap", ADDRESS.triangleControlMap,
+        0xFF, { 0xFF, 0xFE }) and valid
     valid = normalizeByte("circleControlMap", ADDRESS.circleControlMap,
         0xFF, { 0xFF, 0x07, 0xFE }) and valid
-    if CONFIG.triangleGroundFinisher then
-        valid = normalizeByte("attackControlMap", ADDRESS.attackControlMap,
-            0xFF, { 0xFF, CONTROL_INDEX.TRIANGLE, 0xFE }) and valid
-    else
-        restoreIfKnown(ADDRESS.attackControlMap, NORMAL.attackControlMap,
-            { 0xFF, CONTROL_INDEX.TRIANGLE, 0xFE })
-    end
+    valid = normalizeByte("attackControlMap", ADDRESS.attackControlMap,
+        0xFF, { 0xFF, CONTROL_INDEX.TRIANGLE, 0xFE }) and valid
     valid = normalizeByte("squareControlMap", ADDRESS.squareControlMap,
         0xFF, { 0xFF, 0x05, 0xFE }) and valid
     if not valid then return end
 
-    local routeValid = normalizeGroundActionRoute()
+    local groundRouteValid = normalizeGroundActionRoute()
+    local airRouteValid = normalizeAirActionRoute()
+    loadActionLoadout()
+    initializeLoadoutPrompt()
+    hideOwnedLoadoutPrompt()
 
     canRun = true
     ConsolePrint(
         "JokCombat Combat Prototype " .. VERSION
         .. " initialized (Steam GL; combat-only; experimental).")
-    log("ground action route " .. (routeValid and "ready." or
-        "unavailable; combo-position fallback only."))
+    log("ground action route " .. (groundRouteValid and "ready." or
+        "unavailable."))
+    log("aerial action route " .. (airRouteValid and "ready." or
+        "unavailable."))
+    log("Action Loadout: L2+R2+D-pad Left=L2, Up=dual, Right=R2, Down=reset.")
     if staleSyntheticAttack then
         log("cleared stale synthetic Attack flags during reload.")
     end
@@ -1253,12 +2083,16 @@ end
 function _OnFrame()
     if not canRun then return end
     if faulted then
+        if loadoutMenuOpen then hideOwnedLoadoutPrompt() end
+        loadoutMenuOpen = false
         restoreAllPatches()
         return
     end
 
     local player = readPlayer()
     if player == nil then
+        if loadoutMenuOpen then hideOwnedLoadoutPrompt() end
+        loadoutMenuOpen = false
         restoreAllPatches()
         clearComboIntent()
         clearTransitionCheck()
@@ -1266,10 +2100,39 @@ function _OnFrame()
         forceGuardFrames = 0
         forceTriangleAttackFrames = 0
         lastButtons = 0
+        lastDpad = 0
         return
     end
 
     local buttons = ReadByte(ADDRESS.rawButtons)
+    local dpad = ReadByte(ADDRESS.dpadButtons)
+    updateLoadoutMenu(buttons, dpad)
+    local editorChordArmed = (buttons & BUTTON.L2) ~= 0
+        and (buttons & BUTTON.R2) ~= 0
+    updateLoadoutMenuRouting(loadoutMenuOpen or editorChordArmed)
+    if faulted then
+        if loadoutMenuOpen then hideOwnedLoadoutPrompt() end
+        loadoutMenuOpen = false
+        restoreAllPatches()
+        return
+    end
+
+    if loadoutMenuOpen then
+        -- Keep every transient combat branch inert while the editor owns the
+        -- D-pad and face controls. Raw input remains readable by this script.
+        setByte("forceCircle", ADDRESS.forceCircleBranch, NORMAL.forceCircle,
+            { 0x74, 0x72 })
+        setByte("forceSquare", ADDRESS.forceSquareBranch, NORMAL.forceSquare,
+            { 0x84, 0x82 })
+        setByte("airDefense", ADDRESS.airDefenseBranch, NORMAL.airDefense,
+            { 0x85, 0x82 })
+        setByte("guardSelection", ADDRESS.guardSelectionBranch,
+            NORMAL.guardSelection, { 0x74, 0xEB })
+        lastButtons = buttons
+        lastDpad = dpad
+        return
+    end
+
     local abilities = ReadInt(ADDRESS.defenseAbilityFlags)
     local guardAvailable = CONFIG.unlockDefensiveActions
         or (abilities & 0x10) ~= 0
@@ -1291,6 +2154,7 @@ function _OnFrame()
         forceSquareFrames = 0
     end
     updateDefenseRouting(buttons, guardAvailable, dodgeActive)
+    updateModifierFaceRouting(buttons)
     updateAttackControlRouting()
     if faulted then
         restoreAllPatches()
@@ -1298,14 +2162,14 @@ function _OnFrame()
     end
 
     local l2Held = (buttons & BUTTON.L2) ~= 0
+    local r2Held = (buttons & BUTTON.R2) ~= 0
     local circlePressed = pressStarted(buttons, BUTTON.CIRCLE)
     local crossPressed = pressStarted(buttons, BUTTON.CROSS)
     local squarePressed = pressStarted(buttons, BUTTON.SQUARE)
     local trianglePressed = pressStarted(buttons, BUTTON.TRIANGLE)
-    local guardPressed = chordStarted(buttons, BUTTON.L2, BUTTON.CIRCLE)
-    local stunImpactPressed = CONFIG.stunImpactOnL2Cross
-        and l2Held and crossPressed
-    updateStunImpactPrime(player, buttons)
+    local guardPressed = not r2Held
+        and chordStarted(buttons, BUTTON.L2, BUTTON.CIRCLE)
+    updateCrossActionPrime(player, buttons)
     local cancelWindowOpen = isCancelableAttack(player)
     local actionConsumed = false
     local chainWasArmed = groundChainFrames > 0
@@ -1325,22 +2189,23 @@ function _OnFrame()
         clearComboIntent()
         clearTransitionCheck()
         clearDeferredAttackCommand()
-        restoreGroundActionRoute()
+        restoreActionRoutes()
         actionConsumed = true
-    elseif circlePressed and not l2Held then
+    elseif circlePressed and not l2Held and not r2Held then
         -- A normal jump breaks the local ground chain. It only cancels an
         -- attack after the configured link window; it is not universal.
         clearComboIntent()
         clearTransitionCheck()
         clearDeferredAttackCommand()
-        restoreGroundActionRoute()
+        restoreActionRoutes()
         actionConsumed = true
         if CONFIG.groundToAirJumpBranch and not player.airborne
             and cancelWindowOpen then
             cancelPlayer(player, "jump")
             forceCircleFrames = CONFIG.forcedInputFrames
         end
-    elseif CONFIG.fixedDodgeOnSquare and squarePressed and dodgeAvailable then
+    elseif CONFIG.fixedDodgeOnSquare and squarePressed and dodgeAvailable
+        and not l2Held and not r2Held then
         actionConsumed = true
         if dodgeActive then
             -- Dodge Roll is intentionally not self-cancellable: a second
@@ -1352,7 +2217,7 @@ function _OnFrame()
             clearComboIntent()
             clearTransitionCheck()
             clearDeferredAttackCommand()
-            restoreGroundActionRoute()
+            restoreActionRoutes()
         end
         if not dodgeActive and CONFIG.defensiveCancels
             and (CONFIG.universalDodgeCancel or cancelWindowOpen) then
@@ -1361,15 +2226,46 @@ function _OnFrame()
         end
     end
 
-    -- Holding L2 on an earlier frame pre-arms D8; the later physical Cross can
-    -- therefore be selected directly by the native dispatcher, without first
-    -- entering C8. In the air the chord falls through to the normal aerial
-    -- Cross behavior because Stun Impact is a ground finisher.
-    if not actionConsumed and stunImpactPressed and not player.airborne then
-        if ReadByte(ADDRESS.commandMenuSlot) ~= 0 then
-            log("Stun Impact input ignored: reaction command is active.")
-        else
-            actionConsumed = requestStunImpact(player)
+    -- The exact shoulder layer selects one of eleven configurable slots. X uses
+    -- the proven pre-armed physical route; the other face buttons are suppressed
+    -- while their modifier is held and dispatch a delayed synthetic Attack edge.
+    if not actionConsumed and CONFIG.actionLoadout and (l2Held or r2Held) then
+        local selectedSlot = nil
+        for _, slot in ipairs(ACTION_SLOTS) do
+            if slotModifierMatches(buttons, slot)
+                and pressStarted(buttons, slot.face) then
+                selectedSlot = slot
+                break
+            end
+        end
+
+        if selectedSlot ~= nil then
+            local modifierWasHeld = slotModifierMatches(
+                lastButtons, selectedSlot)
+            local action = ACTION_BY_ID[loadout[selectedSlot.id]]
+                or ACTION_BY_ID.none
+            local isPhysicalCross = selectedSlot.face == BUTTON.CROSS
+
+            if not modifierWasHeld then
+                log(selectedSlot.label
+                    .. " ignored: hold the modifier for one frame first.")
+                -- X can safely fall through to its native combo. The other face
+                -- buttons may already have reached KH1 on this first shoulder
+                -- frame, so do not dispatch a second action from the script.
+                actionConsumed = not isPhysicalCross
+            elseif isPhysicalCross then
+                if actionMatchesContext(action, player) then
+                    actionConsumed = requestActionAbility(
+                        player, selectedSlot, action, true)
+                else
+                    -- None or a ground/air mismatch deliberately preserves the
+                    -- normal X combo rather than leaving the player inert.
+                    actionConsumed = false
+                end
+            else
+                actionConsumed = true
+                requestActionAbility(player, selectedSlot, action, false)
+            end
         end
     end
 
@@ -1423,7 +2319,7 @@ function _OnFrame()
     local transitionAcceptedKind = nil
     local deferredAcceptedKind = nil
     if not actionConsumed then
-        updateGroundActionRoute(player)
+        updateActionRoutes(player)
         transitionAcceptedKind = updateTransitionCheck(player)
         deferredHandledThisFrame, deferredAcceptedKind =
             updateDeferredAttackCommand(player)
@@ -1506,10 +2402,18 @@ function _OnFrame()
         groundChainFrames = math.max(0, groundChainFrames - 1)
     end
     lastButtons = buttons
+    lastDpad = dpad
 end
 
 -- LuaBackend reloads call _OnInit(), which normalizes every known patch. This
 -- hook additionally restores state on loaders that provide an exit callback.
 function _OnExit()
-    if canRun then restoreAllPatches() end
+    if canRun then
+        if loadoutMenuOpen then
+            saveActionLoadout()
+            hideOwnedLoadoutPrompt()
+            loadoutMenuOpen = false
+        end
+        restoreAllPatches()
+    end
 end

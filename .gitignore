@@ -3,6 +3,7 @@
 *.bak
 *.codex-backup-*
 *.pre-v*.lua
+JokCombat_ActionLoadout.cfg
 
 # Windows metadata
 Thumbs.db

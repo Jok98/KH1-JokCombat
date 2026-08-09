@@ -9,6 +9,7 @@ local FINGERPRINT = 0x7265737563697065 -- "epicures", little endian
 
 local STEAM_GL = {
     fingerprint = 0x3B2271,
+    dpadButtons = 0x22C9300,
     rawButtons = 0x22C9301,
     commandButtons = 0x23407B5,
     commandMenuSlot = 0x28527AC,
@@ -37,7 +38,15 @@ local BUTTONS = {
     { mask = 0x80, name = "SQUARE" },
 }
 
+local DPAD_BUTTONS = {
+    { mask = 0x10, name = "UP" },
+    { mask = 0x20, name = "RIGHT" },
+    { mask = 0x40, name = "DOWN" },
+    { mask = 0x80, name = "LEFT" },
+}
+
 local canRun = false
+local lastDpad = -1
 local lastRaw = -1
 local lastCommand = -1
 
@@ -45,6 +54,18 @@ local function namesFor(value)
     if value == 0 then return "released" end
     local names = {}
     for _, button in ipairs(BUTTONS) do
+        if (value & button.mask) ~= 0 then
+            table.insert(names, button.name)
+        end
+    end
+    if #names == 0 then return "unknown" end
+    return table.concat(names, "+")
+end
+
+local function dpadNamesFor(value)
+    if value == 0 then return "released" end
+    local names = {}
+    for _, button in ipairs(DPAD_BUTTONS) do
         if (value & button.mask) ~= 0 then
             table.insert(names, button.name)
         end
@@ -65,6 +86,7 @@ local function verifyByte(name, address, expected)
 end
 
 function _OnInit()
+    lastDpad = -1
     lastRaw = -1
     lastCommand = -1
 
@@ -105,15 +127,20 @@ end
 function _OnFrame()
     if not canRun then return end
 
+    local dpad = ReadByte(STEAM_GL.dpadButtons)
     local raw = ReadByte(STEAM_GL.rawButtons)
     local command = ReadByte(STEAM_GL.commandButtons)
-    if raw == lastRaw and command == lastCommand then return end
+    if dpad == lastDpad and raw == lastRaw
+        and command == lastCommand then return end
 
     ConsolePrint(string.format(
-        "[input] raw=0x%02X (%s) command=0x%02X (%s) menuSlot=0x%02X",
+        "[input] dpad=0x%02X (%s) raw=0x%02X (%s) "
+        .. "command=0x%02X (%s) menuSlot=0x%02X",
+        dpad, dpadNamesFor(dpad),
         raw, namesFor(raw),
         command, namesFor(command),
         ReadByte(STEAM_GL.commandMenuSlot)))
+    lastDpad = dpad
     lastRaw = raw
     lastCommand = command
 end
