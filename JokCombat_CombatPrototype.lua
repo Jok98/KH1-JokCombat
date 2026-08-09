@@ -1,8 +1,8 @@
 LUAGUI_NAME = "JokCombat Combat Prototype"
 LUAGUI_AUTH = "Jok; Critical Mix reference by Xendra / KSX"
-LUAGUI_DESC = "Cross-only full ground combo, buffered air links, universal Guard/Dodge cancels and jump branch."
+LUAGUI_DESC = "Cross-only combo, deterministic L2+Cross Stun Impact, universal Guard/Dodge cancels and jump branch."
 
--- JokCombat v0.2.8 prototype for the current Steam Global executable.
+-- JokCombat v0.2.10 prototype for the current Steam Global executable.
 -- Critical Mix was used as an authorized technical reference. This script is
 -- intentionally limited to combat/input state and does not touch save data,
 -- story flags, rewards, inventory, AP, levels, worlds, chests, or synthesis.
@@ -22,6 +22,7 @@ local CONFIG = {
     universalDodgeCancel = true,
     guardOnL2Circle = true,
     fixedDodgeOnSquare = true,
+    stunImpactOnL2Cross = true,
 
     -- Enabled for the first combat test so the requested bindings also work
     -- on an early save. This bypass is runtime-only and never edits the save.
@@ -43,12 +44,13 @@ local CONFIG = {
     attackPulseLowFrames = 1,
     groundRouteFrames = 104,
     transitionCheckFrames = 96,
+    stunImpactRequestFrames = 120,
     forcedInputFrames = 4,
 }
 
 local EXPECTED_GAME_ID = 0xAF71841E
 local FINGERPRINT = 0x7265737563697065 -- "epicures", little endian
-local VERSION = "v0.2.8"
+local VERSION = "v0.2.10"
 
 local ADDRESS = {
     fingerprint = 0x3B2271,
@@ -111,6 +113,9 @@ local CONTROL_INDEX = {
 }
 
 local DODGE_ROLL_ANIMATION = 0xDC
+local STUN_IMPACT_ANIMATION = 0xD8
+local STUN_IMPACT_KIND = "stun-impact"
+local STUN_IMPACT_PRIME_KIND = "stun-impact-prime"
 
 -- These are deliberately conservative first-pass windows, measured in the
 -- game's animation-time units. They are configuration data to tune from logs.
@@ -276,6 +281,7 @@ end
 local function isGroundRouteValue(value, normal)
     return value == normal or value == 0xC8 or value == 0xC9
         or value == 0xCA or value == 0xCB
+        or value == STUN_IMPACT_ANIMATION
 end
 
 local function restoreGroundActionRoute()
@@ -513,6 +519,12 @@ local function linkMatchesExpectation(player, kind, expectedAnimation,
             or player.time + 0.5 < sourceTime)
 end
 
+local function usesFinisherComboPosition(kind, expectedAnimation)
+    return kind == "finisher" or kind == STUN_IMPACT_KIND
+        or expectedAnimation == 0xCB
+        or expectedAnimation == STUN_IMPACT_ANIMATION
+end
+
 local function armTransitionCheck(player, kind, expectedAnimation,
         comboPosition, usesPhysicalInput)
     -- Always create a low frame before the first high edge. This also cleans a
@@ -601,8 +613,8 @@ local function updateDeferredAttackCommand(player)
         if deferredLinkComboPosition ~= nil then
             local maximum = ReadByte(ADDRESS.maxGroundComboLength)
             local maximumRequest = maximum
-            if deferredLinkKind == "finisher"
-                or deferredLinkExpectedAnimation == 0xCB then
+            if usesFinisherComboPosition(
+                    deferredLinkKind, deferredLinkExpectedAnimation) then
                 maximumRequest = maximum + 1
             end
             if maximum < 2 or maximum > 12
@@ -718,8 +730,8 @@ local function updateTransitionCheck(player)
     if transitionExpectedComboPosition ~= nil then
         local maximum = ReadByte(ADDRESS.maxGroundComboLength)
         local maximumRequest = maximum
-        if transitionKind == "finisher"
-            or transitionExpectedAnimation == 0xCB then
+        if usesFinisherComboPosition(
+                transitionKind, transitionExpectedAnimation) then
             maximumRequest = maximum + 1
         end
         if maximum < 2 or maximum > 12
@@ -733,10 +745,10 @@ local function updateTransitionCheck(player)
         WriteByte(ADDRESS.comboPosition, transitionExpectedComboPosition)
     end
 
-    -- A direct finisher is emitted by temporarily sourcing the native Attack
-    -- action from the physical Triangle control. The transition monitor only
-    -- keeps comboPosition stable and observes CB; it must not also pulse the
-    -- command-menu integers, otherwise a later Cross can replay the request.
+    -- A direct request that already owns a physical Attack edge only needs the
+    -- transition monitor. Triangle's parked path sources that edge from its
+    -- control mapping; Stun Impact uses a pre-armed physical Cross. Neither
+    -- path may also pulse the command-menu integers, or the request can replay.
     if transitionUsesPhysicalInput then return nil end
 
     -- v0.2.4 repeatedly wrote 1, leaving both trigger integers high after a
@@ -839,6 +851,113 @@ local function prepareGroundFinisher()
         WriteByte(ADDRESS.comboPosition, finisherPosition)
     end
     return true, finisherPosition, maximum
+end
+
+local function requestStunImpact(player)
+    if player.airborne then return false end
+
+    if player.animation == STUN_IMPACT_ANIMATION then
+        -- Close the accepted request immediately if a second chord arrives on
+        -- D8. Restoring the table here prevents that same Cross from routing a
+        -- second Stun Impact while the first one is still active.
+        if transitionKind == STUN_IMPACT_KIND then
+            clearTransitionCheck()
+        elseif groundRouteKind == STUN_IMPACT_KIND
+            or groundRouteKind == STUN_IMPACT_PRIME_KIND then
+            restoreGroundActionRoute()
+        end
+        log("Stun Impact input ignored: Stun Impact is already active.")
+        return true
+    end
+
+    if transitionKind == STUN_IMPACT_KIND
+        or groundRouteKind == STUN_IMPACT_KIND then
+        log("Stun Impact input ignored: request already pending.")
+        return true
+    end
+
+    local position, maximum = readGroundComboState()
+    if position == nil then
+        log("Stun Impact request ignored: combo state is unavailable.")
+        return true
+    end
+
+    local routeWasPrimed = groundRouteKind == STUN_IMPACT_PRIME_KIND
+        and groundRouteAnimation == STUN_IMPACT_ANIMATION
+    if not routeWasPrimed then
+        -- LuaBackend observes a new Cross after the native dispatcher has
+        -- already selected its action. Never append D8 to that already-chosen
+        -- C8: require L2 to have primed the table on an earlier frame instead.
+        log("Stun Impact input ignored: hold L2 before pressing Cross.")
+        return true
+    end
+
+    -- The chord owns the current attack intent. It does not globally change
+    -- Stun Impact's vanilla 30 percent selector: the table was routed to D8 on
+    -- an earlier L2-only frame, before this physical Cross reached the native
+    -- dispatcher. Promote that bounded prime into the observed request without
+    -- restoring the table between the two phases.
+    clearComboIntent()
+    clearDeferredAttackCommand()
+    groundRouteKind = STUN_IMPACT_KIND
+    groundRouteSourceAnimation = player.animation
+    groundRouteSourceTime = player.time
+
+    local finisherPosition = maximum + 1
+    WriteByte(ADDRESS.comboPosition, finisherPosition)
+    groundRouteFrames = math.max(
+        groundRouteFrames, CONFIG.stunImpactRequestFrames)
+    armTransitionCheck(player, STUN_IMPACT_KIND,
+        STUN_IMPACT_ANIMATION, finisherPosition, true)
+    transitionCheckFrames = math.max(
+        transitionCheckFrames, CONFIG.stunImpactRequestFrames)
+    log(string.format(
+        "Stun Impact requested by L2+Cross: combo=%d max=%d route=prearmed",
+        finisherPosition, maximum))
+    return true
+end
+
+local function updateStunImpactPrime(player, buttons)
+    local l2Held = (buttons & BUTTON.L2) ~= 0
+    local crossHeld = (buttons & BUTTON.CROSS) ~= 0
+    local circleHeld = (buttons & BUTTON.CIRCLE) ~= 0
+    local squareHeld = (buttons & BUTTON.SQUARE) ~= 0
+    local canStayPrimed = CONFIG.stunImpactOnL2Cross
+        and l2Held and not player.airborne
+        and player.animation ~= STUN_IMPACT_ANIMATION
+        and ReadByte(ADDRESS.commandMenuSlot) == 0
+        and not circleHeld and not squareHeld
+
+    if groundRouteKind == STUN_IMPACT_PRIME_KIND then
+        if not canStayPrimed or transitionKind ~= nil
+            or deferredLinkKind ~= nil then
+            restoreGroundActionRoute()
+            log("Stun Impact L2 prime cancelled by state change.")
+            return false
+        end
+        groundRouteFrames = math.max(
+            groundRouteFrames, CONFIG.stunImpactRequestFrames)
+        return true
+    end
+
+    -- A route created on the same frame as Cross is too late: C8 has already
+    -- been selected. Initial priming therefore requires an L2-only frame. This
+    -- also prevents pressing L2 while Cross is already held from converting a
+    -- vanilla attack into a delayed special.
+    if not canStayPrimed or crossHeld
+        or transitionKind ~= nil or deferredLinkKind ~= nil
+        or groundRouteKind ~= nil then
+        return false
+    end
+
+    local routeArmed = beginGroundActionRoute(
+        STUN_IMPACT_PRIME_KIND, STUN_IMPACT_ANIMATION, player)
+    if routeArmed then
+        groundRouteFrames = math.max(
+            groundRouteFrames, CONFIG.stunImpactRequestFrames)
+        log("Stun Impact route primed by L2; waiting for Cross.")
+    end
+    return routeArmed
 end
 
 local function queueAttackBuffer(player, comboPosition, expectedAnimation)
@@ -1184,6 +1303,9 @@ function _OnFrame()
     local squarePressed = pressStarted(buttons, BUTTON.SQUARE)
     local trianglePressed = pressStarted(buttons, BUTTON.TRIANGLE)
     local guardPressed = chordStarted(buttons, BUTTON.L2, BUTTON.CIRCLE)
+    local stunImpactPressed = CONFIG.stunImpactOnL2Cross
+        and l2Held and crossPressed
+    updateStunImpactPrime(player, buttons)
     local cancelWindowOpen = isCancelableAttack(player)
     local actionConsumed = false
     local chainWasArmed = groundChainFrames > 0
@@ -1236,6 +1358,18 @@ function _OnFrame()
             and (CONFIG.universalDodgeCancel or cancelWindowOpen) then
             cancelPlayer(player, "dodge-universal")
             forceSquareFrames = CONFIG.forcedInputFrames
+        end
+    end
+
+    -- Holding L2 on an earlier frame pre-arms D8; the later physical Cross can
+    -- therefore be selected directly by the native dispatcher, without first
+    -- entering C8. In the air the chord falls through to the normal aerial
+    -- Cross behavior because Stun Impact is a ground finisher.
+    if not actionConsumed and stunImpactPressed and not player.airborne then
+        if ReadByte(ADDRESS.commandMenuSlot) ~= 0 then
+            log("Stun Impact input ignored: reaction command is active.")
+        else
+            actionConsumed = requestStunImpact(player)
         end
     end
 
