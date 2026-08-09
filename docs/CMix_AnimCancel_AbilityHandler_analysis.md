@@ -517,3 +517,99 @@ problemi aperti. La prossima diagnosi deve separare esplicitamente restart e
 avanzamento (`C9/CA`) e osservare quale stato o dispatcher nativo seleziona
 l'entry terrestre; il solo `comboPosition` piu' i due flag Attack non e'
 sufficiente sulla build Steam testata.
+
+### Correzione candidata v0.2.3
+
+Una lettura live read-only ha confermato `comboPosition=0` a riposo,
+`maxGroundComboLength=3` e la tabella azioni Steam corrente. Le entry Critical
+Mix sono traslate di `+0x3980` nella sezione dati di questa build:
+
+| Entry | RVA Steam | Valore vanilla |
+| --- | ---: | ---: |
+| Ground Finisher Default | `0x2D2D7D0` | `0xCB` |
+| Ground Combo Slide | `0x2D2D7E4` | `0xD0` |
+| Ground Combo Impulse | `0x2D2D7F8` | `0xD3` |
+| Ground Combo 2 | `0x2D2D80C` | `0xC9` |
+| Ground Combo Slapshot | `0x2D2D820` | `0xCF` |
+| Ground Combo A1 | `0x2D2D834` | `0xC8` |
+| Ground Combo A2 | `0x2D2D848` | `0xCA` |
+
+La v0.2.2 commetteva due errori di routing: conservava `comboPosition=1` per
+ogni normale senza target, quindi il dispatcher ricreava `C8`, e impostava la
+finisher a `max-1` invece che a `max`. La candidata v0.2.3:
+
+1. mantiene Croce sotto la soglia finisher e cicla esplicitamente
+   `C8 -> C9 -> CA -> C8`;
+2. prima del comando sostitutivo instrada temporaneamente tutte le entry ground
+   verso l'animazione desiderata, tecnica gia' usata dallo script autorizzato
+   `CMix_AirRollGuardItem_Plus.lua` per gli attacchi forzati;
+3. per Triangolo scrive `comboPosition=max` e instrada le entry verso `CB`;
+4. ripristina i sette byte vanilla appena osserva l'animazione attesa o dopo
+   otto frame; un fingerprint inatteso disabilita il routing;
+5. accetta come successo soltanto l'ID richiesto, eliminando il falso positivo
+   prodotto dal restart di `C8` nella v0.2.2.
+
+Lo State Probe include ora `comboPosition/maxGroundComboLength` nella chiave di
+stato e nei log, restando completamente read-only. Tutto questo e' ancora una
+candidata: serve la conferma live prima di considerare risolti combo terrestre
+e finisher.
+
+### Risultato live v0.2.3 e correzione candidata v0.2.4
+
+La cattura live v0.2.3 valida gli indirizzi e la tecnica di routing: sono state
+osservate transizioni esatte `C8 -> C9`, `C9 -> CA` e `CA -> C8`. La stessa
+richiesta pero' fallisce spesso con `route timed out`; il comando Attack veniva
+scritto una sola volta e non sempre coincideva con il frame in cui il
+dispatcher Steam lo legge. Triangolo era riconosciuto (`Triangle finisher
+queued`), `comboPosition=max` e la route `CB` erano armati, ma anche quel
+comando scadeva senza transizione. Il difetto quindi non era piu' la selezione
+dell'animazione o il riconoscimento di Triangolo, ma l'affidabilita' del trigger
+one-shot. La catena aerea usa lo stesso trigger ed e' soggetta alla medesima
+perdita intermittente.
+
+La candidata v0.2.4 sostituisce la verifica passiva con una richiesta
+persistente e limitata:
+
+1. dopo l'acknowledgement `control=0x03`, mantiene la route per un massimo di
+   36 frame;
+2. per un massimo di 30 frame riapplica il combo slot e pulsa Attack finche'
+   l'animazione esatta viene osservata;
+3. appena `actionControl` lascia `0x03`, smette di riscrivere Attack e attende
+   soltanto la transizione, riducendo il rischio di un colpo duplicato;
+4. blocca richieste normali sovrapposte; Triangolo puo' invece sostituire una
+   richiesta normale pendente e conserva quindi la priorita' di finisher;
+5. annulla e ripristina la route su cambio terra/aria, reaction command,
+   timeout, Guard, Dodge, salto, reload o uscita.
+
+Il prossimo test deve verificare non solo gli ID `C8/C9/CA/CB`, ma anche il
+numero di impulsi registrato da `command accepted after N pulse(s)` e
+l'assenza di colpi automatici aggiuntivi dopo una singola pressione.
+
+### Risultato live v0.2.4 e correzione candidata v0.2.5
+
+La v0.2.4 ha reso la concatenazione percepibilmente piu' facile e ha osservato
+sia il ciclo terrestre sia `CB`. I tempi restano pero' irregolari: richieste
+riuscite hanno riportato da 1 a 30 presunti impulsi, mentre numerosi link sono
+scaduti al limite di 30. Una lettura esterna read-only del processo, eseguita a
+riposo dopo il test, ha trovato `triggerMenu1=1` e `triggerMenu2=1`. Il retry
+stava quindi mantenendo un livello alto, non generando nuovi fronti, e il
+cleanup non riportava i flag allo stato neutro. Il log mostra inoltre che
+ulteriori pressioni Triangle riarmavano `CB` durante un tentativo gia' attivo.
+
+La candidata v0.2.5:
+
+1. forza un frame basso prima della prima richiesta e alterna due frame alti a
+   un frame basso, cosi' ogni retry produce un fronte `0 -> 1` reale;
+2. prende ownership dei due flag soltanto durante la richiesta sintetica e li
+   azzera su successo, timeout, cambio stato, reaction command, difesa, reload
+   e uscita;
+3. estende la finestra osservata, ma continua a smettere di pulsare quando
+   `actionControl` lascia `0x03`;
+4. conserva al massimo una Croce premuta durante un normale pendente e la
+   riproduce sul nuovo attacco, senza convertire una pressione in piu' colpi;
+5. ignora Triangle ripetuto finche' la finisher precedente e' pendente, invece
+   di azzerarne il tentativo.
+
+Il test v0.2.5 deve verificare fluidita' premendo Croce sia molto presto sia
+molto tardi, una sola esecuzione per pressione, finisher con un solo Triangolo
+e assenza di attacchi ritardati dopo un timeout o una reazione nemica.

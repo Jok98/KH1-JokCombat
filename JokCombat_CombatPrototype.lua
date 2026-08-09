@@ -1,8 +1,8 @@
 LUAGUI_NAME = "JokCombat Combat Prototype"
 LUAGUI_AUTH = "Jok; Critical Mix reference by Xendra / KSX"
-LUAGUI_DESC = "Target-free normal chains, Triangle finisher, universal Guard cancel, jump branch and fixed Dodge."
+LUAGUI_DESC = "Lenient buffered ground/air links, Triangle finisher, universal Guard cancel, jump branch and fixed Dodge."
 
--- JokCombat v0.2.2 prototype for the current Steam Global executable.
+-- JokCombat v0.2.5 prototype for the current Steam Global executable.
 -- Critical Mix was used as an authorized technical reference. This script is
 -- intentionally limited to combat/input state and does not touch save data,
 -- story flags, rewards, inventory, AP, levels, worlds, chests, or synthesis.
@@ -32,14 +32,20 @@ local CONFIG = {
     attackBufferDelayFrames = 3,
     groundChainMemoryFrames = 90,
     releasedCommandMinimumFrames = 1,
-    releasedCommandTimeoutFrames = 30,
-    transitionCheckFrames = 12,
+    releasedCommandTimeoutFrames = 60,
+    -- A real pulse alternates a short high level with a one-frame low gap.
+    -- v0.2.4 kept writing 1, so a rejected request could remain high forever
+    -- without producing a new edge in the Steam dispatcher.
+    attackPulseHighFrames = 2,
+    attackPulseLowFrames = 1,
+    groundRouteFrames = 104,
+    transitionCheckFrames = 96,
     forcedInputFrames = 4,
 }
 
 local EXPECTED_GAME_ID = 0xAF71841E
 local FINGERPRINT = 0x7265737563697065 -- "epicures", little endian
-local VERSION = "v0.2.2"
+local VERSION = "v0.2.5"
 
 local ADDRESS = {
     fingerprint = 0x3B2271,
@@ -54,6 +60,17 @@ local ADDRESS = {
     -- ground-combo length. These do not point to the save file.
     comboPosition = 0x296B221,
     maxGroundComboLength = 0x2D5CCE4,
+
+    -- Current Steam ports of the Sora ground-action table entries used by
+    -- Critical Mix's routed attack experiments. The +0x3980 data shift and
+    -- every vanilla byte below were confirmed through a live read-only scan.
+    groundFinisherDefault = 0x2D2D7D0,
+    groundComboSlide = 0x2D2D7E4,
+    groundComboImpulse = 0x2D2D7F8,
+    groundCombo2 = 0x2D2D80C,
+    groundComboSlapshot = 0x2D2D820,
+    groundComboA1 = 0x2D2D834,
+    groundComboA2 = 0x2D2D848,
 
     circleControlMap = 0x22C9345,
     squareControlMap = 0x22C9347,
@@ -96,6 +113,27 @@ local CANCEL_WINDOW = {
     [0xD3] = 18.0, -- Impulse family
 }
 
+-- Cycle every known vanilla ground-normal animation. The action-table route
+-- makes this deterministic even when no target or hit-confirm exists.
+local GROUND_NORMAL_SEQUENCE = { 0xC8, 0xC9, 0xCA }
+
+local GROUND_ACTION_ROUTE = {
+    { name = "groundFinisherDefault", address = ADDRESS.groundFinisherDefault,
+        normal = 0xCB },
+    { name = "groundComboSlide", address = ADDRESS.groundComboSlide,
+        normal = 0xD0 },
+    { name = "groundComboImpulse", address = ADDRESS.groundComboImpulse,
+        normal = 0xD3 },
+    { name = "groundCombo2", address = ADDRESS.groundCombo2,
+        normal = 0xC9 },
+    { name = "groundComboSlapshot", address = ADDRESS.groundComboSlapshot,
+        normal = 0xCF },
+    { name = "groundComboA1", address = ADDRESS.groundComboA1,
+        normal = 0xC8 },
+    { name = "groundComboA2", address = ADDRESS.groundComboA2,
+        normal = 0xCA },
+}
+
 local NORMAL = {
     forceCircle = 0x74,
     forceSquare = 0x84,
@@ -116,6 +154,7 @@ local attackBufferAnimation = nil
 local attackBufferTime = 0.0
 local attackBufferWasAirborne = false
 local attackBufferComboPosition = nil
+local attackBufferExpectedAnimation = nil
 local finisherBufferFrames = 0
 local groundChainFrames = 0
 local forceCircleFrames = 0
@@ -126,6 +165,11 @@ local transitionCheckFrames = 0
 local transitionSourceAnimation = nil
 local transitionSourceTime = 0.0
 local transitionKind = nil
+local transitionExpectedAnimation = nil
+local transitionExpectedComboPosition = nil
+local transitionWasAirborne = false
+local transitionPulseCount = 0
+local transitionPulsePhaseFrames = 0
 local deferredLinkMinimumFrames = 0
 local deferredLinkTimeoutFrames = 0
 local deferredLinkKind = nil
@@ -133,9 +177,37 @@ local deferredLinkComboPosition = nil
 local deferredLinkSourceAnimation = nil
 local deferredLinkSourceTime = 0.0
 local deferredLinkWasAirborne = false
+local deferredLinkExpectedAnimation = nil
+local groundRouteAvailable = false
+local groundRouteFrames = 0
+local groundRouteAnimation = nil
+local groundRouteKind = nil
+local groundRouteSourceAnimation = nil
+local groundRouteSourceTime = 0.0
+local syntheticAttackCommandOwned = false
+local syntheticAttackCommandHigh = false
+local queuedNormalInput = false
 
 local function log(message)
     if CONFIG.debugLog then ConsolePrint("[JokCombat] " .. message) end
+end
+
+local function lowerSyntheticAttackCommand()
+    if syntheticAttackCommandOwned or syntheticAttackCommandHigh then
+        WriteInt(ADDRESS.triggerMenu1, 0)
+        WriteInt(ADDRESS.triggerMenu2, 0)
+    end
+    syntheticAttackCommandHigh = false
+end
+
+local function clearSyntheticAttackCommand(forceWrite)
+    if forceWrite or syntheticAttackCommandOwned
+        or syntheticAttackCommandHigh then
+        WriteInt(ADDRESS.triggerMenu1, 0)
+        WriteInt(ADDRESS.triggerMenu2, 0)
+    end
+    syntheticAttackCommandOwned = false
+    syntheticAttackCommandHigh = false
 end
 
 local function isPlausiblePointer(value)
@@ -183,7 +255,109 @@ local function restoreIfKnown(address, normal, known)
     end
 end
 
+local function isGroundRouteValue(value, normal)
+    return value == normal or value == 0xC8 or value == 0xC9
+        or value == 0xCA or value == 0xCB
+end
+
+local function restoreGroundActionRoute()
+    for _, entry in ipairs(GROUND_ACTION_ROUTE) do
+        local current = ReadByte(entry.address)
+        if isGroundRouteValue(current, entry.normal)
+            and current ~= entry.normal then
+            WriteByte(entry.address, entry.normal)
+        end
+    end
+    groundRouteFrames = 0
+    groundRouteAnimation = nil
+    groundRouteKind = nil
+    groundRouteSourceAnimation = nil
+    groundRouteSourceTime = 0.0
+end
+
+local function normalizeGroundActionRoute()
+    local valid = true
+    for _, entry in ipairs(GROUND_ACTION_ROUTE) do
+        local current = ReadByte(entry.address)
+        if not isGroundRouteValue(current, entry.normal) then
+            ConsolePrint(string.format(
+                "[JokCombat:route] %s RVA=0x%X has unexpected byte 0x%02X; "
+                .. "forced ground routing disabled.",
+                entry.name, entry.address, current))
+            valid = false
+        elseif current ~= entry.normal then
+            -- Clean up a route left active by a reload during its short window.
+            WriteByte(entry.address, entry.normal)
+        end
+    end
+    groundRouteFrames = 0
+    groundRouteAnimation = nil
+    groundRouteKind = nil
+    groundRouteSourceAnimation = nil
+    groundRouteSourceTime = 0.0
+    groundRouteAvailable = valid
+    return valid
+end
+
+local function beginGroundActionRoute(kind, desiredAnimation, player)
+    if not groundRouteAvailable or desiredAnimation == nil then return false end
+
+    restoreGroundActionRoute()
+    for _, entry in ipairs(GROUND_ACTION_ROUTE) do
+        local current = ReadByte(entry.address)
+        if current ~= entry.normal then
+            ConsolePrint(string.format(
+                "[JokCombat:route] %s changed to 0x%02X before routing; "
+                .. "forced ground routing disabled.", entry.name, current))
+            groundRouteAvailable = false
+            restoreGroundActionRoute()
+            return false
+        end
+    end
+
+    for _, entry in ipairs(GROUND_ACTION_ROUTE) do
+        if entry.normal ~= desiredAnimation then
+            WriteByte(entry.address, desiredAnimation)
+        end
+    end
+    groundRouteFrames = CONFIG.groundRouteFrames
+    groundRouteAnimation = desiredAnimation
+    groundRouteKind = kind
+    groundRouteSourceAnimation = player.animation
+    groundRouteSourceTime = player.time
+    log(string.format(
+        "%s route armed: all ground entries -> 0x%02X",
+        kind, desiredAnimation))
+    return true
+end
+
+local function updateGroundActionRoute(player)
+    if groundRouteFrames <= 0 or groundRouteAnimation == nil then return false end
+
+    local accepted = player.animation == groundRouteAnimation
+        and (player.animation ~= groundRouteSourceAnimation
+            or player.time + 0.5 < groundRouteSourceTime)
+    if accepted then
+        log(string.format(
+            "%s route accepted: anim=0x%02X time=%.2f",
+            groundRouteKind, player.animation, player.time))
+        restoreGroundActionRoute()
+        return true
+    end
+
+    groundRouteFrames = groundRouteFrames - 1
+    if groundRouteFrames <= 0 then
+        log(string.format(
+            "%s route timed out before anim=0x%02X was observed.",
+            groundRouteKind, groundRouteAnimation))
+        restoreGroundActionRoute()
+    end
+    return false
+end
+
 local function restoreAllPatches()
+    clearSyntheticAttackCommand(false)
+    restoreGroundActionRoute()
     restoreIfKnown(ADDRESS.forceCircleBranch, NORMAL.forceCircle,
         { 0x74, 0x72 })
     restoreIfKnown(ADDRESS.forceSquareBranch, NORMAL.forceSquare,
@@ -240,6 +414,14 @@ local function isCancelableAttack(player)
         and player.time >= CANCEL_WINDOW[player.animation]
 end
 
+local function isGroundNormalContext(player)
+    if player.airborne or not isAttackContext(player) then return false end
+    for _, animation in ipairs(GROUND_NORMAL_SEQUENCE) do
+        if player.animation == animation then return true end
+    end
+    return false
+end
+
 local function pressStarted(buttons, mask)
     return (buttons & mask) ~= 0 and (lastButtons & mask) == 0
 end
@@ -255,6 +437,8 @@ local function triggerAttackCommand()
     if ReadByte(ADDRESS.commandMenuSlot) ~= 0 then return false end
     WriteInt(ADDRESS.triggerMenu1, 1)
     WriteInt(ADDRESS.triggerMenu2, 1)
+    syntheticAttackCommandOwned = true
+    syntheticAttackCommandHigh = true
     return true
 end
 
@@ -264,6 +448,7 @@ local function clearAttackBuffer()
     attackBufferAnimation = nil
     attackBufferTime = 0.0
     attackBufferComboPosition = nil
+    attackBufferExpectedAnimation = nil
 end
 
 local function clearFinisherBuffer()
@@ -271,17 +456,50 @@ local function clearFinisherBuffer()
 end
 
 local function clearTransitionCheck()
+    -- A transition owns any temporary ground route for its whole retry window.
+    -- Restoring here also makes Guard, Dodge, jump and reload cancellation safe.
+    if canRun then restoreGroundActionRoute() end
+    clearSyntheticAttackCommand(false)
     transitionCheckFrames = 0
     transitionSourceAnimation = nil
     transitionSourceTime = 0.0
     transitionKind = nil
+    transitionExpectedAnimation = nil
+    transitionExpectedComboPosition = nil
+    transitionWasAirborne = false
+    transitionPulseCount = 0
+    transitionPulsePhaseFrames = 0
 end
 
-local function armTransitionCheck(player, kind)
+local function linkMatchesExpectation(player, kind, expectedAnimation,
+        sourceAnimation, sourceTime)
+    if kind == "finisher" then return player.animation == 0xCB end
+
+    if expectedAnimation ~= nil then
+        return player.animation == expectedAnimation
+            and (player.animation ~= sourceAnimation
+                or player.time + 0.5 < sourceTime)
+    end
+
+    return isAttackContext(player)
+        and (player.animation ~= sourceAnimation
+            or player.time + 0.5 < sourceTime)
+end
+
+local function armTransitionCheck(player, kind, expectedAnimation,
+        comboPosition)
+    -- Always create a low frame before the first high edge. This also cleans a
+    -- stale level left by an earlier rejected request or a script reload.
+    clearSyntheticAttackCommand(true)
     transitionCheckFrames = CONFIG.transitionCheckFrames
     transitionSourceAnimation = player.animation
     transitionSourceTime = player.time
     transitionKind = kind
+    transitionExpectedAnimation = expectedAnimation
+    transitionExpectedComboPosition = comboPosition
+    transitionWasAirborne = player.airborne
+    transitionPulseCount = 0
+    transitionPulsePhaseFrames = CONFIG.attackPulseLowFrames
 end
 
 local function clearDeferredAttackCommand()
@@ -292,9 +510,11 @@ local function clearDeferredAttackCommand()
     deferredLinkSourceAnimation = nil
     deferredLinkSourceTime = 0.0
     deferredLinkWasAirborne = false
+    deferredLinkExpectedAnimation = nil
 end
 
-local function queueAttackAfterRelease(player, kind, comboPosition)
+local function queueAttackAfterRelease(player, kind, comboPosition,
+        expectedAnimation)
     if ReadByte(ADDRESS.commandMenuSlot) ~= 0 then return false end
 
     -- Steam processes the action release before it can accept a replacement
@@ -308,6 +528,7 @@ local function queueAttackAfterRelease(player, kind, comboPosition)
     deferredLinkSourceAnimation = player.animation
     deferredLinkSourceTime = player.time
     deferredLinkWasAirborne = player.airborne
+    deferredLinkExpectedAnimation = expectedAnimation
     WriteByte(player.pointer + PLAYER.actionControl, 0x03, true)
     log(string.format(
         "%s link release issued: anim=0x%02X time=%.2f",
@@ -316,25 +537,26 @@ local function queueAttackAfterRelease(player, kind, comboPosition)
 end
 
 local function updateDeferredAttackCommand(player)
-    if deferredLinkKind == nil then return false end
+    if deferredLinkKind == nil then return false, nil end
 
     if player.airborne ~= deferredLinkWasAirborne
         or ReadByte(ADDRESS.commandMenuSlot) ~= 0 then
         log(deferredLinkKind .. " deferred command cancelled by state change.")
+        queuedNormalInput = false
         clearDeferredAttackCommand()
-        return false
+        return false, nil
     end
 
     -- A held physical Cross may be accepted naturally after the release. If
     -- that happens, do not emit a second command for the same input.
-    if deferredLinkKind == "normal" and isAttackContext(player)
-        and (player.animation ~= deferredLinkSourceAnimation
-            or player.time + 0.5 < deferredLinkSourceTime) then
+    if deferredLinkKind == "normal" and linkMatchesExpectation(
+            player, deferredLinkKind, deferredLinkExpectedAnimation,
+            deferredLinkSourceAnimation, deferredLinkSourceTime) then
         log(string.format(
             "normal transition observed during release: anim=0x%02X time=%.2f",
             player.animation, player.time))
         clearDeferredAttackCommand()
-        return true
+        return true, "normal"
     end
 
     deferredLinkMinimumFrames = math.max(
@@ -354,8 +576,9 @@ local function updateDeferredAttackCommand(player)
                 or deferredLinkComboPosition > maximum then
                 log(deferredLinkKind
                     .. " deferred command cancelled by combo sanity check.")
+                queuedNormalInput = false
                 clearDeferredAttackCommand()
-                return false
+                return false, nil
             end
             -- The release may reset this byte. Reapply the chosen normal or
             -- finisher position immediately before the new Attack command.
@@ -363,57 +586,137 @@ local function updateDeferredAttackCommand(player)
         end
 
         local kind = deferredLinkKind
-        if triggerAttackCommand() then
-            log(string.format(
-                "target-free %s command issued after release: combo=%d",
-                kind, ReadByte(ADDRESS.comboPosition)))
-            armTransitionCheck(player, kind)
-            clearDeferredAttackCommand()
-            return true
+        local expectedAnimation = deferredLinkExpectedAnimation
+        local desiredComboPosition = deferredLinkComboPosition
+        local routeArmed = false
+        if expectedAnimation ~= nil and not player.airborne then
+            routeArmed = beginGroundActionRoute(
+                kind, expectedAnimation, player)
         end
+        armTransitionCheck(
+            player, kind, expectedAnimation, desiredComboPosition)
+        if expectedAnimation ~= nil then
+            log(string.format(
+                "target-free %s pulse armed after release: "
+                .. "combo=%d expected=0x%02X route=%s",
+                kind, ReadByte(ADDRESS.comboPosition), expectedAnimation,
+                tostring(routeArmed)))
+        else
+            log(string.format(
+                "target-free %s pulse armed after release: combo=%d",
+                kind, ReadByte(ADDRESS.comboPosition)))
+        end
+        clearDeferredAttackCommand()
+        return true, nil
     end
 
     if deferredLinkTimeoutFrames <= 0 then
         log(deferredLinkKind
             .. " deferred command timed out before release acknowledgement.")
+        queuedNormalInput = false
         clearDeferredAttackCommand()
     end
-    return false
+    return false, nil
 end
 
 local function updateTransitionCheck(player)
-    if transitionCheckFrames <= 0 or transitionKind == nil then return end
+    if transitionCheckFrames <= 0 or transitionKind == nil then return nil end
 
-    local accepted = false
-    if transitionKind == "finisher" then
-        accepted = player.animation == 0xCB
-    else
-        accepted = isAttackContext(player)
-            and (player.animation ~= transitionSourceAnimation
-                or player.time + 0.5 < transitionSourceTime)
+    if player.airborne ~= transitionWasAirborne
+        or ReadByte(ADDRESS.commandMenuSlot) ~= 0 then
+        log(transitionKind .. " persistent command cancelled by state change.")
+        queuedNormalInput = false
+        clearTransitionCheck()
+        return nil
     end
 
+    local accepted = linkMatchesExpectation(
+        player, transitionKind, transitionExpectedAnimation,
+        transitionSourceAnimation, transitionSourceTime)
+
     if accepted then
-        log(string.format(
-            "%s transition observed: anim=0x%02X time=%.2f",
-            transitionKind, player.animation, player.time))
+        local acceptedKind = transitionKind
+        if transitionExpectedAnimation ~= nil then
+            log(string.format(
+                "%s transition observed: anim=0x%02X time=%.2f combo=%d",
+                transitionKind, player.animation, player.time,
+                ReadByte(ADDRESS.comboPosition)))
+        else
+            log(string.format(
+                "%s transition observed: anim=0x%02X time=%.2f",
+                transitionKind, player.animation, player.time))
+        end
+        log(string.format("%s command accepted after %d pulse(s).",
+            transitionKind, transitionPulseCount))
         clearTransitionCheck()
-        return
+        return acceptedKind
     end
 
     transitionCheckFrames = transitionCheckFrames - 1
     if transitionCheckFrames <= 0 then
-        log(string.format(
-            "%s transition was not observed after the target-free request.",
-            transitionKind))
+        if transitionExpectedAnimation ~= nil then
+            log(string.format(
+                "%s transition was not observed: expected=0x%02X "
+                .. "desiredCombo=%d actualCombo=%d pulses=%d.",
+                transitionKind, transitionExpectedAnimation,
+                transitionExpectedComboPosition or -1,
+                ReadByte(ADDRESS.comboPosition), transitionPulseCount))
+        else
+            log(string.format(
+                "%s transition was not observed after %d target-free pulses.",
+                transitionKind, transitionPulseCount))
+        end
+        queuedNormalInput = false
         clearTransitionCheck()
+        return nil
     end
+
+    -- Reapply the transient combo slot because the engine may reset it between
+    -- the release and the frame in which it polls Attack. Only pulse while the
+    -- released action-control state is acknowledged; once control changes, we
+    -- wait for the matching animation instead of risking a duplicate attack.
+    if transitionExpectedComboPosition ~= nil then
+        local maximum = ReadByte(ADDRESS.maxGroundComboLength)
+        if maximum < 2 or maximum > 12
+            or transitionExpectedComboPosition > maximum then
+            log(transitionKind
+                .. " persistent command cancelled by combo sanity check.")
+            queuedNormalInput = false
+            clearTransitionCheck()
+            return nil
+        end
+        WriteByte(ADDRESS.comboPosition, transitionExpectedComboPosition)
+    end
+
+    -- v0.2.4 repeatedly wrote 1, leaving both trigger integers high after a
+    -- rejected command. Alternate a bounded high phase with an explicit low
+    -- gap so every retry produces a real 0 -> 1 edge. If action control changes
+    -- first, lower the flags immediately and only observe the transition.
+    if player.control ~= 0x03 then
+        lowerSyntheticAttackCommand()
+        transitionPulsePhaseFrames = CONFIG.attackPulseLowFrames
+        return nil
+    end
+
+    transitionPulsePhaseFrames = math.max(
+        0, transitionPulsePhaseFrames - 1)
+    if syntheticAttackCommandHigh then
+        if transitionPulsePhaseFrames <= 0 then
+            lowerSyntheticAttackCommand()
+            transitionPulsePhaseFrames = CONFIG.attackPulseLowFrames
+        end
+    elseif transitionPulsePhaseFrames <= 0 and triggerAttackCommand() then
+        transitionPulseCount = transitionPulseCount + 1
+        transitionPulsePhaseFrames = CONFIG.attackPulseHighFrames
+    end
+    return nil
 end
 
 local function clearComboIntent()
     clearAttackBuffer()
     clearFinisherBuffer()
     groundChainFrames = 0
+    queuedNormalInput = false
 end
 
 local function readGroundComboState()
@@ -437,38 +740,62 @@ local function readGroundComboState()
     return position, maximum
 end
 
-local function prepareNormalGroundAttack()
+local function nextGroundNormalAnimation(player, chainOpen)
+    if not chainOpen or player.airborne or not isAttackContext(player) then
+        return GROUND_NORMAL_SEQUENCE[1]
+    end
+
+    for index, animation in ipairs(GROUND_NORMAL_SEQUENCE) do
+        if player.animation == animation then
+            return GROUND_NORMAL_SEQUENCE[
+                (index % #GROUND_NORMAL_SEQUENCE) + 1]
+        end
+    end
+    return GROUND_NORMAL_SEQUENCE[1]
+end
+
+local function prepareNormalGroundAttack(player, chainOpen)
     local position, maximum = readGroundComboState()
     if position == nil then return false end
 
-    -- The native engine selects the finisher when the incoming combo position
-    -- reaches max-1. Cross wraps to the first normal instead, so every press is
-    -- exactly one normal hit and the chain has no automatic end.
-    if CONFIG.infiniteGroundNormals and position >= maximum - 1 then
-        WriteByte(ADDRESS.comboPosition, 0)
-        position = 0
+    local desiredAnimation = nextGroundNormalAnimation(player, chainOpen)
+    local desiredPosition = 1
+    if desiredAnimation ~= GROUND_NORMAL_SEQUENCE[1] then
+        -- Keep every Cross request below the native finisher position. C9 and
+        -- CA are routed explicitly, so they can share the last normal counter.
+        desiredPosition = math.max(1, maximum - 1)
     end
-    return true, position, maximum
+    if not CONFIG.infiniteGroundNormals then
+        desiredPosition = math.min(maximum, position + 1)
+    end
+
+    if position ~= desiredPosition then
+        WriteByte(ADDRESS.comboPosition, desiredPosition)
+    end
+    return true, desiredPosition, maximum, desiredAnimation
 end
 
 local function prepareGroundFinisher()
     local position, maximum = readGroundComboState()
     if position == nil then return false end
 
-    local finisherPosition = maximum - 1
+    -- Critical Mix's counter route writes maxGroundComboLength to request a
+    -- finisher. v0.2.2 incorrectly used max-1, which is still a normal slot.
+    local finisherPosition = maximum
     if position ~= finisherPosition then
         WriteByte(ADDRESS.comboPosition, finisherPosition)
     end
     return true, finisherPosition, maximum
 end
 
-local function queueAttackBuffer(player)
+local function queueAttackBuffer(player, comboPosition, expectedAnimation)
     attackBufferFrames = CONFIG.attackBufferFrames
     attackBufferDelayFrames = CONFIG.attackBufferDelayFrames
     attackBufferAnimation = player.animation
     attackBufferTime = player.time
     attackBufferWasAirborne = player.airborne
-    attackBufferComboPosition = ReadByte(ADDRESS.comboPosition)
+    attackBufferComboPosition = comboPosition
+    attackBufferExpectedAnimation = expectedAnimation
 end
 
 local function updateAttackBuffer(player)
@@ -479,11 +806,10 @@ local function updateAttackBuffer(player)
         return
     end
 
-    if attackBufferComboPosition ~= nil
-        and ReadByte(ADDRESS.comboPosition) ~= attackBufferComboPosition then
-        clearAttackBuffer()
-        return
-    end
+    -- The engine may rewrite comboPosition while the current animation is
+    -- still active. Keep the buffered intent and reapply its desired value at
+    -- command time; animation state, not this transient byte, decides whether
+    -- the physical press was already consumed.
 
     -- A changed attack ID, or the same ID restarting at time zero, means the
     -- game already consumed the physical press. Do not synthesize a duplicate.
@@ -506,23 +832,32 @@ local function updateAttackBuffer(player)
         and player.control == 0x03 and player.animation <= 0x07
     if not canLinkNow and not returnedToNeutral then return end
 
-    local desiredComboPosition = nil
-    if not player.airborne then
-        local prepared, position = prepareNormalGroundAttack()
-        if not prepared then return end
-        desiredComboPosition = position
-    end
+    local desiredComboPosition = attackBufferComboPosition
+    local expectedAnimation = attackBufferExpectedAnimation
 
     if canLinkNow then
         if queueAttackAfterRelease(
-            player, "normal", desiredComboPosition) then
+            player, "normal", desiredComboPosition, expectedAnimation) then
             clearAttackBuffer()
         end
-    elseif triggerAttackCommand() then
+    else
+        if desiredComboPosition ~= nil then
+            WriteByte(ADDRESS.comboPosition, desiredComboPosition)
+        end
+        local routeArmed = false
+        if expectedAnimation ~= nil then
+            routeArmed = beginGroundActionRoute(
+                "normal", expectedAnimation, player)
+        end
+        armTransitionCheck(player, "normal", expectedAnimation,
+            desiredComboPosition)
         log(string.format(
-            "target-free normal command issued from neutral: combo=%d",
-            ReadByte(ADDRESS.comboPosition)))
-        armTransitionCheck(player, "normal")
+            "target-free normal pulse armed from neutral: combo=%d "
+            .. "expected=%s route=%s",
+            ReadByte(ADDRESS.comboPosition),
+            expectedAnimation ~= nil
+                and string.format("0x%02X", expectedAnimation) or "native",
+            tostring(routeArmed)))
         clearAttackBuffer()
     end
 end
@@ -553,15 +888,20 @@ local function updateFinisherBuffer(player)
 
     if canLinkNow then
         if queueAttackAfterRelease(
-            player, "finisher", finisherPosition) then
+            player, "finisher", finisherPosition, 0xCB) then
             clearComboIntent()
         end
-    elseif triggerAttackCommand() then
+    else
+        WriteByte(ADDRESS.comboPosition, finisherPosition)
+        local routeArmed = beginGroundActionRoute("finisher", 0xCB, player)
+        armTransitionCheck(player, "finisher", 0xCB,
+            finisherPosition)
         log(string.format(
-            "target-free finisher command issued from neutral: combo=%d max=%d",
+            "target-free finisher pulse armed from neutral: "
+            .. "combo=%d max=%d route=%s",
             ReadByte(ADDRESS.comboPosition),
-            ReadByte(ADDRESS.maxGroundComboLength)))
-        armTransitionCheck(player, "finisher")
+            ReadByte(ADDRESS.maxGroundComboLength),
+            tostring(routeArmed)))
         clearComboIntent()
     end
 end
@@ -644,6 +984,15 @@ function _OnInit()
     forceSquareFrames = 0
     forceGuardFrames = 0
     comboWarningShown = false
+    transitionPulsePhaseFrames = 0
+    syntheticAttackCommandOwned = false
+    syntheticAttackCommandHigh = false
+    groundRouteAvailable = false
+    groundRouteFrames = 0
+    groundRouteAnimation = nil
+    groundRouteKind = nil
+    groundRouteSourceAnimation = nil
+    groundRouteSourceTime = 0.0
 
     if not CONFIG.enabled then
         ConsolePrint("JokCombat Combat Prototype is disabled in CONFIG.")
@@ -654,6 +1003,10 @@ function _OnInit()
         ConsolePrint("JokCombat Combat Prototype - unsupported game/build; disabled.")
         return
     end
+
+    local staleSyntheticAttack = ReadInt(ADDRESS.triggerMenu1) ~= 0
+        or ReadInt(ADDRESS.triggerMenu2) ~= 0
+    clearSyntheticAttackCommand(true)
 
     local valid = true
     valid = normalizeByte("forceCircle", ADDRESS.forceCircleBranch, 0x74,
@@ -674,10 +1027,17 @@ function _OnInit()
         0xFF, { 0xFF, 0x05, 0xFE }) and valid
     if not valid then return end
 
+    local routeValid = normalizeGroundActionRoute()
+
     canRun = true
     ConsolePrint(
         "JokCombat Combat Prototype " .. VERSION
         .. " initialized (Steam GL; combat-only; experimental).")
+    log("ground action route " .. (routeValid and "ready." or
+        "unavailable; combo-position fallback only."))
+    if staleSyntheticAttack then
+        log("cleared stale synthetic Attack flags during reload.")
+    end
 
     local position, maximum = readGroundComboState()
     if position ~= nil then
@@ -688,7 +1048,11 @@ function _OnInit()
 end
 
 function _OnFrame()
-    if not canRun or faulted then return end
+    if not canRun then return end
+    if faulted then
+        restoreAllPatches()
+        return
+    end
 
     local player = readPlayer()
     if player == nil then
@@ -722,9 +1086,6 @@ function _OnFrame()
         return
     end
 
-    updateTransitionCheck(player)
-    local deferredHandledThisFrame = updateDeferredAttackCommand(player)
-
     local l2Held = (buttons & BUTTON.L2) ~= 0
     local circlePressed = pressStarted(buttons, BUTTON.CIRCLE)
     local crossPressed = pressStarted(buttons, BUTTON.CROSS)
@@ -732,9 +1093,9 @@ function _OnFrame()
     local trianglePressed = pressStarted(buttons, BUTTON.TRIANGLE)
     local guardPressed = chordStarted(buttons, BUTTON.L2, BUTTON.CIRCLE)
     local cancelWindowOpen = isCancelableAttack(player)
-    local actionConsumed = deferredHandledThisFrame
-        or deferredLinkKind ~= nil
+    local actionConsumed = false
     local chainWasArmed = groundChainFrames > 0
+        or isGroundNormalContext(player)
 
     -- Guard is the sole universal cancel. It can break any current action and,
     -- through airDefenseBranch, is also allowed while Sora is airborne.
@@ -747,6 +1108,7 @@ function _OnFrame()
         clearComboIntent()
         clearTransitionCheck()
         clearDeferredAttackCommand()
+        restoreGroundActionRoute()
         actionConsumed = true
     elseif circlePressed and not l2Held then
         -- A normal jump breaks the local ground chain. It only cancels an
@@ -754,6 +1116,7 @@ function _OnFrame()
         clearComboIntent()
         clearTransitionCheck()
         clearDeferredAttackCommand()
+        restoreGroundActionRoute()
         actionConsumed = true
         if CONFIG.groundToAirJumpBranch and not player.airborne
             and cancelWindowOpen then
@@ -766,6 +1129,7 @@ function _OnFrame()
         clearComboIntent()
         clearTransitionCheck()
         clearDeferredAttackCommand()
+        restoreGroundActionRoute()
         actionConsumed = true
         if CONFIG.defensiveCancels and cancelWindowOpen then
             cancelPlayer(player, "dodge")
@@ -773,36 +1137,95 @@ function _OnFrame()
         end
     end
 
+    -- Triangle has priority over a normal link that is buffered, waiting for
+    -- release, or being retried. This makes Cross -> Triangle deterministic
+    -- even if Triangle arrives during the few dispatcher frames between them.
+    local finisherRequested = false
+    if not actionConsumed and CONFIG.triangleGroundFinisher and trianglePressed
+        and not player.airborne
+        and ReadByte(ADDRESS.commandMenuSlot) == 0 then
+        local finisherAlreadyPending = finisherBufferFrames > 0
+            or deferredLinkKind == "finisher"
+            or transitionKind == "finisher"
+        if finisherAlreadyPending then
+            finisherRequested = true
+            log("Triangle finisher already pending; repeated input ignored.")
+        elseif chainWasArmed then
+            clearAttackBuffer()
+            queuedNormalInput = false
+            clearDeferredAttackCommand()
+            clearTransitionCheck()
+            finisherBufferFrames = CONFIG.attackBufferFrames
+            groundChainFrames = CONFIG.groundChainMemoryFrames
+            finisherRequested = true
+            log("Triangle finisher queued after a ground normal; normal request replaced.")
+        else
+            log("Triangle finisher ignored: no preceding ground normal.")
+        end
+    end
+
+    local deferredHandledThisFrame = false
+    local transitionAcceptedKind = nil
+    local deferredAcceptedKind = nil
     if not actionConsumed then
-        if crossPressed and ReadByte(ADDRESS.commandMenuSlot) == 0 then
+        updateGroundActionRoute(player)
+        transitionAcceptedKind = updateTransitionCheck(player)
+        deferredHandledThisFrame, deferredAcceptedKind =
+            updateDeferredAttackCommand(player)
+        actionConsumed = deferredHandledThisFrame
+            or deferredLinkKind ~= nil
+            or transitionKind ~= nil
+    end
+
+    local acceptedKind = transitionAcceptedKind or deferredAcceptedKind
+    local replayedNormalInput = false
+    if acceptedKind == "normal" and queuedNormalInput then
+        queuedNormalInput = false
+        replayedNormalInput = true
+        actionConsumed = false
+        log("buffered normal input replayed on the new attack.")
+    elseif acceptedKind == "normal" then
+        -- A naturally accepted link can resolve inside the deferred phase.
+        -- Let a new physical press from this same frame be read normally.
+        actionConsumed = false
+    end
+
+    local normalPipelineBusy = transitionKind == "normal"
+        or deferredLinkKind == "normal"
+    if actionConsumed and normalPipelineBusy and crossPressed
+        and not finisherRequested and finisherBufferFrames <= 0
+        and ReadByte(ADDRESS.commandMenuSlot) == 0 then
+        if not queuedNormalInput then
+            log("normal input buffered behind the pending link.")
+        end
+        queuedNormalInput = true
+    end
+
+    if not actionConsumed then
+        local normalInputRequested = crossPressed or replayedNormalInput
+        if normalInputRequested and not finisherRequested
+            and finisherBufferFrames <= 0
+            and ReadByte(ADDRESS.commandMenuSlot) == 0 then
             clearFinisherBuffer()
             local comboPrepared = true
+            local desiredPosition = nil
+            local expectedAnimation = nil
             if not player.airborne then
-                local position, maximum
-                comboPrepared, position, maximum = prepareNormalGroundAttack()
+                local maximum
+                comboPrepared, desiredPosition, maximum, expectedAnimation =
+                    prepareNormalGroundAttack(player, chainWasArmed)
                 if comboPrepared then
                     groundChainFrames = CONFIG.groundChainMemoryFrames
                     log(string.format(
-                        "normal input accepted: combo=%d max=%d",
-                        position, maximum))
+                        "normal input accepted: combo=%d max=%d expected=0x%02X",
+                        desiredPosition, maximum, expectedAnimation))
                 end
             end
 
             if CONFIG.attackBuffer and isAttackContext(player)
                 and (player.airborne or comboPrepared) then
-                queueAttackBuffer(player)
-            end
-        end
-
-        if CONFIG.triangleGroundFinisher and trianglePressed
-            and not player.airborne
-            and ReadByte(ADDRESS.commandMenuSlot) == 0 then
-            if chainWasArmed then
-                clearAttackBuffer()
-                finisherBufferFrames = CONFIG.attackBufferFrames
-                log("Triangle finisher queued after a ground normal.")
-            else
-                log("Triangle finisher ignored: no preceding ground normal.")
+                queueAttackBuffer(
+                    player, desiredPosition, expectedAnimation)
             end
         end
 
