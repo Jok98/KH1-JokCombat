@@ -1,0 +1,9 @@
+# Runtime output and local backups
+*.log
+*.bak
+*.codex-backup-*
+*.pre-v*.lua
+
+# Windows metadata
+Thumbs.db
+Desktop.ini
