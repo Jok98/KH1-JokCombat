@@ -2,7 +2,7 @@ LUAGUI_NAME = "JokCombat Combat Prototype"
 LUAGUI_AUTH = "Jok; Critical Mix reference by Xendra / KSX"
 LUAGUI_DESC = "Cross combo, configurable Action Ability loadout, universal Guard/Dodge cancels and jump branch."
 
--- JokCombat v0.4.15 prototype for the current Steam Global executable.
+-- JokCombat v0.5.0 prototype for the current Steam Global executable.
 -- Critical Mix was used as an authorized technical reference. This script is
 -- intentionally limited to combat/input state and does not touch save data,
 -- story flags, rewards, inventory, AP, levels, worlds, chests, or synthesis.
@@ -40,6 +40,9 @@ local CONFIG = {
     -- A normal ground attack accepts one next-hit request only near its native
     -- link point. Earlier spam is ignored instead of being carried forward.
     groundLinkPrebufferLead = 4.0,
+    -- The aerial string follows the same one-request rule. CC and CD accept
+    -- their next input shortly before their respective release windows.
+    airLinkPrebufferLead = 4.0,
     groundChainMemoryFrames = 90,
     releasedCommandMinimumFrames = 1,
     releasedCommandTimeoutFrames = 60,
@@ -56,7 +59,7 @@ local CONFIG = {
 
 local EXPECTED_GAME_ID = 0xAF71841E
 local FINGERPRINT = 0x7265737563697065 -- "epicures", little endian
-local VERSION = "v0.4.15"
+local VERSION = "v0.5.0"
 
 local ADDRESS = {
     fingerprint = 0x3B2271,
@@ -652,7 +655,7 @@ local function loadActionLoadout()
 
     local file = io.open(loadoutPath, "r")
     if file == nil then
-        log("loadout file not found; using v0.4.15 defaults.")
+        log("loadout file not found; using v0.5.0 defaults.")
         return
     end
 
@@ -683,7 +686,7 @@ local function saveActionLoadout()
         return false
     end
 
-    file:write("# JokCombat v0.4.15 Action Ability loadout\n")
+    file:write("# JokCombat v0.5.0 Action Ability loadout\n")
     file:write("# Guard remains fixed on L2+Circle; Dodge Roll on Square.\n")
     file:write("action_overlay=", HUD.enabled and "true" or "false", "\n")
     for _, slot in ipairs(ACTION_SLOTS) do
@@ -2125,6 +2128,11 @@ local function isGroundNormalContext(player)
     return false
 end
 
+local function isAirNormalContext(player)
+    return player.airborne and isAttackContext(player)
+        and (player.animation == 0xCC or player.animation == 0xCD)
+end
+
 local function pressStarted(buttons, mask)
     return (buttons & mask) ~= 0 and (lastButtons & mask) == 0
 end
@@ -2309,9 +2317,14 @@ local function updateDeferredAttackCommand(player)
         local expectedAnimation = deferredLinkExpectedAnimation
         local desiredComboPosition = deferredLinkComboPosition
         local routeArmed = false
-        if expectedAnimation ~= nil and not player.airborne then
-            routeArmed = beginGroundActionRoute(
-                kind, expectedAnimation, player)
+        if expectedAnimation ~= nil then
+            if player.airborne then
+                routeArmed = beginAirActionRoute(
+                    kind, expectedAnimation, player)
+            else
+                routeArmed = beginGroundActionRoute(
+                    kind, expectedAnimation, player)
+            end
         end
         armTransitionCheck(
             player, kind, expectedAnimation, desiredComboPosition)
@@ -2512,6 +2525,14 @@ local function prepareNormalGroundAttack(player, chainOpen)
     return true, desiredPosition, maximum, desiredAnimation
 end
 
+local function prepareNormalAirAttack(player)
+    if not isAirNormalContext(player) then return false end
+    local desiredAnimation = player.animation == 0xCC and 0xCD or 0xCE
+    -- Complete aerial records are routed explicitly, so this path does not
+    -- depend on the early save's native max-air-combo byte or combo counter.
+    return true, nil, desiredAnimation
+end
+
 local function prepareGroundFinisher()
     local position, maximum = readGroundComboState()
     if position == nil then return false end
@@ -2589,8 +2610,13 @@ local function updateAttackBuffer(player)
         end
         local routeArmed = false
         if expectedAnimation ~= nil then
-            routeArmed = beginGroundActionRoute(
-                "normal", expectedAnimation, player)
+            if player.airborne then
+                routeArmed = beginAirActionRoute(
+                    "normal", expectedAnimation, player)
+            else
+                routeArmed = beginGroundActionRoute(
+                    "normal", expectedAnimation, player)
+            end
         end
         armTransitionCheck(player, "normal", expectedAnimation,
             desiredComboPosition)
@@ -3527,26 +3553,27 @@ function _OnFrame()
 
     local physicalCrossConsumedByFreshNative = crossPressed
         and acceptedKind ~= "normal"
-        and isGroundNormalContext(player)
+        and (isGroundNormalContext(player) or isAirNormalContext(player))
         and player.control ~= 0x03
         and player.time <= 0.5
 
     local normalPipelineBusy = transitionKind == "normal"
         or deferredLinkKind == "normal"
-    local groundFinisherActive = not player.airborne
-        and player.animation == 0xCB
+    local normalFinisherActive = (not player.airborne
+            and player.animation == 0xCB)
+        or (player.airborne and player.animation == 0xCE)
     local normalInputSuppressed = crossPressed
         and (normalPipelineBusy or attackBufferFrames > 0
-            or groundFinisherActive)
+            or normalFinisherActive)
         and not finisherRequested and finisherBufferFrames <= 0
         and ReadByte(ADDRESS.commandMenuSlot) == 0
     if normalInputSuppressed then
         if attackBufferFrames > 0 then
             log("Cross ignored: this animation already owns its next link.")
         elseif normalPipelineBusy then
-            log("Cross ignored: the current ground link is transitioning.")
+            log("Cross ignored: the current combo link is transitioning.")
         else
-            log("Cross ignored: ground finisher must return to neutral.")
+            log("Cross ignored: combo finisher must end first.")
         end
     end
 
@@ -3558,38 +3585,59 @@ function _OnFrame()
             and ReadByte(ADDRESS.commandMenuSlot) == 0 then
             clearFinisherBuffer()
             -- LuaBackend can observe the same physical Cross only after KH1
-            -- has already used it to enter a fresh ground animation. Treating
-            -- that edge as a buffer as well made one press produce C8 and C9,
-            -- shortening the visible string and reaching CB one input early.
+            -- has already used it to enter a fresh normal animation. Treating
+            -- that edge as a buffer as well made one press produce two attacks
+            -- on both the ground and aerial paths.
             local nativeCrossAlreadyConsumed =
                 physicalCrossConsumedByFreshNative
 
             if nativeCrossAlreadyConsumed then
                 clearAttackBuffer()
-                groundChainFrames = CONFIG.groundChainMemoryFrames
+                if not player.airborne then
+                    groundChainFrames = CONFIG.groundChainMemoryFrames
+                end
                 log(string.format(
                     "native Cross edge consumed by fresh 0x%02X; "
                     .. "next link not queued.", player.animation))
             else
-                local groundInputWindowOpen = true
-                if not player.airborne and isGroundNormalContext(player) then
+                local normalInputWindowOpen = true
+                local inputOpensAt = nil
+                local inputWindowName = nil
+                if isGroundNormalContext(player) then
                     local linkTime = CANCEL_WINDOW[player.animation]
-                    local inputOpensAt = math.max(
+                    inputOpensAt = math.max(
                         0.0, linkTime - CONFIG.groundLinkPrebufferLead)
-                    groundInputWindowOpen = player.time >= inputOpensAt
-                    if not groundInputWindowOpen then
-                        log(string.format(
-                            "Cross ignored before ground link prebuffer: "
-                            .. "anim=0x%02X time=%.2f opens=%.2f.",
-                            player.animation, player.time, inputOpensAt))
-                    end
+                    inputWindowName = "ground"
+                elseif isAirNormalContext(player) then
+                    local linkTime = CANCEL_WINDOW[player.animation]
+                    inputOpensAt = math.max(
+                        0.0, linkTime - CONFIG.airLinkPrebufferLead)
+                    inputWindowName = "aerial"
+                end
+                if inputOpensAt ~= nil then
+                    normalInputWindowOpen = player.time >= inputOpensAt
+                end
+                if not normalInputWindowOpen then
+                    log(string.format(
+                        "Cross ignored before %s link prebuffer: "
+                        .. "anim=0x%02X time=%.2f opens=%.2f.",
+                        inputWindowName, player.animation,
+                        player.time, inputOpensAt))
                 end
 
-                if groundInputWindowOpen then
+                if normalInputWindowOpen then
                     local comboPrepared = true
                     local desiredPosition = nil
                     local expectedAnimation = nil
-                    if not player.airborne then
+                    if player.airborne then
+                        comboPrepared, desiredPosition,
+                            expectedAnimation = prepareNormalAirAttack(player)
+                        if comboPrepared then
+                            log(string.format(
+                                "Aerial Cross input accepted: expected=0x%02X",
+                                expectedAnimation))
+                        end
+                    else
                         local maximum
                         comboPrepared, desiredPosition, maximum,
                             expectedAnimation = prepareNormalGroundAttack(
