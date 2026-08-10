@@ -155,7 +155,7 @@ La repository contiene tre probe read-only e il primo prototipo combat:
   faccia e valida gli indirizzi Steam portati prima che il prototipo scriva;
 - `JokCombat_CommandMenuProbe.lua`: confronta in sola lettura controller,
   transizioni e strutture delle quattro righe native del Command Menu;
-- `JokCombat_CombatPrototype.lua`: prototipo v0.5.0 con combo terrestre completa
+- `JokCombat_CombatPrototype.lua`: prototipo v0.5.1 con combo terrestre completa
   e combo aerea `CC -> CD -> CE`,
   e finisher su Croce, undici slot Action Ability configurabili,
   Triangolo non modificato lasciato nativo,
@@ -172,7 +172,7 @@ Requisito di design confermato: JokCombat fornisce dall'inizio un loadout
 runtime di sole Action Ability, indipendente dallo sblocco vanilla e senza
 inserirle nel salvataggio. Guard e Dodge Roll restano comandi fissi; abilita'
 passive, condivise, movimento, magia e Limit a consumo MP non compaiono
-nell'editor v0.5.0. Queste ultime richiedono un dispatcher diverso dalla route
+nell'editor v0.5.1. Queste ultime richiedono un dispatcher diverso dalla route
 Attack e verranno analizzate separatamente, senza fingere che siano gia'
 supportate.
 
@@ -198,8 +198,8 @@ pacchetto Critical Mix sono conservati, ma non caricati, nelle directory
 `C:\Users\<utente>\Documents\KH_mod\reference\CriticalMix`. Backup, log e
 copie runtime restano locali e non fanno parte del repository.
 
-Per verificare la v0.5.0, premi `F1` nella console LuaBackend. Il log iniziale
-deve mostrare `v0.5.0`, `ground action route ready`, `aerial action route ready`,
+Per verificare la v0.5.1, premi `F1` nella console LuaBackend. Il log iniziale
+deve mostrare `v0.5.1`, `ground action route ready`, `aerial action route ready`,
 `complete action records ready: 11/11`
 `native Command Menu overlay ready` e
 `native Ripple Drive/Stun Impact/Gravity Break/Zantetsuken selectors ready`.
@@ -222,7 +222,7 @@ Magic, Items o Summon e, mentre una direzione e' tenuta, nessuna mossa o tasto
 faccia deve raggiungere il dispatcher di combattimento.
 Rilasciare prima il modificatore mantiene questo blocco fino al rilascio del
 D-pad. La configurazione non richiede una conferma: rilasciare il modificatore
-salva automaticamente. Limite live noto della v0.5.0: premere Croce mentre il
+salva automaticamente. Limite live noto della v0.5.1: premere Croce mentre il
 cursore si trova sulla seconda o terza riga permette ancora a KH1 di aprire
 rispettivamente Magic o Items prima del ripristino su Attack. Fino alla fix,
 torna sulla prima riga oppure rilascia e ripremi il modificatore prima di usare
@@ -275,9 +275,11 @@ parte finale prepara un solo link e le successive devono essere ignorate.
 In aria, tre pressioni distinte devono produrre `CC -> CD -> CE`, anche senza
 bersaglio. Le pressioni prima del tempo `8` su `CC` o del tempo `10` su `CD`
 devono essere ignorate; la prima valida deve mostrare
-`Aerial Cross input accepted` e la route attesa. Durante `CE`, ulteriori Croce
-devono produrre `Cross ignored: combo finisher must end first` e non riavviare
-la stringa.
+`Aerial Cross input accepted` e la route attesa. Durante `CE`, Croce prima del
+tempo `20` deve produrre `Cross ignored: combo finisher must end first` senza
+essere conservata. Una nuova Croce da `20` in poi deve mostrare
+`Aerial finisher cycle requested: CE -> CC`, quindi riaprire `CC` se Sora e'
+ancora in aria. L'atterraggio deve interrompere il ciclo normalmente.
 Durante `DC`, Quadrato senza modificatori deve produrre
 `Dodge input ignored`; `L2 + Cerchio` deve dare Guard; Cerchio senza
 modificatori deve saltare e Triangolo senza modificatori deve restare vanilla.
@@ -425,7 +427,12 @@ viene riutilizzato; `CC` accetta una sola richiesta da tempo `8`, `CD` da tempo
 `10`, e `CE` chiude la stringa senza poter essere concatenata su se stessa.
 La route non dipende dal valore di combo aerea sbloccato nel salvataggio, quindi
 la finisher e' disponibile anche nelle prime sezioni del gioco.
+La v0.5.1 rende la stringa ciclica mentre Sora resta realmente in aria:
+`CC -> CD -> CE -> CC`. `CE` non usa il prebuffer; gli input prima del tempo
+`20` vengono scartati e una nuova pressione valida instrada il record completo
+`CC`. Il ciclo non modifica quota, velocita' verticale o stato airborne, quindi
+la gravita' e l'atterraggio restano i limiti naturali della concatenazione.
 Prima di aggiungere Limit, movement o magic cancel, ogni voce del catalogo
-v0.5.0 deve essere validata live e le route devono
+v0.5.1 deve essere validata live e le route devono
 risultare sempre ripristinate dopo successo, timeout, Guard, Dodge, salto,
 reload e perdita del player object.
