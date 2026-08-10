@@ -8,7 +8,7 @@ LUAGUI_DESC = "Read-only Steam probe for KH1's native four-row Command Menu."
 
 local EXPECTED_GAME_ID = 0xAF71841E
 local FINGERPRINT = 0x7265737563697065 -- "epicures", little endian
-local VERSION = "v0.1.0"
+local VERSION = "v0.1.2"
 local SETTLE_FRAMES = 18
 local TEXT_RECHECK_FRAMES = 300
 local HEARTBEAT_FRAMES = 900
@@ -21,9 +21,14 @@ local ADDRESS = {
     -- Steam Global ports of Critical Mix's currentCommandMenu and
     -- currentCommandMenuSlot globals.
     currentMenu = 0x2852790,
+    visualSlot = 0x2852794,
     currentSlot = 0x28527AC,
     lastSlot = 0x28527B0,
     menuVisibility = 0x285280C,
+    dpadUpControlMap = 0x22C933C,
+    dpadRightControlMap = 0x22C933D,
+    dpadDownControlMap = 0x22C933E,
+    dpadLeftControlMap = 0x22C933F,
 
     -- This global points into the live World message-resource owner. On the
     -- validated executable the World text base is owner-0x50 and its byte
@@ -144,31 +149,43 @@ end
 local function readMenuState()
     return {
         menu = ReadByte(ADDRESS.currentMenu),
+        visualSlot = ReadByte(ADDRESS.visualSlot),
         slot = ReadByte(ADDRESS.currentSlot),
         lastSlot = ReadByte(ADDRESS.lastSlot),
         visibility = u32(ReadInt(ADDRESS.menuVisibility)),
         raw = ReadByte(ADDRESS.rawButtons),
         dpad = ReadByte(ADDRESS.dpadButtons),
+        upMap = ReadByte(ADDRESS.dpadUpControlMap),
+        rightMap = ReadByte(ADDRESS.dpadRightControlMap),
+        downMap = ReadByte(ADDRESS.dpadDownControlMap),
+        leftMap = ReadByte(ADDRESS.dpadLeftControlMap),
     }
 end
 
 local function keyFor(state)
-    return string.format("%02X:%02X:%02X",
-        state.menu, state.slot, state.lastSlot)
+    return string.format("%02X:%02X:%02X:%02X:%02X:%02X:%02X:%02X",
+        state.menu, state.visualSlot, state.slot, state.lastSlot,
+        state.upMap, state.rightMap, state.downMap, state.leftMap)
 end
 
 local function logMenuState(state, reason)
     ConsolePrint(string.format(
-        "[JokCombat:cmdprobe:%s] menu=%d(%s) slot=%d last=%d "
-        .. "visibility=0x%08X raw=0x%02X dpad=0x%02X",
+        "[JokCombat:cmdprobe:%s] menu=%d(%s) visual=%d slot=%d last=%d "
+        .. "visibility=0x%08X raw=0x%02X dpad=0x%02X "
+        .. "maps=%02X/%02X/%02X/%02X",
         reason,
         state.menu,
         menuName(state.menu),
+        state.visualSlot,
         state.slot,
         state.lastSlot,
         state.visibility,
         state.raw,
-        state.dpad))
+        state.dpad,
+        state.upMap,
+        state.rightMap,
+        state.downMap,
+        state.leftMap))
 end
 
 local function validateRows()
@@ -324,10 +341,11 @@ end
 local function finishSettledCapture(state, secondSnapshots)
     captureNumber = captureNumber + 1
     ConsolePrint(string.format(
-        "[JokCombat:cmdprobe:capture] #%d menu=%d(%s) slot=%d last=%d",
+        "[JokCombat:cmdprobe:capture] #%d menu=%d(%s) visual=%d slot=%d last=%d",
         captureNumber,
         state.menu,
         menuName(state.menu),
+        state.visualSlot,
         state.slot,
         state.lastSlot))
 
@@ -405,13 +423,18 @@ function _OnFrame()
     if state.raw ~= lastInputRaw or state.dpad ~= lastInputDpad then
         ConsolePrint(string.format(
             "[JokCombat:cmdprobe:input] raw=0x%02X(%s) dpad=0x%02X(%s) "
-            .. "menu=%d slot=%d",
+            .. "menu=%d visual=%d slot=%d maps=%02X/%02X/%02X/%02X",
             state.raw,
             namesFor(state.raw, BUTTONS),
             state.dpad,
             namesFor(state.dpad, DPAD),
             state.menu,
-            state.slot))
+            state.visualSlot,
+            state.slot,
+            state.upMap,
+            state.rightMap,
+            state.downMap,
+            state.leftMap))
         lastInputRaw = state.raw
         lastInputDpad = state.dpad
     end

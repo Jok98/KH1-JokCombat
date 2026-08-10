@@ -90,21 +90,17 @@ vanilla.
 > nel test live.
 >
 > **Candidato v0.3.8:** tenere `L2`, `R2` oppure `L2 + R2` sostituisce
-> temporaneamente le quattro etichette del Command Menu nativo in basso a
+> temporaneamente fino a quattro etichette del Command Menu nativo in basso a
 > sinistra. L2 presenta le tre Action Ability e `Cerchio: Guard`; R2 e L2+R2
 > presentano i rispettivi quattro slot. Comandi, selezione ed effetti vanilla
-> non vengono modificati: soltanto i quattro puntatori testuali sono deviati ai
+> non vengono modificati: soltanto i puntatori testuali sono deviati ai
 > buffer JokCombat e ripristinati al rilascio. `L1 + R1 + L2 + R2` abilita o
 > disabilita persistentemente il riepilogo.
 >
-> **Candidato v0.3.9:** sui salvataggi iniziali la quarta voce vanilla ha ID
-> `0x00` e non possiede un record grafico disegnabile. Durante il solo
-> riepilogo, e finche' D-pad e tasti faccia sono neutralizzati, JokCombat usa
-> temporaneamente il record `Summon` come supporto grafico della quarta
-> etichetta e ripristina l'ID originale al rilascio, al reload e all'uscita.
-> Il D-pad viene ora isolato dal cursore vanilla: nasconde le etichette solo
-> mentre e' premuto e queste ricompaiono al rilascio senza lasciare il menu in
-> uno stato invalido.
+> **Risultato v0.3.9:** il D-pad viene isolato dal cursore vanilla e il menu
+> ricompare correttamente al rilascio. Il tentativo di usare `Summon` come
+> supporto grafico per una quarta riga non ancora sbloccata non viene invece
+> disegnato dal gioco.
 >
 > **Candidato v0.4.0:** il riepilogo nativo diventa anche l'editor. Tenendo
 > `L2`, `R2` oppure `L2 + R2`, `D-pad Su/Giu` seleziona una delle righe
@@ -113,6 +109,42 @@ vanilla.
 > rilascio o al cambio del modificatore. `L2 + Circle: Guard` rimane visibile
 > ma fisso e viene saltato dalla selezione. Durante ogni input D-pad, cursore
 > vanilla, route Attack e tasti faccia restano neutralizzati.
+>
+> **Esperimenti v0.4.1-v0.4.3, rimossi:** copia del record `Summon`, scrittura
+> dello slot portato da Critical Mix e ampliamento del loop root da tre a
+> quattro iterazioni non hanno prodotto una quarta riga visibile. La struttura
+> `com_fra_d` di Summon e' separata dalle tre righe root `com_fra_c`; la v0.4.4
+> non mantiene nessuno di questi hack e non scrive record, slot Summon o codice
+> del renderer.
+>
+> **Candidato v0.4.4:** l'overlay modifica esclusivamente i token testuali
+> delle righe native realmente presenti. Un quarto ID `0x00`/`0xFF` viene
+> trattato come Summon bloccato: vengono mostrate e configurate tre righe. Dopo
+> lo sblocco naturale, il nuovo ID non nullo viene rilevato automaticamente e
+> abilita la quarta riga senza cambiare progressione o salvataggio. Un cleanup
+> di migrazione ripristina una sola volta eventuali scritture rimaste attive
+> passando dalle versioni sperimentali precedenti.
+>
+> **Candidato v0.4.5:** le etichette usano una legenda Xbox universale e
+> compatta dopo il nome della mossa: Croce=`[A]`, Triangolo=`[Y]`,
+> Quadrato=`[X]`, Cerchio=`[B]`. Sono caratteri KHSCII, non sprite, quindi la
+> stessa legenda viene mostrata con qualunque controller e non dipende dal
+> rilevamento automatico del dispositivo.
+>
+> **Candidato v0.4.6:** il simbolo precede il nome e tutte le schermate seguono
+> l'ordine del menu Shortcut nativo: `[Y]`, `[X]`, `[A]`, `[B]`. Le abilita'
+> restano associate ai loro tasti reali; cambia soltanto l'ordine visuale e di
+> navigazione dell'editor.
+>
+> **Risultato v0.4.8, rimosso:** scrivere insieme `controller +0x14` e lo slot
+> logico `+0x2C` desatura correttamente la prima riga, ma non esegue la
+> trasformazione completa del cursore: il simbolo finisce dentro il testo.
+>
+> **Candidato v0.4.9:** `Su/Giu` non forza piu' gli indici. Per il solo impulso
+> verticale l'editor ripristina temporaneamente il control-map nativo e lascia
+> che KH1 muova pannello e cursore con la propria animazione completa.
+> `Sinistra/Destra` restano isolati e cambiano soltanto l'Action Ability; alla
+> chiusura entrambi gli slot vengono recuperati su Attack.
 
 La repository contiene tre probe read-only e il primo prototipo combat:
 
@@ -123,7 +155,7 @@ La repository contiene tre probe read-only e il primo prototipo combat:
   faccia e valida gli indirizzi Steam portati prima che il prototipo scriva;
 - `JokCombat_CommandMenuProbe.lua`: confronta in sola lettura controller,
   transizioni e strutture delle quattro righe native del Command Menu;
-- `JokCombat_CombatPrototype.lua`: prototipo v0.4.0 con combo terrestre completa
+- `JokCombat_CombatPrototype.lua`: prototipo v0.4.9 con combo terrestre completa
   e finisher su Croce, undici slot Action Ability configurabili,
   Triangolo non modificato lasciato nativo,
   jump-cancel terra -> aria, Guard universale su L2 + Cerchio e Dodge Roll
@@ -139,7 +171,7 @@ Requisito di design confermato: JokCombat fornisce dall'inizio un loadout
 runtime di sole Action Ability, indipendente dallo sblocco vanilla e senza
 inserirle nel salvataggio. Guard e Dodge Roll restano comandi fissi; abilita'
 passive, condivise, movimento, magia e Limit a consumo MP non compaiono
-nell'editor v0.4.0. Queste ultime richiedono un dispatcher diverso dalla route
+nell'editor v0.4.9. Queste ultime richiedono un dispatcher diverso dalla route
 Attack e verranno analizzate separatamente, senza fingere che siano gia'
 supportate.
 
@@ -165,8 +197,8 @@ pacchetto Critical Mix sono conservati, ma non caricati, nelle directory
 `C:\Users\<utente>\Documents\KH_mod\reference\CriticalMix`. Backup, log e
 copie runtime restano locali e non fanno parte del repository.
 
-Per verificare la v0.4.0, premi `F1` nella console LuaBackend. Il log iniziale
-deve mostrare `v0.4.0`, `ground action route ready`, `aerial action route ready`,
+Per verificare la v0.4.9, premi `F1` nella console LuaBackend. Il log iniziale
+deve mostrare `v0.4.9`, `ground action route ready`, `aerial action route ready`,
 `complete action records ready: 11/11`
 `native Command Menu overlay ready` e
 `native Stun Impact/Zantetsuken selectors ready`.
@@ -174,18 +206,31 @@ deve mostrare `v0.4.0`, `ground action route ready`, `aerial action route ready`
 Tieni un modificatore per visualizzare e configurare il relativo gruppo: `L2`,
 `R2` oppure entrambi per `L2+R2`. Il riepilogo mostra sempre un massimo di
 quattro righe nel Command Menu originale in basso a sinistra. Premi `Su/Giu`
-per selezionare lo slot; la riga attiva riceve il prefisso `+`. Premi
-`Sinistra/Destra` per scegliere l'Action Ability precedente o successiva. Le
+per selezionare lo slot: keyblade e riquadro colorato devono seguire la riga,
+senza prefisso `+`. Premi `Sinistra/Destra` per scegliere l'Action Ability
+precedente o successiva. Le
 righe cambiano immediatamente e vengono salvate una sola volta quando rilasci
-il modificatore o passi a un altro gruppo. Nel gruppo L2, Su/Giu attraversa
-soltanto X, Triangolo e Quadrato: `Circle: Guard` non viene modificato.
+il modificatore o passi a un altro gruppo. Ogni gruppo segue l'ordine
+`[Y]`, `[X]`, `[A]`, `[B]`; con i default L2 mostra `[Y] Slapshot`,
+`[X] Sliding Dash`, `[A] Stun Impact` e `[B] Guard`. Nel gruppo L2, Su/Giu
+attraversa soltanto Triangolo, Quadrato e Croce: Guard non viene modificato ed
+e' la quarta etichetta quando Summon e' disponibile.
 
-Il D-pad non deve muovere il cursore vanilla e, mentre una direzione e' tenuta,
-nessuna mossa o tasto faccia deve raggiungere il dispatcher di combattimento.
+Il D-pad pilota soltanto la posizione grafica del cursore root; non deve aprire
+Magic, Items o Summon e, mentre una direzione e' tenuta, nessuna mossa o tasto
+faccia deve raggiungere il dispatcher di combattimento.
 Rilasciare prima il modificatore mantiene questo blocco fino al rilascio del
-D-pad. Premere invece un tasto faccia senza D-pad nasconde il riepilogo ed
-esegue normalmente la mossa assegnata. Se la quarta voce vanilla non e' ancora
-sbloccata, il log aggiunge `row4-carrier=06`.
+D-pad. La configurazione non richiede una conferma: rilasciare il modificatore
+salva automaticamente. Limite live noto della v0.4.9: premere Croce mentre il
+cursore si trova sulla seconda o terza riga permette ancora a KH1 di aprire
+rispettivamente Magic o Items prima del ripristino su Attack. Fino alla fix,
+torna sulla prima riga oppure rilascia e ripremi il modificatore prima di usare
+la scorciatoia su Croce. Se Summon non e' ancora sbloccato, il menu espone
+soltanto le prime tre righe e il log indica
+`visible=3/4 (Summon locked)`. Il quarto shortcut R2/L2+R2 resta eseguibile con
+il valore gia' presente nel file di configurazione, ma diventa selezionabile
+nel menu solo quando KH1 crea naturalmente la quarta riga. Da quel momento il
+log passa a `visible=4/4` e l'editor la include automaticamente.
 
 Premi e rilascia `L1 + R1 + L2 + R2` senza D-pad per alternare persistentemente
 il riepilogo. Per ripristinare gli undici default, tieni gli stessi quattro
@@ -297,16 +342,27 @@ dal selettore nativo. La v0.3.5 forza temporaneamente gate finisher e tiro del
 La v0.3.6 applica lo stesso percorso nativo a Zantetsuken `0xD9` e rimuove dal
 catalogo l'erronea route Limit `0xDB`.
 La v0.3.7 aggiunge il primo riepilogo contestuale usando due box HUD. La v0.3.8
-segue il renderer originale: preserva i quattro command ID e devia soltanto i
-relativi token testuali verso quattro buffer da 0x20 byte, con record di recupero
-per reload inattesi e toggle persistente.
-La v0.3.9 gestisce anche la quarta riga assente sui salvataggi iniziali mediante
-un command ID grafico temporaneo incluso nello stesso recupero e impedisce al
-D-pad di alterare lo slot nativo mentre il riepilogo e' attivo.
+segue il renderer originale e devia i token testuali delle righe presenti verso
+quattro buffer da 0x20 byte, con record di recupero per reload inattesi e toggle
+persistente. La v0.3.9 impedisce al D-pad di alterare lo slot nativo mentre il
+riepilogo e' attivo; il suo carrier grafico per la quarta riga non ha funzionato.
 La v0.4.0 elimina il precedente editor a box e modifica direttamente il
-loadout nelle quattro righe native, con selezione marcata, isolamento completo
+loadout nelle righe native, con selezione marcata, isolamento completo
 degli input durante il D-pad e salvataggio automatico alla chiusura del gruppo.
+Le prove v0.4.1-v0.4.3 sulla quarta riga bloccata sono state falsificate dal
+test live e rimosse. La v0.4.4 modifica soltanto i token delle tre righe
+esistenti finche' Summon e' bloccato, poi riconosce automaticamente il quarto
+ID creato dalla progressione vanilla e abilita anche quella riga.
+La v0.4.5 sostituisce i nomi estesi dei pulsanti con la legenda universale
+`[A]/[Y]/[X]/[B]`, lasciando piu' spazio al nome dell'Action Ability.
+La v0.4.6 porta il simbolo davanti al nome e uniforma l'ordine di ogni gruppo a
+quello del menu Shortcut: `[Y] -> [X] -> [A] -> [B]`.
+La v0.4.7 ha verificato che scrivere soltanto lo slot logico non muove la
+grafica. La v0.4.8 ha dimostrato che scrivere anche il selettore visuale avvia
+solo una parte della transizione e corrompe la posizione del simbolo. La
+v0.4.9 delega invece a KH1 il solo impulso verticale e ripristina entrambi gli
+slot su Attack prima che un input di combattimento venga elaborato.
 Prima di aggiungere Limit, movement o magic cancel, ogni voce del catalogo
-v0.4.0 deve essere validata live e le route devono
+v0.4.9 deve essere validata live e le route devono
 risultare sempre ripristinate dopo successo, timeout, Guard, Dodge, salto,
 reload e perdita del player object.
