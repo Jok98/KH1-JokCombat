@@ -2,7 +2,7 @@ LUAGUI_NAME = "JokCombat Combat Prototype"
 LUAGUI_AUTH = "Jok; Critical Mix reference by Xendra / KSX"
 LUAGUI_DESC = "Cross combo, configurable Action Ability loadout, universal Guard/Dodge cancels and jump branch."
 
--- JokCombat v0.5.0 prototype for the current Steam Global executable.
+-- JokCombat v0.5.1 prototype for the current Steam Global executable.
 -- Critical Mix was used as an authorized technical reference. This script is
 -- intentionally limited to combat/input state and does not touch save data,
 -- story flags, rewards, inventory, AP, levels, worlds, chests, or synthesis.
@@ -43,6 +43,10 @@ local CONFIG = {
     -- The aerial string follows the same one-request rule. CC and CD accept
     -- their next input shortly before their respective release windows.
     airLinkPrebufferLead = 4.0,
+    -- CE remains protected through its hit/recovery. Unlike CC/CD, presses
+    -- before this time are discarded rather than buffered; a fresh press at
+    -- or after the threshold may explicitly restart the aerial string at CC.
+    airFinisherRestartTime = 20.0,
     groundChainMemoryFrames = 90,
     releasedCommandMinimumFrames = 1,
     releasedCommandTimeoutFrames = 60,
@@ -59,7 +63,7 @@ local CONFIG = {
 
 local EXPECTED_GAME_ID = 0xAF71841E
 local FINGERPRINT = 0x7265737563697065 -- "epicures", little endian
-local VERSION = "v0.5.0"
+local VERSION = "v0.5.1"
 
 local ADDRESS = {
     fingerprint = 0x3B2271,
@@ -655,7 +659,7 @@ local function loadActionLoadout()
 
     local file = io.open(loadoutPath, "r")
     if file == nil then
-        log("loadout file not found; using v0.5.0 defaults.")
+        log("loadout file not found; using v0.5.1 defaults.")
         return
     end
 
@@ -686,7 +690,7 @@ local function saveActionLoadout()
         return false
     end
 
-    file:write("# JokCombat v0.5.0 Action Ability loadout\n")
+    file:write("# JokCombat v0.5.1 Action Ability loadout\n")
     file:write("# Guard remains fixed on L2+Circle; Dodge Roll on Square.\n")
     file:write("action_overlay=", HUD.enabled and "true" or "false", "\n")
     for _, slot in ipairs(ACTION_SLOTS) do
@@ -3559,12 +3563,16 @@ function _OnFrame()
 
     local normalPipelineBusy = transitionKind == "normal"
         or deferredLinkKind == "normal"
-    local normalFinisherActive = (not player.airborne
+    local aerialFinisherActive = player.airborne
+        and player.animation == 0xCE
+    local aerialFinisherRestartReady = aerialFinisherActive
+        and player.time >= CONFIG.airFinisherRestartTime
+    local normalFinisherLocked = (not player.airborne
             and player.animation == 0xCB)
-        or (player.airborne and player.animation == 0xCE)
+        or (aerialFinisherActive and not aerialFinisherRestartReady)
     local normalInputSuppressed = crossPressed
         and (normalPipelineBusy or attackBufferFrames > 0
-            or normalFinisherActive)
+            or normalFinisherLocked)
         and not finisherRequested and finisherBufferFrames <= 0
         and ReadByte(ADDRESS.commandMenuSlot) == 0
     if normalInputSuppressed then
@@ -3591,7 +3599,15 @@ function _OnFrame()
             local nativeCrossAlreadyConsumed =
                 physicalCrossConsumedByFreshNative
 
-            if nativeCrossAlreadyConsumed then
+            if aerialFinisherRestartReady then
+                clearAttackBuffer()
+                if queueAttackAfterRelease(
+                        player, "normal", nil, 0xCC) then
+                    log(string.format(
+                        "Aerial finisher cycle requested: "
+                        .. "CE -> CC at time=%.2f.", player.time))
+                end
+            elseif nativeCrossAlreadyConsumed then
                 clearAttackBuffer()
                 if not player.airborne then
                     groundChainFrames = CONFIG.groundChainMemoryFrames
