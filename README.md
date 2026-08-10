@@ -155,7 +155,7 @@ La repository contiene tre probe read-only e il primo prototipo combat:
   faccia e valida gli indirizzi Steam portati prima che il prototipo scriva;
 - `JokCombat_CommandMenuProbe.lua`: confronta in sola lettura controller,
   transizioni e strutture delle quattro righe native del Command Menu;
-- `JokCombat_CombatPrototype.lua`: prototipo v0.4.9 con combo terrestre completa
+- `JokCombat_CombatPrototype.lua`: prototipo v0.4.10 con combo terrestre completa
   e finisher su Croce, undici slot Action Ability configurabili,
   Triangolo non modificato lasciato nativo,
   jump-cancel terra -> aria, Guard universale su L2 + Cerchio e Dodge Roll
@@ -171,7 +171,7 @@ Requisito di design confermato: JokCombat fornisce dall'inizio un loadout
 runtime di sole Action Ability, indipendente dallo sblocco vanilla e senza
 inserirle nel salvataggio. Guard e Dodge Roll restano comandi fissi; abilita'
 passive, condivise, movimento, magia e Limit a consumo MP non compaiono
-nell'editor v0.4.9. Queste ultime richiedono un dispatcher diverso dalla route
+nell'editor v0.4.10. Queste ultime richiedono un dispatcher diverso dalla route
 Attack e verranno analizzate separatamente, senza fingere che siano gia'
 supportate.
 
@@ -197,11 +197,11 @@ pacchetto Critical Mix sono conservati, ma non caricati, nelle directory
 `C:\Users\<utente>\Documents\KH_mod\reference\CriticalMix`. Backup, log e
 copie runtime restano locali e non fanno parte del repository.
 
-Per verificare la v0.4.9, premi `F1` nella console LuaBackend. Il log iniziale
-deve mostrare `v0.4.9`, `ground action route ready`, `aerial action route ready`,
+Per verificare la v0.4.10, premi `F1` nella console LuaBackend. Il log iniziale
+deve mostrare `v0.4.10`, `ground action route ready`, `aerial action route ready`,
 `complete action records ready: 11/11`
 `native Command Menu overlay ready` e
-`native Stun Impact/Zantetsuken selectors ready`.
+`native Ripple Drive/Stun Impact/Gravity Break/Zantetsuken selectors ready`.
 
 Tieni un modificatore per visualizzare e configurare il relativo gruppo: `L2`,
 `R2` oppure entrambi per `L2+R2`. Il riepilogo mostra sempre un massimo di
@@ -221,7 +221,7 @@ Magic, Items o Summon e, mentre una direzione e' tenuta, nessuna mossa o tasto
 faccia deve raggiungere il dispatcher di combattimento.
 Rilasciare prima il modificatore mantiene questo blocco fino al rilascio del
 D-pad. La configurazione non richiede una conferma: rilasciare il modificatore
-salva automaticamente. Limite live noto della v0.4.9: premere Croce mentre il
+salva automaticamente. Limite live noto della v0.4.10: premere Croce mentre il
 cursore si trova sulla seconda o terza riga permette ancora a KH1 di aprire
 rispettivamente Magic o Items prima del ripristino su Attack. Fino alla fix,
 torna sulla prima riga oppure rilascia e ripremi il modificatore prima di usare
@@ -339,7 +339,8 @@ anticipo dal modificatore. La v0.3.4 usa record completi al posto della sola
 animazione, ma il test ha dimostrato che gli effetti speciali dipendono anche
 dal selettore nativo. La v0.3.5 forza temporaneamente gate finisher e tiro del
 30% per Stun Impact, mantenendo vanilla il codice fuori dalla relativa chord.
-La v0.3.6 applica lo stesso percorso nativo a Zantetsuken `0xD9` e rimuove dal
+La v0.3.6 applica lo stesso percorso nativo alla voce allora identificata come
+Zantetsuken `0xD9` e rimuove dal
 catalogo l'erronea route Limit `0xDB`.
 La v0.3.7 aggiunge il primo riepilogo contestuale usando due box HUD. La v0.3.8
 segue il renderer originale e devia i token testuali delle righe presenti verso
@@ -362,7 +363,16 @@ grafica. La v0.4.8 ha dimostrato che scrivere anche il selettore visuale avvia
 solo una parte della transizione e corrompe la posizione del simbolo. La
 v0.4.9 delega invece a KH1 il solo impulso verticale e ripristina entrambi gli
 slot su Attack prima che un input di combattimento venga elaborato.
+La v0.4.10 corregge la mappa del selettore finisher ricavata dal disassemblato
+Steam: `0xD9` e il record index 4 appartengono a Gravity Break, mentre `0xDA` e
+il record index 5 appartengono a Zantetsuken. Durante una shortcut mantiene
+temporaneamente attivo soltanto il bit della finisher richiesta: Ripple Drive
+usa il bit nativo diretto, mentre Stun Impact, Gravity Break e Zantetsuken
+forzano al 100% soltanto il proprio ramo probabilistico. Al rilascio, i quattro
+bit e tutte le istruzioni vengono ripristinati esattamente allo stato vanilla.
+Questo dovrebbe permettere al dispatcher nativo di creare anche VFX, hitbox e
+danno di Ripple Drive; la conferma finale richiede un test live sui nemici.
 Prima di aggiungere Limit, movement o magic cancel, ogni voce del catalogo
-v0.4.9 deve essere validata live e le route devono
+v0.4.10 deve essere validata live e le route devono
 risultare sempre ripristinate dopo successo, timeout, Guard, Dodge, salto,
 reload e perdita del player object.

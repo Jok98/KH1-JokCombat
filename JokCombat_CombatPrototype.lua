@@ -2,7 +2,7 @@ LUAGUI_NAME = "JokCombat Combat Prototype"
 LUAGUI_AUTH = "Jok; Critical Mix reference by Xendra / KSX"
 LUAGUI_DESC = "Cross combo, configurable Action Ability loadout, universal Guard/Dodge cancels and jump branch."
 
--- JokCombat v0.4.9 prototype for the current Steam Global executable.
+-- JokCombat v0.4.10 prototype for the current Steam Global executable.
 -- Critical Mix was used as an authorized technical reference. This script is
 -- intentionally limited to combat/input state and does not touch save data,
 -- story flags, rewards, inventory, AP, levels, worlds, chests, or synthesis.
@@ -53,7 +53,7 @@ local CONFIG = {
 
 local EXPECTED_GAME_ID = 0xAF71841E
 local FINGERPRINT = 0x7265737563697065 -- "epicures", little endian
-local VERSION = "v0.4.9"
+local VERSION = "v0.4.10"
 
 local ADDRESS = {
     fingerprint = 0x3B2271,
@@ -112,10 +112,10 @@ local ADDRESS = {
     -- also depends on the native action selector. These addresses remain
     -- signature-validated before any transient route is copied.
     actionRecordStunImpact = 0x2D2D76C,
-    actionRecordGravityBreak = 0x2D2D794,
+    actionRecordGravityBreak = 0x2D2D780,
     actionRecordBlitz = 0x2D2D7A8,
     actionRecordRippleDrive = 0x2D2D7BC,
-    actionRecordZantetsuken = 0x2D2D780,
+    actionRecordZantetsuken = 0x2D2D794,
     actionRecordCounterattack = 0x2D2DC08,
 
     dpadUpControlMap = 0x22C933C,
@@ -133,14 +133,15 @@ local ADDRESS = {
     guardSelectionBranch = 0x2A7C01,    -- 74 normal, EB choose guard
     dodgeAvailabilityBranch = 0x2A7C1F, -- 84 normal, 82 enabled
 
-    -- Native ground-finisher selector. Stun Impact and Zantetsuken are gated
-    -- first by the current combo position and then by consecutive vanilla
-    -- random < 0.30 tests. The relevant branches are bypassed only while one
-    -- of those shortcuts is active, letting KH1 create the complete native
-    -- action (animation, VFX, hitbox and damage) rather than a routed pose.
+    -- Native ground-finisher selector. Ripple Drive uses its equipped bit
+    -- directly; Stun Impact, Gravity Break and Zantetsuken then use three
+    -- consecutive probability branches. The relevant branch is bypassed only
+    -- while its shortcut is active, letting KH1 create animation, VFX, hitbox
+    -- and damage rather than merely entering the routed pose.
     groundFinisherGateBranch = 0x2A6F8A, -- 72 71 normal, 90 90 forced
     stunImpactChanceBranch = 0x2A6FAF,   -- 76 07 normal, 90 90 forced
-    zantetsukenChanceBranch = 0x2A6FC5,  -- 76 07 normal, 90 90 forced
+    gravityBreakChanceBranch = 0x2A6FC5, -- 76 07 normal, 90 90 forced
+    zantetsukenChanceBranch = 0x2A6FDF,  -- 76 07 normal, 90 90 forced
 
     -- Native KH notification storage remains available to the loadout editor.
     -- While the editor is closed, its four 0x20-byte line buffers feed the
@@ -197,10 +198,14 @@ local DODGE_ROLL_ANIMATION = 0xDC
 local ACTION_KIND_PREFIX = "action:"
 local ACTION_PRIME_PREFIX = "action-prime:"
 local ACTION_RECORD_SIZE = 0x14
+local RIPPLE_DRIVE_ABILITY_BIT = 0x04000000
 local STUN_IMPACT_ABILITY_BIT = 0x08000000
-local ZANTETSUKEN_ABILITY_BIT = 0x10000000
-local NATIVE_FINISHER_ABILITY_MASK = STUN_IMPACT_ABILITY_BIT
+local GRAVITY_BREAK_ABILITY_BIT = 0x10000000
+local ZANTETSUKEN_ABILITY_BIT = 0x20000000
+local NATIVE_FINISHER_ABILITY_MASK = RIPPLE_DRIVE_ABILITY_BIT
+    | STUN_IMPACT_ABILITY_BIT | GRAVITY_BREAK_ABILITY_BIT
     | ZANTETSUKEN_ABILITY_BIT
+local NATIVE_FINISHER_ABILITY_CLEAR_MASK = 0xC3FFFFFF
 
 -- Only Sora combat Action Abilities are exposed. Guard and Dodge Roll stay on
 -- their fixed controls; support, shared and special/Limit abilities never enter
@@ -265,16 +270,16 @@ local ACTION_CATALOG = {
             0x00, 0x00, 0x00, 0x00, 0x1B, 0x05, 0x1B, 0x06,
             0x00, 0x00, 0x00, 0x00 } },
     { id = "gravity_break", name = "Gravity Break", context = "ground",
-        animation = 0xDA, finisher = true,
-        recordAddress = ADDRESS.actionRecordGravityBreak,
-        record = { 0xDA, 0x00, 0x05, 0xFF, 0xD8, 0x4F, 0x00, 0x00,
-            0x00, 0x00, 0x00, 0x00, 0x18, 0x05, 0x18, 0x06,
-            0x00, 0x00, 0x00, 0x00 } },
-    { id = "zantetsuken", name = "Zantetsuken", context = "ground",
         animation = 0xD9, finisher = true,
-        recordAddress = ADDRESS.actionRecordZantetsuken,
+        recordAddress = ADDRESS.actionRecordGravityBreak,
         record = { 0xD9, 0x00, 0x05, 0xFF, 0x68, 0x4F, 0x00, 0x00,
             0x00, 0x00, 0x00, 0x00, 0x17, 0x05, 0x17, 0x06,
+            0x00, 0x00, 0x00, 0x00 } },
+    { id = "zantetsuken", name = "Zantetsuken", context = "ground",
+        animation = 0xDA, finisher = true,
+        recordAddress = ADDRESS.actionRecordZantetsuken,
+        record = { 0xDA, 0x00, 0x05, 0xFF, 0xD8, 0x4F, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x18, 0x05, 0x18, 0x06,
             0x00, 0x00, 0x00, 0x00 } },
 }
 
@@ -636,7 +641,7 @@ local function loadActionLoadout()
 
     local file = io.open(loadoutPath, "r")
     if file == nil then
-        log("loadout file not found; using v0.4.9 defaults.")
+        log("loadout file not found; using v0.4.10 defaults.")
         return
     end
 
@@ -667,7 +672,7 @@ local function saveActionLoadout()
         return false
     end
 
-    file:write("# JokCombat v0.4.9 Action Ability loadout\n")
+    file:write("# JokCombat v0.4.10 Action Ability loadout\n")
     file:write("# Guard remains fixed on L2+Circle; Dodge Roll on Square.\n")
     file:write("action_overlay=", HUD.enabled and "true" or "false", "\n")
     for _, slot in ipairs(ACTION_SLOTS) do
@@ -1384,9 +1389,17 @@ local function restoreIfKnown(address, normal, known)
 end
 
 local NATIVE_FINISHER_SELECTOR = {
+    ripple_drive = {
+        abilityBit = RIPPLE_DRIVE_ABILITY_BIT,
+        chanceBranch = nil,
+    },
     stun_impact = {
         abilityBit = STUN_IMPACT_ABILITY_BIT,
         chanceBranch = ADDRESS.stunImpactChanceBranch,
+    },
+    gravity_break = {
+        abilityBit = GRAVITY_BREAK_ABILITY_BIT,
+        chanceBranch = ADDRESS.gravityBreakChanceBranch,
     },
     zantetsuken = {
         abilityBit = ZANTETSUKEN_ABILITY_BIT,
@@ -1394,7 +1407,12 @@ local NATIVE_FINISHER_SELECTOR = {
     },
 }
 
-local NATIVE_FINISHER_ACTION_IDS = { "stun_impact", "zantetsuken" }
+local NATIVE_FINISHER_ACTION_IDS = {
+    "ripple_drive",
+    "stun_impact",
+    "gravity_break",
+    "zantetsuken",
+}
 
 local function kindTargetsAction(kind, actionId)
     if type(kind) ~= "string" then return false end
@@ -1449,18 +1467,18 @@ local function restoreNativeFinisherSelection()
         { 0x72, 0x90 })
     restoreIfKnown(ADDRESS.groundFinisherGateBranch + 1, 0x71,
         { 0x71, 0x90 })
-    restoreIfKnown(ADDRESS.stunImpactChanceBranch, 0x76,
-        { 0x76, 0x90 })
-    restoreIfKnown(ADDRESS.stunImpactChanceBranch + 1, 0x07,
-        { 0x07, 0x90 })
-    restoreIfKnown(ADDRESS.zantetsukenChanceBranch, 0x76,
-        { 0x76, 0x90 })
-    restoreIfKnown(ADDRESS.zantetsukenChanceBranch + 1, 0x07,
-        { 0x07, 0x90 })
+    for _, selector in pairs(NATIVE_FINISHER_SELECTOR) do
+        if selector.chanceBranch ~= nil then
+            restoreIfKnown(selector.chanceBranch, 0x76,
+                { 0x76, 0x90 })
+            restoreIfKnown(selector.chanceBranch + 1, 0x07,
+                { 0x07, 0x90 })
+        end
+    end
 
     if nativeFinisherOriginalAbilityBits ~= nil then
         local current = ReadInt(ADDRESS.defenseAbilityFlags)
-        local restored = (current & 0xE7FFFFFF)
+        local restored = (current & NATIVE_FINISHER_ABILITY_CLEAR_MASK)
             | nativeFinisherOriginalAbilityBits
         if current ~= restored then
             WriteInt(ADDRESS.defenseAbilityFlags,
@@ -1500,16 +1518,12 @@ local function updateNativeFinisherSelection(buttons, player)
             & NATIVE_FINISHER_ABILITY_MASK
     end
 
-    local desiredAbilityBits = nativeFinisherOriginalAbilityBits
-    if action.id == "zantetsuken" then
-        -- Stun Impact is tested first by the native selector. Temporarily clear
-        -- its runtime bit so the guaranteed D9 branch cannot be pre-empted.
-        desiredAbilityBits = (desiredAbilityBits & 0xF7FFFFFF)
-            | ZANTETSUKEN_ABILITY_BIT
-    else
-        desiredAbilityBits = desiredAbilityBits | STUN_IMPACT_ABILITY_BIT
-    end
-    local desiredAbilities = (abilities & 0xE7FFFFFF) | desiredAbilityBits
+    -- The native selector scans these finishers in a fixed order. Keep only
+    -- the requested bit active during the shortcut so another equipped action
+    -- cannot pre-empt it; restore the exact original four bits afterwards.
+    local desiredAbilities =
+        (abilities & NATIVE_FINISHER_ABILITY_CLEAR_MASK)
+        | selector.abilityBit
     if abilities ~= desiredAbilities then
         WriteInt(ADDRESS.defenseAbilityFlags, desiredAbilities)
     end
@@ -1521,26 +1535,26 @@ local function updateNativeFinisherSelection(buttons, player)
     valid = setByte("groundFinisherGateDisplacement",
         ADDRESS.groundFinisherGateBranch + 1, 0x90,
         { 0x71, 0x90 }) and valid
-    valid = setByte("stunImpactChanceOpcode",
-        ADDRESS.stunImpactChanceBranch,
-        action.id == "stun_impact" and 0x90 or 0x76,
-        { 0x76, 0x90 }) and valid
-    valid = setByte("stunImpactChanceDisplacement",
-        ADDRESS.stunImpactChanceBranch + 1,
-        action.id == "stun_impact" and 0x90 or 0x07,
-        { 0x07, 0x90 }) and valid
-    valid = setByte("zantetsukenChanceOpcode",
-        ADDRESS.zantetsukenChanceBranch,
-        action.id == "zantetsuken" and 0x90 or 0x76,
-        { 0x76, 0x90 }) and valid
-    valid = setByte("zantetsukenChanceDisplacement",
-        ADDRESS.zantetsukenChanceBranch + 1,
-        action.id == "zantetsuken" and 0x90 or 0x07,
-        { 0x07, 0x90 }) and valid
+    for actionId, candidate in pairs(NATIVE_FINISHER_SELECTOR) do
+        if candidate.chanceBranch ~= nil then
+            local forced = action.id == actionId
+            valid = setByte(actionId .. "ChanceOpcode",
+                candidate.chanceBranch,
+                forced and 0x90 or 0x76,
+                { 0x76, 0x90 }) and valid
+            valid = setByte(actionId .. "ChanceDisplacement",
+                candidate.chanceBranch + 1,
+                forced and 0x90 or 0x07,
+                { 0x07, 0x90 }) and valid
+        end
+    end
 
     if valid and newlyActive then
-        log(action.name
-            .. " native selector armed: finisher gate + 100% roll.")
+        local selectorMode = selector.chanceBranch == nil
+            and "equipped-bit route"
+            or "finisher gate + 100% roll"
+        log(action.name .. " native selector armed: "
+            .. selectorMode .. ".")
     end
     return valid
 end
@@ -3151,18 +3165,16 @@ function _OnInit()
     valid = normalizeByte("groundFinisherGateDisplacement",
         ADDRESS.groundFinisherGateBranch + 1, 0x71,
         { 0x71, 0x90 }) and valid
-    valid = normalizeByte("stunImpactChanceOpcode",
-        ADDRESS.stunImpactChanceBranch, 0x76,
-        { 0x76, 0x90 }) and valid
-    valid = normalizeByte("stunImpactChanceDisplacement",
-        ADDRESS.stunImpactChanceBranch + 1, 0x07,
-        { 0x07, 0x90 }) and valid
-    valid = normalizeByte("zantetsukenChanceOpcode",
-        ADDRESS.zantetsukenChanceBranch, 0x76,
-        { 0x76, 0x90 }) and valid
-    valid = normalizeByte("zantetsukenChanceDisplacement",
-        ADDRESS.zantetsukenChanceBranch + 1, 0x07,
-        { 0x07, 0x90 }) and valid
+    for actionId, selector in pairs(NATIVE_FINISHER_SELECTOR) do
+        if selector.chanceBranch ~= nil then
+            valid = normalizeByte(actionId .. "ChanceOpcode",
+                selector.chanceBranch, 0x76,
+                { 0x76, 0x90 }) and valid
+            valid = normalizeByte(actionId .. "ChanceDisplacement",
+                selector.chanceBranch + 1, 0x07,
+                { 0x07, 0x90 }) and valid
+        end
+    end
     valid = normalizeByte("dpadUpControlMap", ADDRESS.dpadUpControlMap,
         0xFF, { 0xFF, 0xFE }) and valid
     valid = normalizeByte("dpadRightControlMap", ADDRESS.dpadRightControlMap,
@@ -3209,7 +3221,8 @@ function _OnInit()
         .. (HUD.enabled and "on." or "off."))
     log("fourth loadout row follows the native Summon unlock; early saves "
         .. "show and edit the three rows KH1 currently renders.")
-    log("native Stun Impact/Zantetsuken selectors ready: shortcut rolls forced to 100%.")
+    log("native Ripple Drive/Stun Impact/Gravity Break/Zantetsuken "
+        .. "selectors ready.")
     if staleSyntheticAttack then
         log("cleared stale synthetic Attack flags during reload.")
     end
