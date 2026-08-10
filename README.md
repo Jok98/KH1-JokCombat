@@ -155,7 +155,7 @@ La repository contiene tre probe read-only e il primo prototipo combat:
   faccia e valida gli indirizzi Steam portati prima che il prototipo scriva;
 - `JokCombat_CommandMenuProbe.lua`: confronta in sola lettura controller,
   transizioni e strutture delle quattro righe native del Command Menu;
-- `JokCombat_CombatPrototype.lua`: prototipo v0.4.10 con combo terrestre completa
+- `JokCombat_CombatPrototype.lua`: prototipo v0.4.15 con combo terrestre completa
   e finisher su Croce, undici slot Action Ability configurabili,
   Triangolo non modificato lasciato nativo,
   jump-cancel terra -> aria, Guard universale su L2 + Cerchio e Dodge Roll
@@ -171,7 +171,7 @@ Requisito di design confermato: JokCombat fornisce dall'inizio un loadout
 runtime di sole Action Ability, indipendente dallo sblocco vanilla e senza
 inserirle nel salvataggio. Guard e Dodge Roll restano comandi fissi; abilita'
 passive, condivise, movimento, magia e Limit a consumo MP non compaiono
-nell'editor v0.4.10. Queste ultime richiedono un dispatcher diverso dalla route
+nell'editor v0.4.15. Queste ultime richiedono un dispatcher diverso dalla route
 Attack e verranno analizzate separatamente, senza fingere che siano gia'
 supportate.
 
@@ -197,8 +197,8 @@ pacchetto Critical Mix sono conservati, ma non caricati, nelle directory
 `C:\Users\<utente>\Documents\KH_mod\reference\CriticalMix`. Backup, log e
 copie runtime restano locali e non fanno parte del repository.
 
-Per verificare la v0.4.10, premi `F1` nella console LuaBackend. Il log iniziale
-deve mostrare `v0.4.10`, `ground action route ready`, `aerial action route ready`,
+Per verificare la v0.4.15, premi `F1` nella console LuaBackend. Il log iniziale
+deve mostrare `v0.4.15`, `ground action route ready`, `aerial action route ready`,
 `complete action records ready: 11/11`
 `native Command Menu overlay ready` e
 `native Ripple Drive/Stun Impact/Gravity Break/Zantetsuken selectors ready`.
@@ -221,7 +221,7 @@ Magic, Items o Summon e, mentre una direzione e' tenuta, nessuna mossa o tasto
 faccia deve raggiungere il dispatcher di combattimento.
 Rilasciare prima il modificatore mantiene questo blocco fino al rilascio del
 D-pad. La configurazione non richiede una conferma: rilasciare il modificatore
-salva automaticamente. Limite live noto della v0.4.10: premere Croce mentre il
+salva automaticamente. Limite live noto della v0.4.15: premere Croce mentre il
 cursore si trova sulla seconda o terza riga permette ancora a KH1 di aprire
 rispettivamente Magic o Items prima del ripristino su Attack. Fino alla fix,
 torna sulla prima riga oppure rilascia e ripremi il modificatore prima di usare
@@ -264,7 +264,14 @@ chord. Testare ogni azione prima senza target e poi su nemici, verificando
 animazione, hitbox, danno e stati applicati.
 
 Controlla infine la regressione: Croce senza modificatori deve conservare
-`C8 -> C9 -> CA -> CB`; durante `DC`, Quadrato senza modificatori deve produrre
+`C8 -> C9 -> CA -> CB`, con quattro pressioni distinte. Il primo fronte che
+KH1 ha gia' usato per entrare in `C8` deve produrre il log
+`native Cross edge consumed by fresh 0xC8; next link not queued` e non deve
+generare automaticamente anche `C9`. Le pressioni prima del tempo `14` su
+`C8/C9` o del tempo `16` su `CA` devono dare
+`Cross ignored before ground link prebuffer`; la prima pressione valida nella
+parte finale prepara un solo link e le successive devono essere ignorate.
+Durante `DC`, Quadrato senza modificatori deve produrre
 `Dodge input ignored`; `L2 + Cerchio` deve dare Guard; Cerchio senza
 modificatori deve saltare e Triangolo senza modificatori deve restare vanilla.
 `F2` mostra o nasconde la console.
@@ -372,7 +379,40 @@ forzano al 100% soltanto il proprio ramo probabilistico. Al rilascio, i quattro
 bit e tutte le istruzioni vengono ripristinati esattamente allo stato vanilla.
 Questo dovrebbe permettere al dispatcher nativo di creare anche VFX, hitbox e
 danno di Ripple Drive; la conferma finale richiede un test live sui nemici.
+La v0.4.11 corregge il doppio consumo del fronte Croce nella combo terrestre.
+LuaBackend puo' osservare una pressione nello stesso frame in cui KH1 l'ha gia'
+usata per avviare una nuova animazione: prima quel singolo fronte apriva `C8` e
+veniva anche accodato come richiesta di `C9`, portando la finisher un input in
+anticipo. Ora una Croce coincidente con il frame iniziale di `C8`, `C9` o `CA`
+vale soltanto per l'azione appena iniziata; gli input successivi continuano a
+usare il buffer target-free e le finestre `18/18/20` restano invariate per
+isolare questa correzione.
+La v0.4.12 sostituisce il successivo buffer booleano one-deep con una coda di
+tre fronti Croce. Se il prossimo link e' gia' preparato o in transizione, ogni
+nuova pressione aumenta `normal input queued: depth=N`; a ogni nuova animazione
+viene consumata una sola voce con
+`queued normal input replayed on the new attack: remaining=N`. La coda viene
+azzerata quando compare `CB`, evitando che lo spam oltre la finisher produca
+un attacco ritardato nella combo successiva.
+Il test live della v0.4.12 ha mostrato che proprio quell'azzeramento eliminava
+tre input validi (`dropped=3`) e interrompeva lo spam. La v0.4.13 conserva
+quindi fino a dodici fronti, non li consuma durante `CB` e ne usa uno quando
+Sora torna neutrale per avviare la stringa successiva da `C8`. Il log
+`queued Cross restarting ground string` identifica il riavvio; le altre voci
+restano in coda e continuano a essere consumate una per ogni animazione.
+La v0.4.14 rimuove questo modello dopo che il test ha mostrato attacchi
+automatici prolungati oltre `CB`. Ogni animazione normale possiede ora un solo
+slot, chiuso durante la parte iniziale e aperto quattro unita' prima della
+finestra di link: `14` per `C8/C9`, `16` per `CA`. Lo spam anticipato non viene
+registrato, una richiesta valida non puo' essere sovrascritta e `CB` non
+conserva input per la stringa successiva.
+La v0.4.15 separa l'apertura di quel singolo slot dal momento di rilascio
+dell'animazione. `C9`, identificato dalla reference autorizzata come affondo
+del Keyblade, continua ad accettare il prossimo input da tempo `14`, ma conserva
+la richiesta fino a tempo `34`. In questo modo lo spam non accoda altri colpi e
+non tronca la parte visibile dell'affondo; `C8` e `CA` mantengono le soglie
+precedenti.
 Prima di aggiungere Limit, movement o magic cancel, ogni voce del catalogo
-v0.4.10 deve essere validata live e le route devono
+v0.4.15 deve essere validata live e le route devono
 risultare sempre ripristinate dopo successo, timeout, Guard, Dodge, salto,
 reload e perdita del player object.
