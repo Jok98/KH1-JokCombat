@@ -2,7 +2,7 @@ LUAGUI_NAME = "JokCombat Combat Prototype"
 LUAGUI_AUTH = "Jok; Critical Mix reference by Xendra / KSX"
 LUAGUI_DESC = "Cross combo, configurable Action Ability loadout, universal Guard/Dodge cancels and jump branch."
 
--- JokCombat v0.6.9 prototype for the current Steam Global executable.
+-- JokCombat v0.6.10 prototype for the current Steam Global executable.
 -- Critical Mix was used as an authorized technical reference. This script is
 -- intentionally limited to combat/input state and does not touch save data,
 -- story flags, rewards, inventory, AP, levels, worlds, chests, or synthesis.
@@ -67,7 +67,7 @@ local CONFIG = {
 
 local EXPECTED_GAME_ID = 0xAF71841E
 local FINGERPRINT = 0x7265737563697065 -- "epicures", little endian
-local VERSION = "v0.6.9"
+local VERSION = "v0.6.10"
 
 local ADDRESS = {
     fingerprint = 0x3B2271,
@@ -683,7 +683,7 @@ local function loadActionLoadout()
 
     local file = io.open(loadoutPath, "r")
     if file == nil then
-        log("loadout file not found; using v0.6.9 defaults.")
+        log("loadout file not found; using v0.6.10 defaults.")
         return
     end
 
@@ -714,7 +714,7 @@ local function saveActionLoadout()
         return false
     end
 
-    file:write("# JokCombat v0.6.9 Action Ability loadout\n")
+    file:write("# JokCombat v0.6.10 Action Ability loadout\n")
     file:write("# Guard remains fixed on L2+Circle; Dodge Roll on Square.\n")
     file:write("action_overlay=", HUD.enabled and "true" or "false", "\n")
     for _, slot in ipairs(ACTION_SLOTS) do
@@ -3382,10 +3382,14 @@ local function updateDefenseRouting(buttons, guardAvailable, dodgeActive)
     local r2Held = (buttons & BUTTON.R2) ~= 0
     local circleHeld = (buttons & BUTTON.CIRCLE) ~= 0
     local squareHeld = (buttons & BUTTON.SQUARE) ~= 0
-    local anyModifierHeld = l2Held or r2Held
+    local actionModifierHeld = l2Held or r2Held
+    -- L1/R1 own KH1's native magic shortcut layer. Fixed Dodge must leave
+    -- Square completely vanilla while either shortcut modifier is held.
+    local nativeShortcutHeld = (buttons & (BUTTON.L1 | BUTTON.R1)) ~= 0
+    local anyDodgeModifierHeld = actionModifierHeld or nativeShortcutHeld
     local guardChord = l2Held and not r2Held and circleHeld
     local dodgeSquareHeld = squareHeld and not dodgeActive
-        and not anyModifierHeld
+        and not anyDodgeModifierHeld
 
     local circleMap = NORMAL.circleControlMap
     local squareMap = NORMAL.squareControlMap
@@ -3408,7 +3412,7 @@ local function updateDefenseRouting(buttons, guardAvailable, dodgeActive)
         circleMap = 0xFE
         squareMap = 0xFE
     end
-    if dodgeActive and squareHeld and not anyModifierHeld then
+    if dodgeActive and squareHeld and not anyDodgeModifierHeld then
         -- Once DC has begun, physical Square must not feed the shared defense
         -- action again. Guard remains available through its Circle mapping.
         squareMap = 0xFE
@@ -3429,7 +3433,8 @@ local function updateDefenseRouting(buttons, guardAvailable, dodgeActive)
         and (guardChord or forceGuardFrames > 0)
     local allowAirDodge = CONFIG.universalDodgeCancel
         and forceGuardFrames == 0
-        and (dodgeSquareHeld or forceSquareFrames > 0)
+        and (dodgeSquareHeld
+            or (forceSquareFrames > 0 and not nativeShortcutHeld))
     setByte("airDefense", ADDRESS.airDefenseBranch,
         (allowAirGuard or allowAirDodge) and 0x82 or 0x85,
         { 0x85, 0x82 })
@@ -3439,7 +3444,8 @@ local function updateDefenseRouting(buttons, guardAvailable, dodgeActive)
     -- was selected only after Square was observed, so a stationary first press
     -- could already have entered Guard and a second press appeared to roll.
     if CONFIG.fixedDodgeOnSquare and forceGuardFrames == 0
-        and (not anyModifierHeld or forceSquareFrames > 0) then
+        and (not anyDodgeModifierHeld
+            or (forceSquareFrames > 0 and not nativeShortcutHeld)) then
         guardAvailability = 0xEB
     end
     setByte("guardAvailability", ADDRESS.guardAvailabilityBranch,
@@ -3450,7 +3456,7 @@ local function updateDefenseRouting(buttons, guardAvailable, dodgeActive)
     -- enabling it on L2 alone caused the unwanted automatic Guard.
     if (CONFIG.guardOnL2Circle and guardChord)
         or (CONFIG.fixedDodgeOnSquare and dodgeSquareHeld)
-        or forceSquareFrames > 0 then
+        or (forceSquareFrames > 0 and not nativeShortcutHeld) then
         setByte("forceSquare", ADDRESS.forceSquareBranch, 0x82,
             { 0x84, 0x82 })
     else
@@ -3751,6 +3757,7 @@ function _OnFrame()
 
     local l2Held = (buttons & BUTTON.L2) ~= 0
     local r2Held = (buttons & BUTTON.R2) ~= 0
+    local nativeShortcutHeld = (buttons & (BUTTON.L1 | BUTTON.R1)) ~= 0
     local circlePressed = pressStarted(buttons, BUTTON.CIRCLE)
     local crossPressed = pressStarted(buttons, BUTTON.CROSS)
     local squarePressed = pressStarted(buttons, BUTTON.SQUARE)
@@ -3793,7 +3800,7 @@ function _OnFrame()
             forceCircleFrames = CONFIG.forcedInputFrames
         end
     elseif CONFIG.fixedDodgeOnSquare and squarePressed and dodgeAvailable
-        and not l2Held and not r2Held then
+        and not l2Held and not r2Held and not nativeShortcutHeld then
         actionConsumed = true
         if dodgeActive then
             -- Dodge Roll is intentionally not self-cancellable: a second
