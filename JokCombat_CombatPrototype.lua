@@ -1,8 +1,8 @@
 LUAGUI_NAME = "JokCombat Combat Prototype"
 LUAGUI_AUTH = "Jok; Critical Mix reference by Xendra / KSX"
-LUAGUI_DESC = "Cross combo, configurable Action Ability loadout, universal Guard/Dodge cancels and jump branch."
+LUAGUI_DESC = "Native Cross combo, canonical X/T Action tree, configurable loadout and universal defense."
 
--- JokCombat v0.6.12 prototype for the current Steam Global executable.
+-- JokCombat v0.7.1 prototype for the current Steam Global executable.
 -- Critical Mix was used as an authorized technical reference. This script is
 -- intentionally limited to combat/input state and does not touch save data,
 -- story flags, rewards, inventory, AP, levels, worlds, chests, or synthesis.
@@ -16,6 +16,17 @@ local CONFIG = {
     -- intermediate attacks and finishers. The legacy routed-normal pipeline
     -- remains below only as a disabled rollback path.
     nativeNormalAttacks = true,
+
+    -- A modifier-free Triangle pressed during a native X string enters the
+    -- canonical branch tree. v0.7.1 enables the eleven already validated
+    -- Action Ability nodes. Magic and Limit nodes remain in the canonical map
+    -- but deliberately use a safe native-attack fallback until their complete
+    -- Steam dispatchers (effect, cost, target and follow-ups) are validated.
+    branchCombos = true,
+    branchActionAbilities = true,
+    branchMagic = false,
+    branchLimits = false,
+    branchInputTimeoutFrames = 150,
 
     attackBuffer = true,
     crossGroundFinisher = true,
@@ -79,7 +90,7 @@ local CONFIG = {
 
 local EXPECTED_GAME_ID = 0xAF71841E
 local FINGERPRINT = 0x7265737563697065 -- "epicures", little endian
-local VERSION = "v0.6.12"
+local VERSION = "v0.7.1"
 
 local ADDRESS = {
     fingerprint = 0x3B2271,
@@ -110,6 +121,7 @@ local ADDRESS = {
     -- ground-combo length. These do not point to the save file.
     comboPosition = 0x296B221,
     maxGroundComboLength = 0x2D5CCE4,
+    maxAirComboLength = 0x2D5CCE5,
 
     -- Current Steam ports of the Sora ground-action table entries used by
     -- Critical Mix's routed attack experiments. The +0x3980 data shift and
@@ -2142,6 +2154,9 @@ local function updateActionRoutes(player)
 end
 
 local function restoreAllPatches()
+    if JokCombatBranch ~= nil and JokCombatBranch.reset ~= nil then
+        JokCombatBranch.reset("patch restore", true, true)
+    end
     clearSyntheticAttackCommand(false)
     restoreActionRoutes()
     restoreAirGroundActionBridge()
@@ -3124,12 +3139,14 @@ local function primeActionComboState(action, primeKind, player)
     return true
 end
 
-local function requestActionAbility(player, slot, action, usesPhysicalInput)
+local function requestActionAbility(player, slot, action, usesPhysicalInput,
+        branchWindowAuthorized, branchContextAuthorized)
     if action == nil or action.animation == nil then
         log(slot.label .. " has no Action Ability assigned.")
         return false
     end
-    if not actionMatchesContext(action, player) then
+    if not branchContextAuthorized
+        and not actionMatchesContext(action, player) then
         log(string.format("%s ignored: %s is %s-only.",
             slot.label, action.name, action.context))
         return false
@@ -3165,7 +3182,8 @@ local function requestActionAbility(player, slot, action, usesPhysicalInput)
     end
 
     local neutral = player.control == 0x03 and not isAttackContext(player)
-    local canCancel = isCancelableAttack(player)
+    local canCancel = branchWindowAuthorized == true
+        or isCancelableAttack(player)
         or (player.airborne and player.animation == 0xCE
             and player.time >= CONFIG.airFinisherRestartTime)
     if not usesPhysicalInput and not neutral and not canCancel then
@@ -3242,6 +3260,427 @@ local function requestActionAbility(player, slot, action, usesPhysicalInput)
             and string.format(" combo=%d max=%d", comboPosition, maximum)
             or ""))
     return true
+end
+
+-- Canonical modifier-free X/T tree. Keep this as one global controller table:
+-- Lua 5.3 limits a chunk to 200 local variables and this prototype already
+-- carries the validated loadout, HUD and route state in the same chunk.
+-- Every node name is unique. The unavailable magic/Limit adapters are retained
+-- here so the runtime map and docs cannot silently drift while those native
+-- dispatchers are being ported.
+JokCombatBranch = {
+    nodes = {
+        XT = { kind = "action", id = "slapshot",
+            cross = "XTX", triangle = "XTT" },
+        XTX = { kind = "action", id = "vortex",
+            cross = "XTXX", triangle = "XTXT" },
+        XTXX = { kind = "magic", id = "fire" },
+        XTXT = { kind = "magic", id = "blizzard" },
+        XTT = { kind = "action", id = "sliding_dash",
+            cross = "XTTX", triangle = "XTTT" },
+        XTTX = { kind = "action", id = "counterattack" },
+        XTTT = { kind = "magic", id = "cure" },
+
+        XXT = { kind = "action", id = "aerial_sweep",
+            cross = "XXTX", triangle = "XXTT" },
+        XXTX = { kind = "action", id = "hurricane_blast",
+            cross = "XXTXX", triangle = "XXTXT" },
+        XXTXX = { kind = "magic", id = "thunder" },
+        XXTXT = { kind = "magic", id = "aero" },
+        XXTT = { kind = "limit", id = "ragnarok" },
+
+        XXXT = { kind = "action", id = "ripple_drive",
+            cross = "XXXTX", triangle = "XXXTT" },
+        XXXTX = { kind = "action", id = "stun_impact",
+            cross = "XXXTXX", triangle = "XXXTXT" },
+        XXXTXX = { kind = "magic", id = "gravity" },
+        XXXTXT = { kind = "magic", id = "stop" },
+        XXXTT = { kind = "action", id = "gravity_break",
+            cross = "XXXTTX", triangle = "XXXTTT" },
+        XXXTTX = { kind = "limit", id = "ars_arcanum" },
+        XXXTTT = { kind = "experimental", id = "chain_attack_burst" },
+
+        XXXXT = { kind = "action", id = "blitz",
+            cross = "XXXXTX", triangle = "XXXXTT" },
+        XXXXTX = { kind = "action", id = "zantetsuken" },
+        XXXXTT = { kind = "limit", id = "strike_raid" },
+        XXXXXT = { kind = "limit", id = "sonic_blade" },
+        XXXXXXT = { kind = "limit", id = "trinity_limit" },
+    },
+
+    -- `open` accepts exactly one buffered edge; `release` is the earliest
+    -- frame at which the current move may be cancelled into its child.
+    windows = {
+        [0xC8] = { open = 14.0, release = 18.0 },
+        [0xC9] = { open = 14.0, release = 34.0 },
+        [0xCA] = { open = 16.0, release = 20.0 },
+        [0xCC] = { open = 8.0, release = 12.0 },
+        [0xCD] = { open = 10.0, release = 14.0 },
+        [0xCF] = { open = 14.0, release = 18.0 }, -- Slapshot
+        [0xD0] = { open = 14.0, release = 18.0 }, -- Sliding Dash
+        [0xD1] = { open = 26.0, release = 30.0 }, -- Hurricane Blast
+        [0xD2] = { open = 14.0, release = 18.0 }, -- Blitz
+        [0xD3] = { open = 14.0, release = 18.0 }, -- Vortex
+        [0xD6] = { open = 16.0, release = 20.0 }, -- Aerial Sweep
+        -- Live aerial captures reached the complete late VFX phase near 34-36.
+        -- These conservative windows avoid cutting the native effect script.
+        [0xD7] = { open = 32.0, release = 36.0 }, -- Ripple Drive
+        [0xD8] = { open = 32.0, release = 36.0 }, -- Stun Impact
+        [0xD9] = { open = 32.0, release = 36.0 }, -- Gravity Break
+    },
+
+    slot = { id = "branch_combo", label = "X/T branch" },
+    valid = false,
+    active = false,
+    path = nil,
+    animation = nil,
+    pendingPath = nil,
+    pendingSourceAnimation = nil,
+    pendingSourceTime = 0.0,
+    pendingRelease = 0.0,
+    waitingPath = nil,
+    waitingAnimation = nil,
+    waitingFrames = 0,
+    waitingSourceAnimation = nil,
+    waitingSourceTime = 0.0,
+}
+
+function JokCombatBranch.kindReady(node)
+    if node == nil then return false end
+    if node.kind == "action" then return CONFIG.branchActionAbilities end
+    if node.kind == "magic" then return CONFIG.branchMagic end
+    if node.kind == "limit" or node.kind == "experimental" then
+        return CONFIG.branchLimits
+    end
+    return false
+end
+
+function JokCombatBranch.initialize()
+    JokCombatBranch.reset(nil, true, true)
+    local count = 0
+    local unique = {}
+    local actionCount = 0
+    local valid = true
+    for path, node in pairs(JokCombatBranch.nodes) do
+        count = count + 1
+        local identity = node.kind .. ":" .. node.id
+        if unique[identity] ~= nil then
+            ConsolePrint(string.format(
+                "[JokCombat:branch:fault] duplicate %s at %s and %s.",
+                identity, unique[identity], path))
+            valid = false
+        end
+        unique[identity] = path
+        if node.kind == "action" then
+            actionCount = actionCount + 1
+            if ACTION_BY_ID[node.id] == nil then
+                ConsolePrint(string.format(
+                    "[JokCombat:branch:fault] unknown Action Ability %s at %s.",
+                    node.id, path))
+                valid = false
+            end
+        end
+        if node.cross ~= nil and JokCombatBranch.nodes[node.cross] == nil then
+            ConsolePrint(string.format(
+                "[JokCombat:branch:fault] %s has missing X child %s.",
+                path, node.cross))
+            valid = false
+        end
+        if node.triangle ~= nil
+            and JokCombatBranch.nodes[node.triangle] == nil then
+            ConsolePrint(string.format(
+                "[JokCombat:branch:fault] %s has missing T child %s.",
+                path, node.triangle))
+            valid = false
+        end
+    end
+    if count ~= 24 or actionCount ~= 11 then
+        ConsolePrint(string.format(
+            "[JokCombat:branch:fault] canonical count mismatch: nodes=%d/24 "
+            .. "actions=%d/11.", count, actionCount))
+        valid = false
+    end
+    JokCombatBranch.valid = valid
+    return valid, count, actionCount
+end
+
+function JokCombatBranch.reset(reason, quiet, skipCleanup)
+    local wasActive = JokCombatBranch.active
+        or JokCombatBranch.pendingPath ~= nil
+        or JokCombatBranch.waitingPath ~= nil
+    if wasActive and not skipCleanup and canRun then
+        if JokCombatBranch.waitingPath ~= nil then clearTransitionCheck() end
+        restoreActionRoutes()
+        if airGroundActionBridgeAnimation ~= nil then
+            restoreAirGroundActionBridge()
+        end
+    end
+    JokCombatBranch.active = false
+    JokCombatBranch.path = nil
+    JokCombatBranch.animation = nil
+    JokCombatBranch.pendingPath = nil
+    JokCombatBranch.pendingSourceAnimation = nil
+    JokCombatBranch.pendingSourceTime = 0.0
+    JokCombatBranch.pendingRelease = 0.0
+    JokCombatBranch.waitingPath = nil
+    JokCombatBranch.waitingAnimation = nil
+    JokCombatBranch.waitingFrames = 0
+    JokCombatBranch.waitingSourceAnimation = nil
+    JokCombatBranch.waitingSourceTime = 0.0
+    if wasActive and not quiet then
+        log("[branch] closed" .. (reason ~= nil and ": " .. reason or "."))
+    end
+end
+
+function JokCombatBranch.refreshAirState(player)
+    player.airborneState = ReadInt(
+        player.pointer + PLAYER.airborneState, true)
+    player.airborne = player.airborneState ~= 0
+end
+
+function JokCombatBranch.dispatch(player, path)
+    local node = JokCombatBranch.nodes[path]
+    local action = node ~= nil and ACTION_BY_ID[node.id] or nil
+    if node == nil or node.kind ~= "action" or action == nil
+        or action.animation == nil or action.recordAvailable ~= true then
+        log("[branch] " .. tostring(path)
+            .. " could not dispatch a complete Action Ability record.")
+        JokCombatBranch.reset("dispatcher unavailable")
+        return true
+    end
+
+    -- A chained child must inherit the real aerial state, not the temporary
+    -- fake-ground value owned by its parent Action Ability.
+    if airGroundActionBridgeFakeGround then
+        restoreAirGroundActionBridge()
+        JokCombatBranch.refreshAirState(player)
+    end
+
+    -- Hurricane Blast is natively air-only. In the canonical ground tree it
+    -- is legal only after Aerial Sweep: D6 is already the validated bridge
+    -- into that aerial-style branch, so do not broaden the normal shortcut's
+    -- context or make Hurricane Blast independently ground-callable.
+    local branchContextAuthorized = path == "XXTX"
+        and JokCombatBranch.path == "XXT"
+        and player.animation == 0xD6
+        and not player.airborne
+    if branchContextAuthorized then
+        log("[branch] XXTX context bridge authorized: "
+            .. "ground Aerial Sweep -> Hurricane Blast.")
+    end
+
+    JokCombatBranch.slot.label = path .. " -> " .. action.name
+    local requested = requestActionAbility(
+        player, JokCombatBranch.slot, action, false, true,
+        branchContextAuthorized)
+    if not requested or transitionKind ~= actionKind(action) then
+        log("[branch] " .. path .. " request was not armed; tree closed.")
+        JokCombatBranch.reset("request rejected")
+        return true
+    end
+
+    JokCombatBranch.pendingPath = nil
+    JokCombatBranch.pendingSourceAnimation = nil
+    JokCombatBranch.pendingSourceTime = 0.0
+    JokCombatBranch.pendingRelease = 0.0
+    JokCombatBranch.waitingPath = path
+    JokCombatBranch.waitingAnimation = action.animation
+    JokCombatBranch.waitingFrames = CONFIG.branchInputTimeoutFrames
+    JokCombatBranch.waitingSourceAnimation = player.animation
+    JokCombatBranch.waitingSourceTime = player.time
+    JokCombatBranch.active = true
+    log(string.format(
+        "[branch] %s requested: %s (0x%02X).",
+        path, action.name, action.animation))
+    return true
+end
+
+function JokCombatBranch.fallback(player, path)
+    local node = JokCombatBranch.nodes[path]
+    local label = node ~= nil and (node.kind .. ":" .. node.id) or path
+    log("[branch] " .. path .. " -> " .. label
+        .. " is reserved; its complete Steam adapter is not enabled yet. "
+        .. "Using one native physical fallback.")
+    JokCombatBranch.reset("reserved adapter", true)
+    clearComboIntent()
+    clearTransitionCheck()
+    clearDeferredAttackCommand()
+    restoreActionRoutes()
+    JokCombatBranch.refreshAirState(player)
+    if not queueAttackAfterRelease(
+            player, "branch-fallback:" .. path, nil, nil) then
+        log("[branch] " .. path .. " fallback could not be queued.")
+    end
+    return true
+end
+
+function JokCombatBranch.execute(player, path)
+    local node = JokCombatBranch.nodes[path]
+    if JokCombatBranch.kindReady(node) then
+        return JokCombatBranch.dispatch(player, path)
+    end
+    return JokCombatBranch.fallback(player, path)
+end
+
+function JokCombatBranch.queue(player, path)
+    local node = JokCombatBranch.nodes[path]
+    if node == nil then
+        JokCombatBranch.reset("unmapped sequence " .. tostring(path))
+        return true
+    end
+    local window = JokCombatBranch.windows[player.animation]
+    if window == nil then
+        log(string.format(
+            "[branch] %s ignored: animation 0x%02X has no safe link window.",
+            path, player.animation))
+        JokCombatBranch.reset("missing safe window")
+        return true
+    end
+    if player.time < window.open then
+        log(string.format(
+            "[branch] %s ignored before prebuffer: anim=0x%02X "
+            .. "time=%.2f opens=%.2f.",
+            path, player.animation, player.time, window.open))
+        return true
+    end
+
+    JokCombatBranch.pendingPath = path
+    JokCombatBranch.pendingSourceAnimation = player.animation
+    JokCombatBranch.pendingSourceTime = player.time
+    JokCombatBranch.pendingRelease = window.release
+    JokCombatBranch.active = true
+    if player.time >= window.release then
+        return JokCombatBranch.execute(player, path)
+    end
+    log(string.format(
+        "[branch] %s buffered once: anim=0x%02X time=%.2f releases=%.2f.",
+        path, player.animation, player.time, window.release))
+    return true
+end
+
+function JokCombatBranch.advancePending(player)
+    local path = JokCombatBranch.pendingPath
+    if path == nil then return false end
+    if player.animation ~= JokCombatBranch.pendingSourceAnimation
+        or player.time + 0.5 < JokCombatBranch.pendingSourceTime then
+        JokCombatBranch.reset("buffer source changed")
+        return false
+    end
+    if player.time < JokCombatBranch.pendingRelease then return false end
+    return JokCombatBranch.execute(player, path)
+end
+
+function JokCombatBranch.observeRequest(player)
+    if JokCombatBranch.waitingPath == nil then return false end
+    if player.animation == JokCombatBranch.waitingAnimation
+        and (player.animation ~= JokCombatBranch.waitingSourceAnimation
+            or player.time + 0.5 < JokCombatBranch.waitingSourceTime) then
+        JokCombatBranch.path = JokCombatBranch.waitingPath
+        JokCombatBranch.animation = JokCombatBranch.waitingAnimation
+        JokCombatBranch.waitingPath = nil
+        JokCombatBranch.waitingAnimation = nil
+        JokCombatBranch.waitingFrames = 0
+        JokCombatBranch.waitingSourceAnimation = nil
+        JokCombatBranch.waitingSourceTime = 0.0
+        log(string.format(
+            "[branch] %s accepted: anim=0x%02X context=%s.",
+            JokCombatBranch.path, player.animation,
+            player.airborne and "air" or
+                (airGroundActionBridgeFakeGround and "air-suspended"
+                    or "ground")))
+        return true
+    end
+
+    JokCombatBranch.waitingFrames = JokCombatBranch.waitingFrames - 1
+    if JokCombatBranch.waitingFrames <= 0 then
+        JokCombatBranch.reset("requested action timed out")
+    end
+    return false
+end
+
+function JokCombatBranch.rootPath(player)
+    local maximum = nil
+    if isGroundNormalContext(player) then
+        maximum = ReadByte(ADDRESS.maxGroundComboLength)
+    elseif isAirNormalContext(player) then
+        maximum = ReadByte(ADDRESS.maxAirComboLength)
+    else
+        return nil
+    end
+    local position = ReadByte(ADDRESS.comboPosition)
+    if position < 1 or position >= maximum then return nil end
+    return string.rep("X", position) .. "T"
+end
+
+function JokCombatBranch.update(player, buttons, crossPressed,
+        trianglePressed)
+    if not CONFIG.branchCombos or not JokCombatBranch.valid then return false end
+
+    local modified = (buttons & (BUTTON.L1 | BUTTON.R1
+        | BUTTON.L2 | BUTTON.R2)) ~= 0
+    if modified then
+        if JokCombatBranch.active then
+            JokCombatBranch.reset("modifier shortcut took priority")
+        end
+        return false
+    end
+    if not HUD.nativeRootSelectionAvailable() then
+        if JokCombatBranch.active then
+            JokCombatBranch.reset("native command took priority")
+        end
+        return false
+    end
+
+    JokCombatBranch.observeRequest(player)
+    if JokCombatBranch.waitingPath ~= nil then
+        if crossPressed or trianglePressed then
+            log("[branch] input ignored while the requested node is entering.")
+            return true
+        end
+        return false
+    end
+
+    if JokCombatBranch.pendingPath ~= nil then
+        local dispatched = JokCombatBranch.advancePending(player)
+        if dispatched then return true end
+        if crossPressed or trianglePressed then
+            log("[branch] repeated input ignored: one buffered child already exists.")
+            return true
+        end
+        return false
+    end
+
+    if JokCombatBranch.path ~= nil then
+        if player.animation ~= JokCombatBranch.animation then
+            JokCombatBranch.reset("active node ended or was interrupted")
+            return false
+        end
+        if not crossPressed and not trianglePressed then return false end
+
+        local node = JokCombatBranch.nodes[JokCombatBranch.path]
+        local child = crossPressed and node.cross or node.triangle
+        if child == nil then
+            log("[branch] " .. JokCombatBranch.path
+                .. " is terminal; new input discarded until recovery.")
+            return true
+        end
+        return JokCombatBranch.queue(player, child)
+    end
+
+    if not trianglePressed or transitionKind ~= nil
+        or deferredLinkKind ~= nil then
+        return false
+    end
+
+    local root = JokCombatBranch.rootPath(player)
+    local node = root ~= nil and JokCombatBranch.nodes[root] or nil
+    if node == nil then return false end
+    if not JokCombatBranch.kindReady(node) then
+        log("[branch] " .. root .. " remains native in this build; "
+            .. node.kind .. " adapter is not enabled yet.")
+        return false
+    end
+    return JokCombatBranch.queue(player, root)
 end
 
 local function updateCrossActionPrime(player, buttons)
@@ -3394,14 +3833,19 @@ local function updateModifierFaceRouting(buttons)
     local r2Held = (buttons & BUTTON.R2) ~= 0
     local actionModifierHeld = l2Held or r2Held
     local reactionActive = not HUD.nativeRootSelectionAvailable()
+    local branchOwnsTriangle = CONFIG.branchCombos
+        and JokCombatBranch ~= nil and JokCombatBranch.active
     return setByte("triangleControlMap", ADDRESS.triangleControlMap,
-        actionModifierHeld and not reactionActive and 0xFE
+        (actionModifierHeld or branchOwnsTriangle)
+            and not reactionActive and 0xFE
             or NORMAL.triangleControlMap,
         { 0xFF, 0xFE })
 end
 
 local function updateAttackControlRouting(buttons, player)
     local suppressPhysicalCross = airGroundActionBridgeFakeGround
+        or (CONFIG.branchCombos and JokCombatBranch ~= nil
+            and JokCombatBranch.active)
     if not suppressPhysicalCross and buttons ~= nil and player ~= nil
         and player.airborne then
         local l2Held = (buttons & BUTTON.L2) ~= 0
@@ -3649,6 +4093,8 @@ function _OnInit()
     local groundRouteValid = normalizeGroundActionRoute()
     local airRouteValid = normalizeAirActionRoute()
     local validActionRecordCount = validateCanonicalActionRecords()
+    local branchValid, branchNodeCount, branchActionCount =
+        JokCombatBranch.initialize()
     loadActionLoadout()
     HUD.initialize()
     HUD.hideOwned()
@@ -3663,6 +4109,10 @@ function _OnInit()
         "unavailable."))
     log(string.format("complete action records ready: %d/%d.",
         validActionRecordCount, #ACTION_CATALOG - 1))
+    log(string.format("canonical X/T tree %s: %d unique nodes, "
+        .. "%d Action Ability nodes enabled; magic/Limit adapters parked.",
+        branchValid and "ready" or "disabled",
+        branchNodeCount, branchActionCount))
     log("direct Action Loadout ready: hold L2/R2/L2+R2; "
         .. "D-pad Up/Down selects, Left/Right changes, release saves.")
     log("native editor cursor delegation ready: Up/Down uses KH1's complete "
@@ -3780,6 +4230,7 @@ function _OnFrame()
         clearTransitionCheck()
         clearDeferredAttackCommand()
         restoreActionRoutes()
+        JokCombatBranch.reset("loadout editor opened", true)
         restoreNativeFinisherSelection()
         setByte("forceCircle", ADDRESS.forceCircleBranch, NORMAL.forceCircle,
             { 0x74, 0x72 })
@@ -3848,6 +4299,7 @@ function _OnFrame()
         cancelPlayer(player, "guard-universal")
         forceSquareFrames = CONFIG.forcedInputFrames
         forceGuardFrames = CONFIG.forcedInputFrames
+        JokCombatBranch.reset("Guard cancel")
         clearComboIntent()
         clearTransitionCheck()
         clearDeferredAttackCommand()
@@ -3856,6 +4308,7 @@ function _OnFrame()
     elseif circlePressed and not l2Held and not r2Held then
         -- A normal jump breaks the local ground chain. It only cancels an
         -- attack after the configured link window; it is not universal.
+        JokCombatBranch.reset("jump")
         clearComboIntent()
         clearTransitionCheck()
         clearDeferredAttackCommand()
@@ -3876,6 +4329,7 @@ function _OnFrame()
         else
             -- From every other state, universal Dodge can release the current
             -- action. The forced Square window then selects Dodge Roll.
+            JokCombatBranch.reset("Dodge cancel")
             clearComboIntent()
             clearTransitionCheck()
             clearDeferredAttackCommand()
@@ -3886,6 +4340,15 @@ function _OnFrame()
             cancelPlayer(player, "dodge-universal")
             forceSquareFrames = CONFIG.forcedInputFrames
         end
+    end
+
+    -- Modifier-free Triangle enters the canonical tree only from a validated
+    -- native normal. While the tree owns a node, both X and Triangle are read
+    -- as raw edges and the physical mappings stay suppressed; each child is
+    -- then dispatched once through the existing complete Action route.
+    if not actionConsumed then
+        actionConsumed = JokCombatBranch.update(
+            player, buttons, crossPressed, trianglePressed)
     end
 
     -- The exact shoulder layer selects one of eleven configurable slots. X uses
@@ -4156,6 +4619,7 @@ function _OnFrame()
     if forceTriangleAttackFrames == 0 then
         updateAttackControlRouting(buttons, player)
     end
+    updateModifierFaceRouting(buttons)
     if player.airborne then
         groundChainFrames = 0
     else

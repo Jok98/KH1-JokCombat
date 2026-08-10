@@ -154,25 +154,46 @@ Air Combo Plus e Combo Master descritto sotto.
 > coda sicura di `CB` (tempo `67`) o `CE` (tempo `20`) resetta il cursore combo,
 > rilascia il finisher per un frame e pulsa Attack senza modificare alcun record
 > azione. Il dispatcher nativo sceglie quindi la nuova apertura terra/aria.
+>
+> **Candidato v0.7.1 — Action tree:** Triangolo senza modificatori entra nella
+> mappa canonica soltanto durante una normale X valida. Le posizioni native
+> `1..4` aprono rispettivamente `XT`, `XXT`, `XXXT` e `XXXXT`; ogni nodo
+> Action Ability puo' poi ricevere una sola X/T nella propria finestra sicura.
+> Le undici Action Ability sono univoche e riusano record, selettori nativi e
+> sospensione aerea gia' validati dal loadout. Mentre il ramo e' attivo, X e
+> Triangolo fisici sono isolati per evitare un attacco vanilla parallelo; spam,
+> Guard, Dodge, salto, reaction command, menu, reload e cambio player chiudono
+> sempre il ramo. Le sette magie e i sei nodi Limit/speciale sono gia' presenti
+> nella stessa tabella canonica ma restano parcheggiati: fino al porting dei
+> dispatcher Steam completi producono un solo fallback fisico nativo, mai una
+> semplice animazione priva di VFX, hitbox o danno.
+> La v0.7.1 mantiene Hurricane Blast `air-only` nelle shortcut, ma autorizza
+> il ponte terrestre esclusivo `XXT -> XXTX` dopo Aerial Sweep.
 
 La repository contiene tre probe read-only e il primo prototipo combat:
 
 - `JokCombat_StateProbe.lua`: rileva la build Steam Global, usa il player
-  pointer Steam verificato e registra stato action/animation e lunghezze combo
-  terra/aria senza scrivere memoria;
+  pointer Steam verificato, registra stato action/animation e lunghezze combo
+  terra/aria e classifica i candidati `XT`, `XXT`, ecc. senza scrivere memoria
+  né consumare Triangolo;
 - `JokCombat_InputProbe.lua`: registra in sola lettura D-pad, L2/R2 e tasti
   faccia e valida gli indirizzi Steam portati prima che il prototipo scriva;
 - `JokCombat_CommandMenuProbe.lua`: confronta in sola lettura controller,
   transizioni e strutture delle quattro righe native del Command Menu;
-- `JokCombat_CombatPrototype.lua`: prototipo v0.6.12 con combo normali delegate
+- `JokCombat_CombatPrototype.lua`: prototipo v0.7.1 con combo normali delegate
   a KH1 e un bridge post-finisher per i cicli infiniti terra/aria, undici slot
-  Action Ability configurabili,
-  Triangolo non modificato lasciato nativo,
+  Action Ability configurabili e albero canonico X/T Action-only,
   jump-cancel terra -> aria, Guard universale su L2 + Cerchio e Dodge Roll
   fisso su Quadrato;
 - `JokCombat_NativeAbilities.lua`: imposta 99 AP massimi e assegna tramite la
-  lista abilita' nativa una copia equipaggiata di Combo Plus, Air Combo Plus e
-  Combo Master, senza duplicati e usando sempre il primo slot libero;
+  lista abilita' nativa le quantita' massime vanilla richieste: quattro Combo
+  Plus, due Air Combo Plus e un Combo Master, tutte equipaggiate;
+- `docs/JokCombat_BranchCombo_Mapping.md`: mappa canonica di 24 mosse uniche,
+  ciascuna assegnata a una sola sequenza X/T e concatenabile soltanto verso
+  mosse differenti; comprende tutte le Action Ability, sette famiglie magiche,
+  cinque Limit e Chain Attack, senza Summon;
+- `docs/JokCombat_BranchCombo_Mapping_Draft.md`: archivio delle proposte
+  precedenti, incluse le matrici scartate perché duplicavano le abilità;
 - `docs/CMix_AnimCancel_AbilityHandler_analysis.md`: analisi tecnica dei primi
   due script Critical Mix e architettura minima proposta.
 
@@ -194,17 +215,18 @@ byte: gli AP massimi sono a `Character+0x05` (`0x2DE9369`) e la lista delle
 abilita' parte da `Character+0x40` (`0x2DE93A4`). La lista contiene 48 byte: il
 bit alto indica che l'abilita' e' appresa ma disattivata; la forma con il solo
 ID base e' quella equipaggiata. Il primo `0x00` e' lo slot in cui KH1 aggiunge
-la prossima abilita'. JokCombat assegna ed equipaggia una sola copia di:
+la prossima abilita'. JokCombat assegna ed equipaggia quantità esatte di:
 
-- `0x06` Combo Plus (`0x86` quando disattivata);
-- `0x07` Air Combo Plus (`0x87` quando disattivata);
-- `0x41` Combo Master (`0xC1` quando disattivata).
+- quattro `0x06` Combo Plus (`0x86` quando disattivata);
+- due `0x07` Air Combo Plus (`0x87` quando disattivata);
+- un `0x41` Combo Master (`0xC1` quando disattivata).
 
-Se una delle tre e' gia' appresa con il bit alto, viene equipaggiata nello stesso
-slot. Se e' gia' equipaggiata non viene riscritta; se manca, viene inserita nel
-primo slot libero per mantenere la lista contigua e visibile al dispatcher
-nativo. Il vecchio esperimento che usava l'ultimo slot libero e un falso
-"mirror" e' stato rimosso.
+Le copie già apprese con il bit alto vengono equipaggiate nello stesso slot;
+quelle mancanti vengono inserite nel primo slot libero. Se un futuro premio
+vanilla aggiunge una quinta Combo Plus o una terza Air Combo Plus, la v0.3.0
+rimuove la copia più recente e ricompatta i 48 byte, preservando ordine e primo
+terminatore `0x00`. In questo modo la progressione non può superare i massimi
+naturali dopo il bootstrap anticipato.
 
 Il modulo porta inoltre gli AP massimi di Sora a `99`: in questo modo le tre
 passive e le future Action Ability possono essere realmente equipaggiate dal
@@ -220,6 +242,15 @@ disattiva il modulo senza sovrascrivere dati.
 La v0.2.1 corregge la polarita' del flag nativo: `0x80` significa disabilitata,
 non equipaggiata. Le tre forme `0x86/0x87/0xC1` create dalla v0.2.0 vengono
 quindi convertite in-place in `0x06/0x07/0x41`, senza aggiungere duplicati.
+
+La v0.3.0 estende il grant alle quantità massime `4/2/1`. Le sette passive
+costano complessivamente 9 AP; gli AP residui dipendono dalle altre abilità già
+equipaggiate e non sono quindi un controllo affidabile del numero di copie.
+Il test live ha verificato `groundMax=7` e `airMax=5`: a terra KH1 sceglie
+contestualmente `C8`, `C9` o `CA` nelle posizioni `1..6` e `CB` chiude alla 7;
+in aria le posizioni `1..4` hanno mostrato `CC/CD` e `CE` chiude alla 5. Poiché
+lo stesso ID può comparire in posizioni diverse, il futuro controller X/T userà
+`comboPosition` come identità del nodo e l'animazione soltanto per il timing.
 
 Questa assegnazione e' intenzionalmente persistente: dopo un salvataggio le tre
 abilita' fanno parte della partita. Prima del primo test e' stata creata una
@@ -248,17 +279,38 @@ pacchetto Critical Mix sono conservati, ma non caricati, nelle directory
 `C:\Users\<utente>\Documents\KH_mod\reference\CriticalMix`. Backup, log e
 copie runtime restano locali e non fanno parte del repository.
 
-Per verificare la v0.6.12, premi `F1` nella console LuaBackend. Il log iniziale
-deve mostrare `v0.6.12`, `Native Abilities v0.2.1 ready`,
+Per verificare la v0.7.1, premi `F1` nella console LuaBackend. Il log iniziale
+deve mostrare `v0.7.1`, `Native Abilities v0.3.0 ready`,
 `ground action route ready`, `aerial action route ready`,
 `complete action records ready: 11/11`
 `native Command Menu overlay ready` e
 `native Ripple Drive/Stun Impact/Gravity Break/Zantetsuken selectors ready`.
+Deve inoltre comparire
+`canonical X/T tree ready: 24 unique nodes, 11 Action Ability nodes enabled`.
 Deve inoltre comparire `native normal combo ownership ready`; durante i colpi
 intermedi non devono piu' apparire `normal route armed` o
 `target-free normal pulse`. Dopo una Croce valida su `CB`/`CE`, il solo bridge
 registra `infinite combo restart requested natively` e poi una transizione
 `restart` scelta dal dispatcher KH1.
+
+Il primo collaudo dell'Action tree va eseguito senza spammare: ogni input
+successivo deve cadere nella coda visibile della mossa precedente. Verifica in
+quest'ordine, prima senza bersaglio e poi contro un nemico:
+
+- `XT`: Slapshot;
+- `XTX`: Slapshot -> Vortex;
+- `XTTX`: Slapshot -> Sliding Dash -> Counterattack;
+- `XXTX`: Aerial Sweep -> Hurricane Blast;
+- `XXXTX`: Ripple Drive -> Stun Impact;
+- `XXXTT`: Ripple Drive -> Gravity Break;
+- `XXXXTX`: Blitz -> Zantetsuken.
+
+Ogni passaggio valido registra `[branch] <sequenza> requested` e poi
+`[branch] <sequenza> accepted`. Un input premuto troppo presto deve produrre
+`ignored before prebuffer`; un secondo input durante lo stesso buffer deve
+essere ignorato, non accodato. I nodi magia/Limit non sono ancora il collaudo
+di questa build: raggiungerli registra `complete Steam adapter is not enabled`
+e riprende con un solo attacco fisico nativo.
 
 Tieni un modificatore per visualizzare e configurare il relativo gruppo: `L2`,
 `R2` oppure entrambi per `L2+R2`. Il riepilogo mostra sempre un massimo di
