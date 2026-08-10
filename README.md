@@ -155,7 +155,7 @@ La repository contiene tre probe read-only e il primo prototipo combat:
   faccia e valida gli indirizzi Steam portati prima che il prototipo scriva;
 - `JokCombat_CommandMenuProbe.lua`: confronta in sola lettura controller,
   transizioni e strutture delle quattro righe native del Command Menu;
-- `JokCombat_CombatPrototype.lua`: prototipo v0.6.9 con combo terrestre completa
+- `JokCombat_CombatPrototype.lua`: prototipo v0.6.10 con combo terrestre completa
   e combo aerea `CC -> CD -> CE`,
   e finisher su Croce, undici slot Action Ability configurabili,
   Triangolo non modificato lasciato nativo,
@@ -172,7 +172,7 @@ Requisito di design confermato: JokCombat fornisce dall'inizio un loadout
 runtime di sole Action Ability, indipendente dallo sblocco vanilla e senza
 inserirle nel salvataggio. Guard e Dodge Roll restano comandi fissi; abilita'
 passive, condivise, movimento, magia e Limit a consumo MP non compaiono
-nell'editor v0.6.9. Queste ultime richiedono un dispatcher diverso dalla route
+nell'editor v0.6.10. Queste ultime richiedono un dispatcher diverso dalla route
 Attack e verranno analizzate separatamente, senza fingere che siano gia'
 supportate.
 
@@ -198,8 +198,8 @@ pacchetto Critical Mix sono conservati, ma non caricati, nelle directory
 `C:\Users\<utente>\Documents\KH_mod\reference\CriticalMix`. Backup, log e
 copie runtime restano locali e non fanno parte del repository.
 
-Per verificare la v0.6.9, premi `F1` nella console LuaBackend. Il log iniziale
-deve mostrare `v0.6.9`, `ground action route ready`, `aerial action route ready`,
+Per verificare la v0.6.10, premi `F1` nella console LuaBackend. Il log iniziale
+deve mostrare `v0.6.10`, `ground action route ready`, `aerial action route ready`,
 `complete action records ready: 11/11`
 `native Command Menu overlay ready` e
 `native Ripple Drive/Stun Impact/Gravity Break/Zantetsuken selectors ready`.
@@ -222,7 +222,7 @@ Magic, Items o Summon e, mentre una direzione e' tenuta, nessuna mossa o tasto
 faccia deve raggiungere il dispatcher di combattimento.
 Rilasciare prima il modificatore mantiene questo blocco fino al rilascio del
 D-pad. La configurazione non richiede una conferma: rilasciare il modificatore
-salva automaticamente. Limite live noto della v0.6.9: premere Croce mentre il
+salva automaticamente. Limite live noto della v0.6.10: premere Croce mentre il
 cursore si trova sulla seconda o terza riga permette ancora a KH1 di aprire
 rispettivamente Magic o Items prima del ripristino su Attack. Fino alla fix,
 torna sulla prima riga oppure rilascia e ripremi il modificatore prima di usare
@@ -522,7 +522,11 @@ errore, annullava anche la route dell'abilita'. La v0.6.9 usa invece il vettore
 posizione interno all'oggetto player gia' validato (`player+0x10`, verticale
 `+0x14`). Se anche questa lettura fallisse, la sospensione viene saltata ma
 l'Action Ability prosegue obbligatoriamente tramite la route aerea v0.6.7.
+La v0.6.10 assegna priorita' alle shortcut magiche native quando L1 o R1 e'
+tenuto: Quadrato non prearma piu' Dodge, non forza il dispatcher difensivo e
+raggiunge invariato la magia associata. Senza modifier, Quadrato conserva il
+Dodge Roll fisso e universale.
 Prima di aggiungere Limit, movement o magic cancel, ogni voce del catalogo
-v0.6.9 deve essere validata live e le route devono
+v0.6.10 deve essere validata live e le route devono
 risultare sempre ripristinate dopo successo, timeout, Guard, Dodge, salto,
 reload e perdita del player object.
