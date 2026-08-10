@@ -2,7 +2,7 @@ LUAGUI_NAME = "JokCombat Combat Prototype"
 LUAGUI_AUTH = "Jok; Critical Mix reference by Xendra / KSX"
 LUAGUI_DESC = "Cross combo, configurable Action Ability loadout, universal Guard/Dodge cancels and jump branch."
 
--- JokCombat v0.4.0 prototype for the current Steam Global executable.
+-- JokCombat v0.4.9 prototype for the current Steam Global executable.
 -- Critical Mix was used as an authorized technical reference. This script is
 -- intentionally limited to combat/input state and does not touch save data,
 -- story flags, rewards, inventory, AP, levels, worlds, chests, or synthesis.
@@ -53,17 +53,28 @@ local CONFIG = {
 
 local EXPECTED_GAME_ID = 0xAF71841E
 local FINGERPRINT = 0x7265737563697065 -- "epicures", little endian
-local VERSION = "v0.4.0"
+local VERSION = "v0.4.9"
 
 local ADDRESS = {
     fingerprint = 0x3B2271,
     playerPointer = 0x2537E48,
     dpadButtons = 0x22C9300,
     rawButtons = 0x22C9301,
+    commandMenuState = 0x2852790,
+    -- Native D-pad captures update this selector together with
+    -- commandMenuSlot. It is used only for validation/recovery: writing the
+    -- pair directly does not run KH1's complete cursor animation.
+    commandMenuVisualSlot = 0x2852794,
     commandMenuSlot = 0x28527AC,
     commandMenuObject = 0x2D539F0,
     commandRecordBase = 0x2D36D50,
     commandMessageTokens = 0x2D22F98,
+    -- Migration-only addresses: v0.4.9 never patches either location. They
+    -- are retained for one release so an F1 reload can undo a stale v0.4.2 or
+    -- v0.4.3 experiment before returning to the native three-row menu.
+    legacyCommandRowLoopInstruction = 0x27C079,
+    legacyCommandRowLoopCountDisplacement = 0x27C07B,
+    legacySummonCommandSlot = 0x2DE9B26,
     compactPointerSegments = 0x2EE3980,
     triggerMenu1 = 0x23D3F80,
     triggerMenu2 = 0x232DDC4,
@@ -284,28 +295,28 @@ end
 
 local ACTION_SLOTS = {
     { id = "l2_cross", label = "L2 + X", modifier = BUTTON.L2,
-        face = BUTTON.CROSS, faceName = "X" },
+        face = BUTTON.CROSS, faceName = "A" },
     { id = "l2_triangle", label = "L2 + Triangle", modifier = BUTTON.L2,
-        face = BUTTON.TRIANGLE, faceName = "Triangle" },
+        face = BUTTON.TRIANGLE, faceName = "Y" },
     { id = "l2_square", label = "L2 + Square", modifier = BUTTON.L2,
-        face = BUTTON.SQUARE, faceName = "Square" },
+        face = BUTTON.SQUARE, faceName = "X" },
     { id = "r2_cross", label = "R2 + X", modifier = BUTTON.R2,
-        face = BUTTON.CROSS, faceName = "X" },
+        face = BUTTON.CROSS, faceName = "A" },
     { id = "r2_triangle", label = "R2 + Triangle", modifier = BUTTON.R2,
-        face = BUTTON.TRIANGLE, faceName = "Triangle" },
+        face = BUTTON.TRIANGLE, faceName = "Y" },
     { id = "r2_circle", label = "R2 + Circle", modifier = BUTTON.R2,
-        face = BUTTON.CIRCLE, faceName = "Circle" },
+        face = BUTTON.CIRCLE, faceName = "B" },
     { id = "r2_square", label = "R2 + Square", modifier = BUTTON.R2,
-        face = BUTTON.SQUARE, faceName = "Square" },
+        face = BUTTON.SQUARE, faceName = "X" },
     { id = "dual_cross", label = "L2 + R2 + X",
-        modifier = SHOULDER_MASK, face = BUTTON.CROSS, faceName = "X" },
+        modifier = SHOULDER_MASK, face = BUTTON.CROSS, faceName = "A" },
     { id = "dual_triangle", label = "L2 + R2 + Triangle",
         modifier = SHOULDER_MASK, face = BUTTON.TRIANGLE,
-        faceName = "Triangle" },
+        faceName = "Y" },
     { id = "dual_circle", label = "L2 + R2 + Circle",
-        modifier = SHOULDER_MASK, face = BUTTON.CIRCLE, faceName = "Circle" },
+        modifier = SHOULDER_MASK, face = BUTTON.CIRCLE, faceName = "B" },
     { id = "dual_square", label = "L2 + R2 + Square",
-        modifier = SHOULDER_MASK, face = BUTTON.SQUARE, faceName = "Square" },
+        modifier = SHOULDER_MASK, face = BUTTON.SQUARE, faceName = "X" },
 }
 
 local ACTION_SLOT_BY_ID = {}
@@ -327,9 +338,9 @@ local LOADOUT_MENU_GROUPS = {
         label = "L2",
         openDirection = "Left",
         slots = {
-            ACTION_SLOT_BY_ID.l2_cross,
             ACTION_SLOT_BY_ID.l2_triangle,
             ACTION_SLOT_BY_ID.l2_square,
+            ACTION_SLOT_BY_ID.l2_cross,
         },
     },
     r2 = {
@@ -337,10 +348,10 @@ local LOADOUT_MENU_GROUPS = {
         label = "R2",
         openDirection = "Right",
         slots = {
-            ACTION_SLOT_BY_ID.r2_cross,
             ACTION_SLOT_BY_ID.r2_triangle,
-            ACTION_SLOT_BY_ID.r2_circle,
             ACTION_SLOT_BY_ID.r2_square,
+            ACTION_SLOT_BY_ID.r2_cross,
+            ACTION_SLOT_BY_ID.r2_circle,
         },
     },
     dual = {
@@ -348,10 +359,10 @@ local LOADOUT_MENU_GROUPS = {
         label = "L2+R2",
         openDirection = "Up",
         slots = {
-            ACTION_SLOT_BY_ID.dual_cross,
             ACTION_SLOT_BY_ID.dual_triangle,
-            ACTION_SLOT_BY_ID.dual_circle,
             ACTION_SLOT_BY_ID.dual_square,
+            ACTION_SLOT_BY_ID.dual_cross,
+            ACTION_SLOT_BY_ID.dual_circle,
         },
     },
 }
@@ -565,7 +576,12 @@ local HUD = {
     overlayGroup = nil,
     overlaySignature = nil,
     nativeTokenBackups = {},
-    nativeCommandBackup = nil,
+    nativeSelectionOwned = false,
+    nativeSelectionOriginalSlot = nil,
+    nativeSelectionPreviousSlot = nil,
+    nativeSelectionTargetSlot = nil,
+    nativeSelectionPendingFrames = 0,
+    nativeDpadPassMask = 0,
     directEditGroup = nil,
     directEditActive = false,
     directEditDirty = false,
@@ -573,13 +589,15 @@ local HUD = {
     dpadReleaseLock = false,
     controlChordHeld = false,
     controlChordUsed = false,
-    -- Command 0 has no drawable record on early saves. While no face/D-pad
-    -- input can reach KH1, Summon's valid record temporarily carries only the
-    -- fourth JokCombat label; the original command byte is always restored.
-    nativeFallbackCommandId = 0x06,
     nativeRecoveryAddress = 0x2DB7940,
     nativeRecoverySignature = 0x31574F524E4B4F4A, -- "JOKNROW1"
+    -- Legacy markers are read only during initialization. The current marker
+    -- records the temporary visual/logical cursor pair alongside the token
+    -- redirects.
     nativeRecoveryCommandMarker = 0x4A4B0000,
+    nativeRecoveryRecordMarker = 0x4A4C0000,
+    nativeRecoverySummonMarker = 0x4A4D0000,
+    nativeRecoverySelectionMarker = 0x4A4E0000,
     nativeMessageTokenCount = 0x200,
     moduleSize = 0x2F91000,
     boxCount = 2,
@@ -618,7 +636,7 @@ local function loadActionLoadout()
 
     local file = io.open(loadoutPath, "r")
     if file == nil then
-        log("loadout file not found; using v0.4.0 defaults.")
+        log("loadout file not found; using v0.4.9 defaults.")
         return
     end
 
@@ -649,7 +667,7 @@ local function saveActionLoadout()
         return false
     end
 
-    file:write("# JokCombat v0.4.0 Action Ability loadout\n")
+    file:write("# JokCombat v0.4.9 Action Ability loadout\n")
     file:write("# Guard remains fixed on L2+Circle; Dodge Roll on Square.\n")
     file:write("action_overlay=", HUD.enabled and "true" or "false", "\n")
     for _, slot in ipairs(ACTION_SLOTS) do
@@ -674,6 +692,8 @@ local KHSCII_PUNCTUATION = {
     [":"] = 0x6B,
     ["("] = 0x74,
     [")"] = 0x75,
+    ["["] = 0x76,
+    ["]"] = 0x77,
 }
 
 local function getKHSCII(input, capacity)
@@ -819,7 +839,132 @@ function HUD.hideBoxIfOwned(index)
     return true
 end
 
+function HUD.nativeRootSelectionAvailable()
+    if ReadByte(ADDRESS.commandMenuState) ~= 0 then return false end
+    local visualSlot = ReadByte(ADDRESS.commandMenuVisualSlot)
+    local slot = ReadByte(ADDRESS.commandMenuSlot)
+    if visualSlot == 0 and slot == 0 then return true end
+    if not HUD.nativeSelectionOwned or visualSlot ~= slot then return false end
+    if visualSlot == HUD.nativeSelectionTargetSlot then return true end
+    return HUD.nativeSelectionPendingFrames > 0
+        and visualSlot == HUD.nativeSelectionPreviousSlot
+end
+
+function HUD.restoreNativeSelection()
+    if not HUD.nativeSelectionOwned then
+        HUD.nativeSelectionOriginalSlot = nil
+        HUD.nativeSelectionPreviousSlot = nil
+        HUD.nativeSelectionTargetSlot = nil
+        HUD.nativeSelectionPendingFrames = 0
+        HUD.nativeDpadPassMask = 0
+        return false
+    end
+
+    local original = HUD.nativeSelectionOriginalSlot or 0
+    local previous = HUD.nativeSelectionPreviousSlot or original
+    local target = HUD.nativeSelectionTargetSlot or original
+    local visualSlot = ReadByte(ADDRESS.commandMenuVisualSlot)
+    local current = ReadByte(ADDRESS.commandMenuSlot)
+    local root = ReadByte(ADDRESS.commandMenuState) == 0
+    local visualSafe = visualSlot == original or visualSlot == previous
+        or visualSlot == target
+    local currentSafe = current == original or current == previous
+        or current == target
+    if root and visualSafe and currentSafe then
+        if visualSlot ~= original then
+            WriteByte(ADDRESS.commandMenuVisualSlot, original)
+        end
+        if current ~= original then
+            WriteByte(ADDRESS.commandMenuSlot, original)
+        end
+        visualSlot = ReadByte(ADDRESS.commandMenuVisualSlot)
+        current = ReadByte(ADDRESS.commandMenuSlot)
+    end
+    local restored = root and visualSlot == original and current == original
+    if not restored then
+        log(string.format(
+            "native editor cursor restore deferred: menu=%d visual=%d slot=%d expected=%d.",
+            ReadByte(ADDRESS.commandMenuState), visualSlot, current, original))
+    end
+    HUD.nativeSelectionOwned = false
+    HUD.nativeSelectionOriginalSlot = nil
+    HUD.nativeSelectionPreviousSlot = nil
+    HUD.nativeSelectionTargetSlot = nil
+    HUD.nativeSelectionPendingFrames = 0
+    HUD.nativeDpadPassMask = 0
+    return restored
+end
+
+function HUD.observeNativeSelection()
+    if not HUD.nativeSelectionOwned then return true end
+    local visualSlot = ReadByte(ADDRESS.commandMenuVisualSlot)
+    local current = ReadByte(ADDRESS.commandMenuSlot)
+    local target = HUD.nativeSelectionTargetSlot or 0
+    if visualSlot == target and current == target then
+        if HUD.nativeSelectionPendingFrames > 0 then
+            log(string.format(
+                "native cursor move accepted: visual=%d slot=%d.",
+                visualSlot, current))
+        end
+        HUD.nativeSelectionPreviousSlot = target
+        HUD.nativeSelectionPendingFrames = 0
+        HUD.nativeDpadPassMask = 0
+        if #HUD.nativeTokenBackups > 0 then
+            HUD.writeNativeRecovery(HUD.nativeTokenBackups)
+        end
+        return true
+    end
+
+    local previous = HUD.nativeSelectionPreviousSlot or 0
+    if HUD.nativeSelectionPendingFrames > 0
+        and visualSlot == previous and current == previous then
+        HUD.nativeSelectionPendingFrames =
+            HUD.nativeSelectionPendingFrames - 1
+        if HUD.nativeSelectionPendingFrames > 0 then return true end
+        log(string.format(
+            "native cursor move timed out: visual=%d slot=%d expected=%d.",
+            visualSlot, current, target))
+    else
+        log(string.format(
+            "native cursor move drifted: visual=%d slot=%d expected=%d.",
+            visualSlot, current, target))
+    end
+    HUD.restoreNativeSelection()
+    return false
+end
+
+function HUD.requestNativeSelection(index, direction)
+    if index < 1 or index > 4
+        or (direction ~= DPAD.UP and direction ~= DPAD.DOWN)
+        or ReadByte(ADDRESS.commandMenuState) ~= 0 then return false end
+    if HUD.nativeSelectionOwned and not HUD.observeNativeSelection() then
+        return false
+    end
+
+    local target = index - 1
+    local visualSlot = ReadByte(ADDRESS.commandMenuVisualSlot)
+    local current = ReadByte(ADDRESS.commandMenuSlot)
+    if visualSlot ~= current then return false end
+    if not HUD.nativeSelectionOwned then
+        if visualSlot ~= 0 or current ~= 0 then return false end
+        HUD.nativeSelectionOwned = true
+        HUD.nativeSelectionOriginalSlot = current
+    elseif HUD.nativeSelectionPendingFrames > 0 then
+        return false
+    end
+
+    HUD.nativeSelectionPreviousSlot = current
+    HUD.nativeSelectionTargetSlot = target
+    HUD.nativeSelectionPendingFrames = 6
+    HUD.nativeDpadPassMask = direction
+    log(string.format(
+        "native cursor move delegated to KH1: %d -> %d (%s).",
+        current, target, direction == DPAD.UP and "Up" or "Down"))
+    return true
+end
+
 function HUD.hideOwned()
+    HUD.restoreNativeSelection()
     HUD.restoreNativeRows()
     for index = 1, HUD.boxCount do
         HUD.hideBoxIfOwned(index)
@@ -828,36 +973,26 @@ function HUD.hideOwned()
     HUD.overlaySignature = nil
 end
 
-function HUD.directSlotSelected(groupId, index)
-    return HUD.directEditActive and HUD.directEditGroup == groupId
-        and HUD.directEditIndex[groupId] == index
-end
-
-function HUD.actionLine(slot, selected)
+function HUD.actionLine(slot)
     local action = ACTION_BY_ID[loadout[slot.id]] or ACTION_BY_ID.none
-    return string.format("%s%s: %s", selected and "+ " or "",
-        slot.faceName, action.name)
+    return string.format("[%s] %s", slot.faceName, action.name)
 end
 
 function HUD.overlayEntries(groupId)
     if groupId == "l2" then
         return {
-            HUD.actionLine(ACTION_SLOT_BY_ID.l2_cross,
-                HUD.directSlotSelected("l2", 1)),
-            HUD.actionLine(ACTION_SLOT_BY_ID.l2_triangle,
-                HUD.directSlotSelected("l2", 2)),
-            "Circle: Guard",
-            HUD.actionLine(ACTION_SLOT_BY_ID.l2_square,
-                HUD.directSlotSelected("l2", 3)),
+            HUD.actionLine(ACTION_SLOT_BY_ID.l2_triangle),
+            HUD.actionLine(ACTION_SLOT_BY_ID.l2_square),
+            HUD.actionLine(ACTION_SLOT_BY_ID.l2_cross),
+            "[B] Guard",
         }
     end
 
     local group = LOADOUT_MENU_GROUPS[groupId]
     if group == nil then return nil end
     local entries = {}
-    for index, slot in ipairs(group.slots) do
-        table.insert(entries, HUD.actionLine(slot,
-            HUD.directSlotSelected(groupId, index)))
+    for _, slot in ipairs(group.slots) do
+        table.insert(entries, HUD.actionLine(slot))
     end
     return entries
 end
@@ -893,17 +1028,24 @@ function HUD.clearNativeRecovery()
     WriteLong(HUD.nativeRecoveryAddress, 0)
     WriteInt(HUD.nativeRecoveryAddress + 0x08, 0)
     WriteInt(HUD.nativeRecoveryAddress + 0x0C, 0)
+    WriteLong(HUD.nativeRecoveryAddress + 0x40, 0)
 end
 
-function HUD.writeNativeRecovery(patches, commandPatch)
+function HUD.writeNativeRecovery(patches)
     if patches == nil or #patches < 1 or #patches > 4 then return false end
     HUD.clearNativeRecovery()
     WriteInt(HUD.nativeRecoveryAddress + 0x08, #patches)
-    if commandPatch ~= nil then
-        local packedCommand = HUD.nativeRecoveryCommandMarker
-            | (commandPatch.original & 0xFF)
-            | ((commandPatch.patched & 0xFF) << 8)
-        WriteInt(HUD.nativeRecoveryAddress + 0x0C, packedCommand)
+    if HUD.nativeSelectionOwned then
+        local original = HUD.nativeSelectionOriginalSlot or 0
+        local patched = HUD.nativeSelectionTargetSlot or original
+        local visualSlot = ReadByte(ADDRESS.commandMenuVisualSlot)
+        local current = ReadByte(ADDRESS.commandMenuSlot)
+        if visualSlot == current and current >= 0 and current <= 3 then
+            patched = current
+        end
+        WriteInt(HUD.nativeRecoveryAddress + 0x0C,
+            HUD.nativeRecoverySelectionMarker
+                | (original & 0xFF) | ((patched & 0xFF) << 8))
     end
     for index, patch in ipairs(patches) do
         local address = HUD.nativeRecoveryAddress + 0x10
@@ -918,8 +1060,23 @@ function HUD.writeNativeRecovery(patches, commandPatch)
 end
 
 function HUD.recoverStaleNativeRows()
+    -- One-release migration cleanup for the removed v0.4.3 loop patch. The
+    -- current overlay never writes executable code.
+    local rowLoopRestored = false
+    if ReadByte(ADDRESS.legacyCommandRowLoopInstruction) == 0x8D
+        and ReadByte(ADDRESS.legacyCommandRowLoopInstruction + 1) == 0x6F
+        and ReadByte(ADDRESS.legacyCommandRowLoopCountDisplacement) == 0xF0 then
+        WriteByte(ADDRESS.legacyCommandRowLoopCountDisplacement, 0xEF)
+        rowLoopRestored = true
+    end
+
     if ReadLong(HUD.nativeRecoveryAddress)
-        ~= HUD.nativeRecoverySignature then return false end
+        ~= HUD.nativeRecoverySignature then
+        if rowLoopRestored then
+            log("removed a stale v0.4.3 Command Menu loop patch.")
+        end
+        return rowLoopRestored
+    end
 
     local count = ReadInt(HUD.nativeRecoveryAddress + 0x08)
     local restored = 0
@@ -942,13 +1099,16 @@ function HUD.recoverStaleNativeRows()
         end
     end
 
-    local packedCommand = ReadInt(HUD.nativeRecoveryAddress + 0x0C)
+    local recoveryMode = ReadInt(HUD.nativeRecoveryAddress + 0x0C)
         & 0xFFFFFFFF
     local commandRestored = false
-    if (packedCommand & 0xFFFF0000)
+    local recordRestored = false
+    local summonRestored = false
+    local selectionRestored = false
+    if (recoveryMode & 0xFFFF0000)
         == HUD.nativeRecoveryCommandMarker then
-        local original = packedCommand & 0xFF
-        local patched = (packedCommand >> 8) & 0xFF
+        local original = recoveryMode & 0xFF
+        local patched = (recoveryMode >> 8) & 0xFF
         local menuObject = ReadLong(ADDRESS.commandMenuObject)
         if menuObject >= BASE_ADDR
             and menuObject < BASE_ADDR + HUD.moduleSize
@@ -958,14 +1118,72 @@ function HUD.recoverStaleNativeRows()
             WriteByte(menuObject + 0x17, original, true)
             commandRestored = true
         end
+    elseif (recoveryMode & 0xFFFF0000)
+        == HUD.nativeRecoveryRecordMarker
+        and (recoveryMode & 0xFF) == 0x10 then
+        local recordAddress = ReadLong(HUD.nativeRecoveryAddress + 0x40)
+        local original = {}
+        local inModule = recordAddress >= BASE_ADDR
+            and recordAddress + 0x10 <= BASE_ADDR + HUD.moduleSize
+        local matches = inModule
+        for index = 1, 0x10 do
+            original[index] = ReadByte(
+                HUD.nativeRecoveryAddress + 0x47 + index)
+            local patched = ReadByte(
+                HUD.nativeRecoveryAddress + 0x57 + index)
+            matches = matches and ReadByte(
+                recordAddress + index - 1, true) == patched
+        end
+        if matches then
+            for index = 1, 0x10 do
+                WriteByte(recordAddress + index - 1, original[index], true)
+            end
+            recordRestored = true
+        end
+    elseif (recoveryMode & 0xFFFF0000)
+        == HUD.nativeRecoverySummonMarker then
+        local original = recoveryMode & 0xFF
+        local patched = (recoveryMode >> 8) & 0xFF
+        local originalIsEmpty = original == 0x00 or original == 0xFF
+        if originalIsEmpty and patched == 0x06
+            and ReadByte(ADDRESS.legacySummonCommandSlot) == patched then
+            WriteByte(ADDRESS.legacySummonCommandSlot, original)
+            summonRestored = true
+        end
+    elseif (recoveryMode & 0xFFFF0000)
+        == HUD.nativeRecoverySelectionMarker then
+        local original = recoveryMode & 0xFF
+        local patched = (recoveryMode >> 8) & 0xFF
+        local visualSlot = ReadByte(ADDRESS.commandMenuVisualSlot)
+        local current = ReadByte(ADDRESS.commandMenuSlot)
+        if original <= 3 and patched <= 3
+            and ReadByte(ADDRESS.commandMenuState) == 0
+            and (visualSlot == original or visualSlot == patched)
+            and (current == original or current == patched) then
+            if visualSlot == patched then
+                WriteByte(ADDRESS.commandMenuVisualSlot, original)
+            end
+            if current == patched then
+                WriteByte(ADDRESS.commandMenuSlot, original)
+            end
+            selectionRestored =
+                ReadByte(ADDRESS.commandMenuVisualSlot) == original
+                and ReadByte(ADDRESS.commandMenuSlot) == original
+        end
     end
     HUD.clearNativeRecovery()
-    if restored > 0 or commandRestored then
-        log(string.format(
-            "recovered %d stale native Command Menu label(s)%s.",
-            restored, commandRestored and " and its display carrier" or ""))
+    if restored > 0 or commandRestored or recordRestored or summonRestored
+        or selectionRestored or rowLoopRestored then
+        log(string.format("Command Menu recovery: labels=%d%s%s%s%s%s.",
+            restored,
+            commandRestored and " carrier=restored" or "",
+            recordRestored and " record=restored" or "",
+            summonRestored and " summon-slot=restored" or "",
+            selectionRestored and " cursor=restored" or "",
+            rowLoopRestored and " row-loop=restored" or ""))
     end
-    return restored > 0 or commandRestored
+    return restored > 0 or commandRestored or recordRestored or summonRestored
+        or selectionRestored or rowLoopRestored
 end
 
 function HUD.restoreNativeRows()
@@ -976,19 +1194,11 @@ function HUD.restoreNativeRows()
             restored = restored + 1
         end
     end
-    local commandRestored = false
-    local commandPatch = HUD.nativeCommandBackup
-    if commandPatch ~= nil
-        and ReadByte(commandPatch.address, true) == commandPatch.patched then
-        WriteByte(commandPatch.address, commandPatch.original, true)
-        commandRestored = true
-    end
     HUD.nativeTokenBackups = {}
-    HUD.nativeCommandBackup = nil
     HUD.clearNativeRecovery()
     HUD.overlayGroup = nil
     HUD.overlaySignature = nil
-    return restored > 0 or commandRestored
+    return restored > 0
 end
 
 function HUD.nativeOverlayFailure(reason)
@@ -997,6 +1207,7 @@ function HUD.nativeOverlayFailure(reason)
             .. "deferred: " .. reason .. ".")
         HUD.nativeFailureKey = reason
     end
+    HUD.restoreNativeSelection()
     HUD.restoreNativeRows()
     return false
 end
@@ -1024,45 +1235,19 @@ function HUD.showOverlay(groupId)
     for index = 1, 4 do
         commands[index] = ReadByte(menuObject + 0x13 + index, true)
     end
-    -- During an already active overlay, reconstruct the original fourth ID
-    -- before calculating the signature. Otherwise the temporary display
-    -- carrier would look like a vanilla state change on every frame.
-    local activeCommandPatch = HUD.nativeCommandBackup
-    if activeCommandPatch ~= nil
-        and activeCommandPatch.address == menuObject + 0x17
-        and commands[4] == activeCommandPatch.patched then
-        commands[4] = activeCommandPatch.original
-    end
-    local displayCommands = {
-        commands[1], commands[2], commands[3], commands[4],
-    }
-    local commandPatch = nil
-    if displayCommands[4] == 0 then
-        displayCommands[4] = HUD.nativeFallbackCommandId
-        commandPatch = {
-            address = menuObject + 0x17,
-            original = commands[4],
-            patched = displayCommands[4],
-        }
-    end
+    -- A zero/FF fourth ID means the native Summon row has not been unlocked
+    -- yet. Patch only rows the game already owns; once KH1 supplies a real
+    -- fourth ID, the changed signature automatically expands this to four.
+    local visibleCount = (commands[4] == 0x00 or commands[4] == 0xFF)
+        and 3 or 4
     local signature = string.format("%s|%X|%02X%02X%02X%02X|%s",
         groupId, menuObject, commands[1], commands[2], commands[3],
         commands[4], table.concat(entries, "|"))
     if HUD.overlayGroup == groupId and HUD.overlaySignature == signature then
-        local stillPatched = #HUD.nativeTokenBackups == 4
+        local stillPatched = #HUD.nativeTokenBackups == visibleCount
         for _, patch in ipairs(HUD.nativeTokenBackups) do
             stillPatched = stillPatched
                 and (ReadInt(patch.address) & 0xFFFFFFFF) == patch.patched
-        end
-        if commandPatch ~= nil then
-            stillPatched = stillPatched and activeCommandPatch ~= nil
-                and activeCommandPatch.address == commandPatch.address
-                and activeCommandPatch.original == commandPatch.original
-                and activeCommandPatch.patched == commandPatch.patched
-                and ReadByte(commandPatch.address, true)
-                    == commandPatch.patched
-        else
-            stillPatched = stillPatched and activeCommandPatch == nil
         end
         if stillPatched then return true end
     end
@@ -1082,9 +1267,9 @@ function HUD.showOverlay(groupId)
     }
     local patches = {}
     local usedAddresses = {}
-    for index = 1, 4 do
+    for index = 1, visibleCount do
         local messageAddress, messageIndex =
-            HUD.commandMessageTokenAddress(displayCommands[index])
+            HUD.commandMessageTokenAddress(commands[index])
         local textToken = HUD.pointerTokenForAbsolute(
             BASE_ADDR + lineAddresses[index])
         if messageAddress == nil or textToken == nil then
@@ -1106,28 +1291,25 @@ function HUD.showOverlay(groupId)
     for index = 1, 4 do
         WriteArray(lineAddresses[index], getKHSCII(entries[index], 0x20))
     end
-    if not HUD.writeNativeRecovery(patches, commandPatch) then
+    if not HUD.writeNativeRecovery(patches) then
         return HUD.nativeOverlayFailure("recovery record rejected")
     end
     for _, patch in ipairs(patches) do
         WriteInt(patch.address, patch.patched)
     end
-    if commandPatch ~= nil then
-        WriteByte(commandPatch.address, commandPatch.patched, true)
-    end
     HUD.nativeTokenBackups = patches
-    HUD.nativeCommandBackup = commandPatch
     HUD.nativeFailureKey = nil
     HUD.overlayGroup = groupId
     HUD.overlaySignature = signature
     log(string.format(
-        "native Command Menu labels active: %s ids=%02X/%02X/%02X/%02X%s.",
+        "native Command Menu labels active: %s ids=%02X/%02X/%02X/%02X visible=%d/4%s.",
         group.label, commands[1], commands[2], commands[3], commands[4],
-        commandPatch ~= nil and " row4-carrier=06" or ""))
+        visibleCount, visibleCount == 3 and " (Summon locked)" or ""))
     return true
 end
 
 function HUD.hideOverlay()
+    HUD.restoreNativeSelection()
     HUD.restoreNativeRows()
     HUD.hideBoxIfOwned(1)
     HUD.hideBoxIfOwned(2)
@@ -1721,11 +1903,12 @@ function HUD.overlayEligible(buttons, player)
     return CONFIG.actionLoadout and CONFIG.actionLoadoutPrompt
         and CONFIG.actionLoadoutOverlay and HUD.enabled
         and HUD.shoulderGroup(buttons) ~= nil
-        and ReadByte(ADDRESS.commandMenuSlot) == 0
+        and HUD.nativeRootSelectionAvailable()
         and player.control == 0x03 and player.animation <= 0x07
 end
 
 function HUD.finishDirectEdit(reason, dpad)
+    HUD.restoreNativeSelection()
     local groupId = HUD.directEditGroup
     if groupId == nil then
         if dpad == 0 then HUD.dpadReleaseLock = false end
@@ -1761,6 +1944,7 @@ function HUD.updateOverlayControls(buttons, dpad)
     local resetStarted = toggleHeld and (dpad & DPAD.DOWN) ~= 0
         and (lastDpad & DPAD.DOWN) == 0
     if resetStarted then
+        HUD.restoreNativeSelection()
         resetLoadoutToDefaults()
         HUD.directEditDirty = false
         HUD.directEditActive = false
@@ -1786,14 +1970,38 @@ function HUD.updateOverlayControls(buttons, dpad)
     return toggleHeld, dpadConsumed
 end
 
+function HUD.visibleEditableCount(groupId)
+    local group = LOADOUT_MENU_GROUPS[groupId]
+    if group == nil then return 0 end
+    local maximum = #group.slots
+    if maximum <= 3 then return maximum end
+
+    local menuObject = ReadLong(ADDRESS.commandMenuObject)
+    if menuObject >= BASE_ADDR
+        and menuObject < BASE_ADDR + HUD.moduleSize
+        and ReadInt(menuObject, true) == 0
+        and ReadInt(menuObject + 0x10, true) == 4 then
+        local fourthCommand = ReadByte(menuObject + 0x17, true)
+        if fourthCommand ~= 0x00 and fourthCommand ~= 0xFF then
+            return maximum
+        end
+    end
+    return math.min(3, maximum)
+end
+
 function HUD.updateDirectEditor(buttons, dpad, player, controlConsumed)
     if dpad == 0 then HUD.dpadReleaseLock = false end
     local groupId = HUD.shoulderGroup(buttons)
     local eligible = CONFIG.actionLoadoutMenu
         and HUD.overlayEligible(buttons, player)
+        and (buttons & FACE_BUTTON_MASK) == 0
     if not eligible then
-        local reason = groupId == nil and "modifier released"
-            or "shortcut context ended"
+        local reason = "shortcut context ended"
+        if groupId == nil then
+            reason = "modifier released"
+        elseif (buttons & FACE_BUTTON_MASK) ~= 0 then
+            reason = "shortcut input"
+        end
         HUD.finishDirectEdit(reason, dpad)
         return HUD.dpadReleaseLock
     end
@@ -1805,15 +2013,18 @@ function HUD.updateDirectEditor(buttons, dpad, player, controlConsumed)
         HUD.directEditGroup = groupId
         HUD.directEditActive = false
         HUD.directEditDirty = false
-        local group = LOADOUT_MENU_GROUPS[groupId]
-        local index = HUD.directEditIndex[groupId] or 1
-        HUD.directEditIndex[groupId] = math.max(1,
-            math.min(index, #group.slots))
+        -- The native root cursor always starts on Attack. Start each editing
+        -- session on the first displayed row so logical and visual selection
+        -- have the same origin.
+        HUD.directEditIndex[groupId] = 1
     end
 
     if controlConsumed then return true end
     local group = LOADOUT_MENU_GROUPS[groupId]
-    local index = HUD.directEditIndex[groupId]
+    local editableCount = HUD.visibleEditableCount(groupId)
+    local index = math.max(1, math.min(
+        HUD.directEditIndex[groupId], editableCount))
+    HUD.directEditIndex[groupId] = index
     local upStarted = (dpad & DPAD.UP) ~= 0
         and (lastDpad & DPAD.UP) == 0
     local downStarted = (dpad & DPAD.DOWN) ~= 0
@@ -1823,17 +2034,24 @@ function HUD.updateDirectEditor(buttons, dpad, player, controlConsumed)
     local rightStarted = (dpad & DPAD.RIGHT) ~= 0
         and (lastDpad & DPAD.RIGHT) == 0
 
+    local previousIndex = index
     if upStarted then
-        index = ((index - 2) % #group.slots) + 1
+        index = math.max(1, index - 1)
     elseif downStarted then
-        index = (index % #group.slots) + 1
+        index = math.min(editableCount, index + 1)
     end
-    if upStarted or downStarted then
+    if (upStarted or downStarted) and index ~= previousIndex then
         HUD.directEditIndex[groupId] = index
         HUD.directEditActive = true
         HUD.overlaySignature = nil
         log(string.format("%s direct loadout selected %s.",
             group.label, group.slots[index].label))
+        local direction = upStarted and DPAD.UP or DPAD.DOWN
+        if not HUD.requestNativeSelection(index, direction) then
+            log("native editor cursor became unavailable; editor selection closed.")
+            HUD.finishDirectEdit("native cursor unavailable", dpad)
+            return true
+        end
     end
 
     if leftStarted or rightStarted then
@@ -1849,6 +2067,10 @@ function HUD.updateDirectEditor(buttons, dpad, player, controlConsumed)
         HUD.overlaySignature = nil
         ConsolePrint(string.format("[JokCombat:loadout] %s -> %s",
             slot.label, action.name))
+    end
+    if HUD.directEditActive and not HUD.observeNativeSelection() then
+        log("native editor cursor became unavailable; editor selection closed.")
+        HUD.finishDirectEdit("native cursor unavailable", dpad)
     end
     return true
 end
@@ -2643,7 +2865,7 @@ local function updateCrossActionPrime(player, buttons)
         and action.recordAvailable == true
         and actionMatchesContext(action, player)
         and player.animation ~= action.animation
-        and ReadByte(ADDRESS.commandMenuSlot) == 0
+        and HUD.nativeRootSelectionAvailable()
         and not otherFaceHeld
         and transitionKind == nil and deferredLinkKind == nil
 
@@ -2706,14 +2928,22 @@ local function updateCrossActionPrime(player, buttons)
 end
 
 local function updateLoadoutMenuRouting(controlsOwned, dpadOwned)
-    local map = dpadOwned and 0xFE or 0xFF
-    setByte("dpadUpControlMap", ADDRESS.dpadUpControlMap, map,
+    local passMask = HUD.nativeDpadPassMask or 0
+    local upMap = dpadOwned and (passMask & DPAD.UP) == 0
+        and 0xFE or NORMAL.dpadUpControlMap
+    local rightMap = dpadOwned and (passMask & DPAD.RIGHT) == 0
+        and 0xFE or NORMAL.dpadRightControlMap
+    local downMap = dpadOwned and (passMask & DPAD.DOWN) == 0
+        and 0xFE or NORMAL.dpadDownControlMap
+    local leftMap = dpadOwned and (passMask & DPAD.LEFT) == 0
+        and 0xFE or NORMAL.dpadLeftControlMap
+    setByte("dpadUpControlMap", ADDRESS.dpadUpControlMap, upMap,
         { 0xFF, 0xFE })
-    setByte("dpadRightControlMap", ADDRESS.dpadRightControlMap, map,
+    setByte("dpadRightControlMap", ADDRESS.dpadRightControlMap, rightMap,
         { 0xFF, 0xFE })
-    setByte("dpadDownControlMap", ADDRESS.dpadDownControlMap, map,
+    setByte("dpadDownControlMap", ADDRESS.dpadDownControlMap, downMap,
         { 0xFF, 0xFE })
-    setByte("dpadLeftControlMap", ADDRESS.dpadLeftControlMap, map,
+    setByte("dpadLeftControlMap", ADDRESS.dpadLeftControlMap, leftMap,
         { 0xFF, 0xFE })
 
     if controlsOwned then
@@ -2733,7 +2963,7 @@ local function updateModifierFaceRouting(buttons)
     local l2Held = (buttons & BUTTON.L2) ~= 0
     local r2Held = (buttons & BUTTON.R2) ~= 0
     local actionModifierHeld = l2Held or r2Held
-    local reactionActive = ReadByte(ADDRESS.commandMenuSlot) ~= 0
+    local reactionActive = not HUD.nativeRootSelectionAvailable()
     return setByte("triangleControlMap", ADDRESS.triangleControlMap,
         actionModifierHeld and not reactionActive and 0xFE
             or NORMAL.triangleControlMap,
@@ -2847,7 +3077,12 @@ function _OnInit()
     HUD.overlayGroup = nil
     HUD.overlaySignature = nil
     HUD.nativeTokenBackups = {}
-    HUD.nativeCommandBackup = nil
+    HUD.nativeSelectionOwned = false
+    HUD.nativeSelectionOriginalSlot = nil
+    HUD.nativeSelectionPreviousSlot = nil
+    HUD.nativeSelectionTargetSlot = nil
+    HUD.nativeSelectionPendingFrames = 0
+    HUD.nativeDpadPassMask = 0
     HUD.directEditGroup = nil
     HUD.directEditActive = false
     HUD.directEditDirty = false
@@ -2966,10 +3201,14 @@ function _OnInit()
         validActionRecordCount, #ACTION_CATALOG - 1))
     log("direct Action Loadout ready: hold L2/R2/L2+R2; "
         .. "D-pad Up/Down selects, Left/Right changes, release saves.")
-    log("native Command Menu overlay ready: L2=4, R2=4, L2+R2=4; "
+    log("native editor cursor delegation ready: Up/Down uses KH1's complete "
+        .. "native transition; Left/Right remains isolated for editing.")
+    log("native Command Menu overlay ready: up to four native rows; "
         .. "release L1+R1+L2+R2 to toggle it; add D-pad Down to reset "
         .. "defaults; overlay is currently "
         .. (HUD.enabled and "on." or "off."))
+    log("fourth loadout row follows the native Summon unlock; early saves "
+        .. "show and edit the three rows KH1 currently renders.")
     log("native Stun Impact/Zantetsuken selectors ready: shortcut rolls forced to 100%.")
     if staleSyntheticAttack then
         log("cleared stale synthetic Attack flags during reload.")
