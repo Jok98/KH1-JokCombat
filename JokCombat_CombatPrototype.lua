@@ -2,7 +2,7 @@ LUAGUI_NAME = "JokCombat Combat Prototype"
 LUAGUI_AUTH = "Jok; Critical Mix reference by Xendra / KSX"
 LUAGUI_DESC = "Cross combo, configurable Action Ability loadout, universal Guard/Dodge cancels and jump branch."
 
--- JokCombat v0.5.1 prototype for the current Steam Global executable.
+-- JokCombat v0.6.9 prototype for the current Steam Global executable.
 -- Critical Mix was used as an authorized technical reference. This script is
 -- intentionally limited to combat/input state and does not touch save data,
 -- story flags, rewards, inventory, AP, levels, worlds, chests, or synthesis.
@@ -47,6 +47,10 @@ local CONFIG = {
     -- before this time are discarded rather than buffered; a fresh press at
     -- or after the threshold may explicitly restart the aerial string at CC.
     airFinisherRestartTime = 20.0,
+    -- Ground-native actions otherwise touch the floor before their active
+    -- frame. Once (and only once) the requested animation is actually active,
+    -- move Sora upward on KH1's inverted vertical axis and clamp descent there.
+    airGroundActionLift = 50.0,
     groundChainMemoryFrames = 90,
     releasedCommandMinimumFrames = 1,
     releasedCommandTimeoutFrames = 60,
@@ -63,7 +67,7 @@ local CONFIG = {
 
 local EXPECTED_GAME_ID = 0xAF71841E
 local FINGERPRINT = 0x7265737563697065 -- "epicures", little endian
-local VERSION = "v0.5.1"
+local VERSION = "v0.6.9"
 
 local ADDRESS = {
     fingerprint = 0x3B2271,
@@ -139,6 +143,11 @@ local ADDRESS = {
     forceCircleBranch = 0x2A7B74,       -- 74 normal, 72 forced
     forceSquareBranch = 0x2A7BD6,       -- 84 normal, 82 forced
     airDefenseBranch = 0x2A7BE0,        -- 85 ground-only, 82 allow in air
+    -- Steam port of Critical Mix's transient ground-animation-in-air check.
+    -- TEST EAX,EAX immediately precedes it, so 73 is an always-taken bridge.
+    -- It is used only while pre-arming a physical ground-native action. The
+    -- real v0.6.9 shortcut uses vanilla 74 with raw70=0 in suspended fake-ground.
+    airGroundActionBranch = 0x2A376D,   -- 74 normal, 73 bridged
     guardAvailabilityBranch = 0x2A7BFD, -- 74 normal, 72 enabled, EB choose roll
     guardSelectionBranch = 0x2A7C01,    -- 74 normal, EB choose guard
     dodgeAvailabilityBranch = 0x2A7C1F, -- 84 normal, 82 enabled
@@ -225,38 +234,42 @@ local NATIVE_FINISHER_ABILITY_CLEAR_MASK = 0xC3FFFFFF
 -- requirements still need live validation one ability at a time.
 local ACTION_CATALOG = {
     { id = "none", name = "None", context = "none" },
-    { id = "slapshot", name = "Slapshot", context = "ground",
+    { id = "slapshot", name = "Slapshot", context = "both",
+        airBridge = true,
         animation = 0xCF, finisher = false,
         recordAddress = ADDRESS.groundComboSlapshot,
         record = { 0xCF, 0x00, 0x05, 0xFF, 0x28, 0x51, 0x00, 0x00,
             0x00, 0x00, 0x00, 0x00, 0x00, 0x05, 0x06, 0x04,
             0x00, 0x00, 0x00, 0x00 } },
-    { id = "sliding_dash", name = "Sliding Dash", context = "ground",
+    { id = "sliding_dash", name = "Sliding Dash", context = "both",
+        airBridge = true,
         animation = 0xD0, finisher = false,
         recordAddress = ADDRESS.groundComboSlide,
         record = { 0xD0, 0x00, 0x05, 0xFF, 0xB8, 0x50, 0x00, 0x00,
             0x00, 0x00, 0x00, 0x00, 0x02, 0x05, 0x06, 0x04,
             0x00, 0x00, 0x00, 0x00 } },
-    { id = "vortex", name = "Vortex", context = "ground",
+    { id = "vortex", name = "Vortex", context = "both",
+        airBridge = true,
         animation = 0xD3, finisher = false,
         recordAddress = ADDRESS.groundComboImpulse,
         record = { 0xD3, 0x00, 0x05, 0xFF, 0xC8, 0x4C, 0x00, 0x00,
             0x00, 0x00, 0x00, 0x00, 0x01, 0x05, 0x06, 0x04,
             0x00, 0x00, 0x00, 0x00 } },
-    { id = "aerial_sweep", name = "Aerial Sweep", context = "ground",
+    { id = "aerial_sweep", name = "Aerial Sweep", context = "both",
         animation = 0xD6, finisher = false,
         recordAddress = ADDRESS.airComboAerialSweep,
         record = { 0xD6, 0x00, 0x05, 0xFF, 0xC8, 0x4C, 0x00, 0x00,
             0x00, 0x00, 0x00, 0x00, 0x03, 0x05, 0x06, 0x04,
             0x00, 0x00, 0x00, 0x00 } },
-    { id = "counterattack", name = "Counterattack", context = "ground",
+    { id = "counterattack", name = "Counterattack", context = "both",
         animation = 0xD5, finisher = false, contextual = true,
+        airBridge = true,
         recordAddress = ADDRESS.actionRecordCounterattack,
         record = { 0xD5, 0x00, 0x05, 0xFF, 0x18, 0x4E, 0x00, 0x00,
             0x00, 0x00, 0x00, 0x00, 0x03, 0x05, 0x06, 0x05,
             0x00, 0x00, 0x00, 0x00 } },
-    { id = "blitz", name = "Blitz", context = "ground",
-        animation = 0xD2, finisher = true,
+    { id = "blitz", name = "Blitz", context = "both",
+        animation = 0xD2, finisher = true, airBridge = true,
         recordAddress = ADDRESS.actionRecordBlitz,
         record = { 0xD2, 0x00, 0x05, 0xFF, 0x38, 0x4D, 0x00, 0x00,
             0x00, 0x00, 0x00, 0x00, 0x1B, 0x05, 0x06, 0x06,
@@ -267,26 +280,26 @@ local ACTION_CATALOG = {
         record = { 0xD1, 0x00, 0x05, 0xFF, 0x48, 0x50, 0x00, 0x00,
             0x00, 0x00, 0x20, 0x42, 0x1B, 0x05, 0x06, 0x05,
             0x00, 0x00, 0x00, 0x00 } },
-    { id = "ripple_drive", name = "Ripple Drive", context = "ground",
-        animation = 0xD7, finisher = true,
+    { id = "ripple_drive", name = "Ripple Drive", context = "both",
+        animation = 0xD7, finisher = true, airBridge = true,
         recordAddress = ADDRESS.actionRecordRippleDrive,
         record = { 0xD7, 0x00, 0x05, 0xFF, 0x88, 0x4E, 0x00, 0x00,
             0x00, 0x00, 0x00, 0x00, 0x17, 0x05, 0x17, 0x05,
             0x00, 0x00, 0x00, 0x00 } },
-    { id = "stun_impact", name = "Stun Impact", context = "ground",
-        animation = 0xD8, finisher = true,
+    { id = "stun_impact", name = "Stun Impact", context = "both",
+        animation = 0xD8, finisher = true, airBridge = true,
         recordAddress = ADDRESS.actionRecordStunImpact,
         record = { 0xD8, 0x00, 0x05, 0xFF, 0xF8, 0x4E, 0x00, 0x00,
             0x00, 0x00, 0x00, 0x00, 0x1B, 0x05, 0x1B, 0x06,
             0x00, 0x00, 0x00, 0x00 } },
-    { id = "gravity_break", name = "Gravity Break", context = "ground",
-        animation = 0xD9, finisher = true,
+    { id = "gravity_break", name = "Gravity Break", context = "both",
+        animation = 0xD9, finisher = true, airBridge = true,
         recordAddress = ADDRESS.actionRecordGravityBreak,
         record = { 0xD9, 0x00, 0x05, 0xFF, 0x68, 0x4F, 0x00, 0x00,
             0x00, 0x00, 0x00, 0x00, 0x17, 0x05, 0x17, 0x06,
             0x00, 0x00, 0x00, 0x00 } },
-    { id = "zantetsuken", name = "Zantetsuken", context = "ground",
-        animation = 0xDA, finisher = true,
+    { id = "zantetsuken", name = "Zantetsuken", context = "both",
+        animation = 0xDA, finisher = true, airBridge = true,
         recordAddress = ADDRESS.actionRecordZantetsuken,
         record = { 0xDA, 0x00, 0x05, 0xFF, 0xD8, 0x4F, 0x00, 0x00,
             0x00, 0x00, 0x00, 0x00, 0x18, 0x05, 0x18, 0x06,
@@ -404,10 +417,12 @@ local CANCEL_WINDOW = {
     [0xCA] = 20.0, -- basic ground combo A2/context
     [0xCC] = 12.0, -- air combo 1
     [0xCD] = 14.0, -- air combo 2
+    [0xD1] = 30.0, -- Hurricane Blast recovery
     [0xCF] = 18.0, -- Slapshot
     [0xD0] = 18.0, -- Sliding Dash family
     [0xD2] = 18.0, -- Cleave family
     [0xD3] = 18.0, -- Impulse family
+    [0xD6] = 20.0, -- Aerial Sweep recovery
 }
 
 -- Input can be remembered before a normal attack is safe to release. C9 is
@@ -520,6 +535,7 @@ local NORMAL = {
     forceCircle = 0x74,
     forceSquare = 0x84,
     airDefense = 0x85,
+    airGroundAction = 0x74,
     guardAvailability = 0x74,
     guardSelection = 0x74,
     dodgeAvailability = 0x84,
@@ -580,6 +596,14 @@ local airRouteAnimation = nil
 local airRouteKind = nil
 local airRouteSourceAnimation = nil
 local airRouteSourceTime = 0.0
+local airGroundActionBridgeAnimation = nil
+local airGroundActionBridgePositionPointer = nil
+local airGroundActionBridgeHeight = nil
+local airGroundActionBridgeLifted = false
+local airGroundActionBridgeUsesBranch = false
+local airGroundActionBridgePlayerPointer = nil
+local airGroundActionBridgeOriginalState = nil
+local airGroundActionBridgeFakeGround = false
 local syntheticAttackCommandOwned = false
 local syntheticAttackCommandHigh = false
 local actionPrimeComboOwned = false
@@ -659,7 +683,7 @@ local function loadActionLoadout()
 
     local file = io.open(loadoutPath, "r")
     if file == nil then
-        log("loadout file not found; using v0.5.1 defaults.")
+        log("loadout file not found; using v0.6.9 defaults.")
         return
     end
 
@@ -690,7 +714,7 @@ local function saveActionLoadout()
         return false
     end
 
-    file:write("# JokCombat v0.5.1 Action Ability loadout\n")
+    file:write("# JokCombat v0.6.9 Action Ability loadout\n")
     file:write("# Guard remains fixed on L2+Circle; Dodge Roll on Square.\n")
     file:write("action_overlay=", HUD.enabled and "true" or "false", "\n")
     for _, slot in ipairs(ACTION_SLOTS) do
@@ -1406,6 +1430,111 @@ local function restoreIfKnown(address, normal, known)
     end
 end
 
+local function restoreAirGroundActionBridge()
+    if airGroundActionBridgeFakeGround
+        and airGroundActionBridgePlayerPointer ~= nil
+        and airGroundActionBridgeOriginalState ~= nil then
+        local livePlayerPointer = ReadLong(ADDRESS.playerPointer)
+        if livePlayerPointer == airGroundActionBridgePlayerPointer
+            and ReadInt(livePlayerPointer + PLAYER.airborneState, true) == 0 then
+            WriteInt(livePlayerPointer + PLAYER.airborneState,
+                airGroundActionBridgeOriginalState, true)
+            log(string.format(
+                "airborne action suspension released: raw70=0x%08X.",
+                airGroundActionBridgeOriginalState))
+        end
+    end
+    restoreIfKnown(ADDRESS.airGroundActionBranch,
+        NORMAL.airGroundAction, { 0x74, 0x73 })
+    airGroundActionBridgeAnimation = nil
+    airGroundActionBridgePositionPointer = nil
+    airGroundActionBridgeHeight = nil
+    airGroundActionBridgeLifted = false
+    airGroundActionBridgeUsesBranch = false
+    airGroundActionBridgePlayerPointer = nil
+    airGroundActionBridgeOriginalState = nil
+    airGroundActionBridgeFakeGround = false
+end
+
+local function updateAirGroundActionBridge(player)
+    local animation = airGroundActionBridgeAnimation
+    if animation == nil then return end
+
+    local pending = airRouteAnimation == animation
+        or groundRouteAnimation == animation
+        or transitionExpectedAnimation == animation
+        or deferredLinkExpectedAnimation == animation
+    local animationMatches = player.animation == animation
+    local fakeGround = airGroundActionBridgeFakeGround
+    local active = animationMatches and (player.airborne or fakeGround)
+    if (not player.airborne and not fakeGround)
+        or (not pending and not active) then
+        restoreAirGroundActionBridge()
+        return
+    end
+
+    if fakeGround then
+        if player.pointer ~= airGroundActionBridgePlayerPointer then
+            log("airborne action suspension released: player pointer changed.")
+            restoreAirGroundActionBridge()
+            return
+        end
+        if player.airborneState ~= 0 then
+            WriteInt(player.pointer + PLAYER.airborneState, 0, true)
+            player.airborneState = 0
+        end
+        player.airborne = false
+    end
+
+    local positionPointer = player.pointer
+    if positionPointer ~= airGroundActionBridgePositionPointer
+        or airGroundActionBridgeHeight == nil then
+        log("airborne ground-action stall released: "
+            .. "Sora position pointer changed or became unavailable.")
+        restoreAirGroundActionBridge()
+        return
+    end
+
+    local currentHeight = ReadFloat(positionPointer + 0x14, true)
+    if currentHeight ~= currentHeight or math.abs(currentHeight) > 10000000 then
+        log("airborne ground-action stall released: invalid vertical position.")
+        restoreAirGroundActionBridge()
+        return
+    end
+
+    -- Fake-ground suspension deliberately keeps vanilla 0x74: raw70=0 now
+    -- reaches KH1's complete ground dispatcher while the transform remains at
+    -- the captured aerial height. Legacy animation-only primes can still own
+    -- the transient 0x73 bridge until the real shortcut input arrives.
+    setByte("airGroundAction", ADDRESS.airGroundActionBranch,
+        airGroundActionBridgeUsesBranch and 0x73 or NORMAL.airGroundAction,
+        { 0x74, 0x73 })
+    -- KH1 otherwise lets the ground-native pose fall into Landing before its
+    -- active frame. Do not lift Sora while the shortcut is merely primed: wait
+    -- until the requested animation is really active. The game's vertical axis
+    -- grows toward the floor, so subtraction lifts and later writes clamp only
+    -- the descent while preserving any further native upward movement.
+    if fakeGround and airGroundActionBridgeLifted then
+        if currentHeight ~= airGroundActionBridgeHeight then
+            WriteFloat(positionPointer + 0x14,
+                airGroundActionBridgeHeight, true)
+        end
+    elseif active and not airGroundActionBridgeLifted then
+        airGroundActionBridgeHeight = currentHeight
+            - CONFIG.airGroundActionLift
+        WriteFloat(positionPointer + 0x14,
+            airGroundActionBridgeHeight, true)
+        airGroundActionBridgeLifted = true
+        log(string.format(
+            "airborne ground-action height stall engaged: "
+            .. "anim=0x%02X %.3f -> %.3f.", animation,
+            currentHeight, airGroundActionBridgeHeight))
+    elseif active and currentHeight > airGroundActionBridgeHeight then
+        WriteFloat(positionPointer + 0x14,
+            airGroundActionBridgeHeight, true)
+    end
+end
+
 local NATIVE_FINISHER_SELECTOR = {
     ripple_drive = {
         abilityBit = RIPPLE_DRIVE_ABILITY_BIT,
@@ -1443,7 +1572,8 @@ local function pendingNativeFinisherAction()
     for _, actionId in ipairs(NATIVE_FINISHER_ACTION_IDS) do
         if kindTargetsAction(transitionKind, actionId)
             or kindTargetsAction(deferredLinkKind, actionId)
-            or kindTargetsAction(groundRouteKind, actionId) then
+            or kindTargetsAction(groundRouteKind, actionId)
+            or kindTargetsAction(airRouteKind, actionId) then
             return ACTION_BY_ID[actionId]
         end
     end
@@ -1508,12 +1638,28 @@ local function restoreNativeFinisherSelection()
 end
 
 local function updateNativeFinisherSelection(buttons, player)
-    local action = pendingNativeFinisherAction()
-        or chordNativeFinisherAction(buttons)
+    local bridgeActive = airGroundActionBridgeAnimation ~= nil
+        and player.animation == airGroundActionBridgeAnimation
+    local action = nil
+    if bridgeActive then
+        -- Once a bridged animation owns the air route, a held shoulder must not
+        -- swap its native selector to the passive X shortcut. Preserve only the
+        -- selector belonging to the active finisher itself; non-finishers clear
+        -- any selector that was armed while their modifier was held.
+        for _, actionId in ipairs(NATIVE_FINISHER_ACTION_IDS) do
+            local candidate = ACTION_BY_ID[actionId]
+            if candidate.animation == player.animation then
+                action = candidate
+                break
+            end
+        end
+    else
+        action = pendingNativeFinisherAction()
+            or chordNativeFinisherAction(buttons)
+    end
     local selector = action ~= nil and NATIVE_FINISHER_SELECTOR[action.id]
         or nil
     local enable = CONFIG.actionLoadout and selector ~= nil
-        and not player.airborne
 
     if not enable then
         if nativeFinisherSelectionActionId ~= nil
@@ -1613,8 +1759,30 @@ local function routeEntryHasKnownRecord(entry)
     -- reload only when all remaining 19 bytes still match this entry's Steam
     -- baseline, then normalize it to the complete baseline below.
     local animation = ReadByte(entry.address)
-    return ROUTE_RECORD_BY_ANIMATION[animation] ~= nil
-        and actionRecordMatches(entry.address, entry.record, 1)
+    local routedRecord = ROUTE_RECORD_BY_ANIMATION[animation]
+    if routedRecord == nil then return false end
+    if actionRecordMatches(entry.address, entry.record, 1) then return true end
+
+    -- v0.6.7 special-finisher hybrid: the aerial dispatcher reads the motion
+    -- ID from byte zero and its native resource from dword +4. Preserve every
+    -- other byte from the aerial entry so the ground record cannot request Fall
+    -- before Ripple Drive/Stun Impact reach their late VFX/hit frames.
+    for offset = 1, 3 do
+        if ReadByte(entry.address + offset) ~= entry.record[offset + 1] then
+            return false
+        end
+    end
+    for offset = 4, 7 do
+        if ReadByte(entry.address + offset) ~= routedRecord[offset + 1] then
+            return false
+        end
+    end
+    for offset = 8, ACTION_RECORD_SIZE - 1 do
+        if ReadByte(entry.address + offset) ~= entry.record[offset + 1] then
+            return false
+        end
+    end
+    return true
 end
 
 local function validateCanonicalActionRecords()
@@ -1771,7 +1939,7 @@ local function normalizeAirActionRoute()
     return valid
 end
 
-local function beginAirActionRoute(kind, desiredAnimation, player)
+local function beginAirActionRoute(kind, desiredAnimation, player, routeMode)
     if not airRouteAvailable or desiredAnimation == nil then return false end
     local desiredRecord = ROUTE_RECORD_BY_ANIMATION[desiredAnimation]
     if desiredRecord == nil then
@@ -1795,16 +1963,52 @@ local function beginAirActionRoute(kind, desiredAnimation, player)
     end
 
     for _, entry in ipairs(AIR_ACTION_ROUTE) do
-        writeActionRecord(entry.address, desiredRecord)
+        if routeMode == "animation" then
+            -- Ground-native animations must inherit the aerial entry's state,
+            -- movement and hit-dispatch metadata. Critical Mix routes these by
+            -- replacing byte zero only; copying the complete ground record made
+            -- KH1 clear Sora's airborne state at animation time 12-25.
+            if ReadByte(entry.address) ~= desiredAnimation then
+                WriteByte(entry.address, desiredAnimation)
+            end
+        elseif routeMode == "resource" then
+            -- D7/D8/D9/DA need their own native motion resource for their late
+            -- effect/hit script, but the complete ground record also requests
+            -- Fall at animation time 20-22. Import only ID + resource and keep
+            -- the aerial movement/state/hit-dispatch fields at +8..+19.
+            if ReadByte(entry.address) ~= desiredAnimation then
+                WriteByte(entry.address, desiredAnimation)
+            end
+            for offset = 4, 7 do
+                local desired = desiredRecord[offset + 1]
+                if ReadByte(entry.address + offset) ~= desired then
+                    WriteByte(entry.address + offset, desired)
+                end
+            end
+        else
+            writeActionRecord(entry.address, desiredRecord)
+        end
     end
     airRouteFrames = CONFIG.groundRouteFrames
     airRouteAnimation = desiredAnimation
     airRouteKind = kind
     airRouteSourceAnimation = player.animation
     airRouteSourceTime = player.time
-    log(string.format(
-        "%s route armed: all aerial entries -> complete 0x%02X record",
-        kind, desiredAnimation))
+    if routeMode == "animation" then
+        log(string.format(
+            "%s route armed: all aerial entries -> animation 0x%02X "
+            .. "over native air records", kind, desiredAnimation))
+    elseif routeMode == "resource" then
+        log(string.format(
+            "%s route armed: all aerial entries -> animation 0x%02X + "
+            .. "native resource %02X%02X%02X%02X over air state",
+            kind, desiredAnimation, desiredRecord[8], desiredRecord[7],
+            desiredRecord[6], desiredRecord[5]))
+    else
+        log(string.format(
+            "%s route armed: all aerial entries -> complete 0x%02X record",
+            kind, desiredAnimation))
+    end
     return true
 end
 
@@ -1843,10 +2047,80 @@ end
 local function beginActionRoute(kind, action, player)
     if action == nil or action.animation == nil then return false end
     if action.recordAvailable ~= true then return false end
-    if action.context == "air" then
-        return beginAirActionRoute(kind, action.animation, player)
+    local bridged = player.airborne and action.airBridge == true
+    local priming = type(kind) == "string"
+        and kind:sub(1, #ACTION_PRIME_PREFIX) == ACTION_PRIME_PREFIX
+    -- Limit fake-ground to the normal Jump/Fall states validated by the probe.
+    -- Swimming, flying and scripted airborne states keep the older aerial route.
+    local fakeGround = bridged and not priming
+        and (player.airborneState == 1 or player.airborneState == 2)
+    local nativeFinisherBridge = bridged
+        and NATIVE_FINISHER_SELECTOR[action.id] ~= nil
+    if bridged then
+        restoreAirGroundActionBridge()
+        -- The validated player object owns its live position vector directly at
+        -- +0x10; +0x14 is the vertical component. The former global pointer can
+        -- legitimately be zero in gameplay and must never gate an action route.
+        local positionPointer = player.pointer
+        local height = ReadFloat(positionPointer + 0x14, true)
+        if height == nil or height ~= height or math.abs(height) > 10000000 then
+            log(string.format(
+                "%s suspension unavailable; using executable aerial fallback.",
+                kind))
+            fakeGround = false
+        else
+            local usesGroundBranch = not fakeGround and not nativeFinisherBridge
+            if not setByte("airGroundAction", ADDRESS.airGroundActionBranch,
+                    usesGroundBranch and 0x73 or NORMAL.airGroundAction,
+                    { 0x74, 0x73 }) then
+                return false
+            end
+            airGroundActionBridgeAnimation = action.animation
+            airGroundActionBridgePositionPointer = positionPointer
+            airGroundActionBridgeUsesBranch = usesGroundBranch
+            airGroundActionBridgePlayerPointer = player.pointer
+            airGroundActionBridgeOriginalState = player.airborneState
+            airGroundActionBridgeFakeGround = fakeGround
+            if fakeGround then
+                airGroundActionBridgeHeight = height - CONFIG.airGroundActionLift
+                airGroundActionBridgeLifted = true
+                WriteFloat(positionPointer + 0x14,
+                    airGroundActionBridgeHeight, true)
+                WriteInt(player.pointer + PLAYER.airborneState, 0, true)
+                player.airborneState = 0
+                player.airborne = false
+                log(string.format(
+                    "%s airborne action suspension armed for 0x%02X: "
+                    .. "fake-ground raw70=0x%08X->0 height=%.3f->%.3f.",
+                    kind, action.animation, airGroundActionBridgeOriginalState,
+                    height, airGroundActionBridgeHeight))
+            else
+                airGroundActionBridgeHeight = height
+                airGroundActionBridgeLifted = false
+                log(string.format(
+                    "%s airborne ground-action prime armed for 0x%02X at %.3f "
+                    .. "(%s).", kind, action.animation, height,
+                    nativeFinisherBridge
+                        and "native aerial dispatcher + resource"
+                        or "transient ground bridge + air state"))
+            end
+        end
+    else
+        restoreAirGroundActionBridge()
     end
-    return beginGroundActionRoute(kind, action.animation, player)
+
+    local armed = false
+    if fakeGround then
+        armed = beginGroundActionRoute(kind, action.animation, player)
+    elseif player.airborne then
+        armed = beginAirActionRoute(
+            kind, action.animation, player,
+            bridged and (nativeFinisherBridge and "resource" or "animation"))
+    else
+        armed = beginGroundActionRoute(kind, action.animation, player)
+    end
+    if not armed and bridged then restoreAirGroundActionBridge() end
+    return armed
 end
 
 local function updateActionRoutes(player)
@@ -1858,6 +2132,7 @@ end
 local function restoreAllPatches()
     clearSyntheticAttackCommand(false)
     restoreActionRoutes()
+    restoreAirGroundActionBridge()
     restoreNativeFinisherSelection()
     HUD.hideOverlay()
     restoreIfKnown(ADDRESS.forceCircleBranch, NORMAL.forceCircle,
@@ -1866,6 +2141,8 @@ local function restoreAllPatches()
         { 0x84, 0x82 })
     restoreIfKnown(ADDRESS.airDefenseBranch, NORMAL.airDefense,
         { 0x85, 0x82 })
+    restoreIfKnown(ADDRESS.airGroundActionBranch,
+        NORMAL.airGroundAction, { 0x74, 0x73 })
     restoreIfKnown(ADDRESS.guardAvailabilityBranch,
         NORMAL.guardAvailability, { 0x74, 0x72, 0xEB })
     restoreIfKnown(ADDRESS.guardSelectionBranch, NORMAL.guardSelection,
@@ -1901,10 +2178,12 @@ local function readPlayer()
         return nil
     end
 
+    local airborneState = ReadInt(pointer + PLAYER.airborneState, true)
     return {
         pointer = pointer,
         control = ReadByte(pointer + PLAYER.actionControl, true),
-        airborne = ReadInt(pointer + PLAYER.airborneState, true) ~= 0,
+        airborneState = airborneState,
+        airborne = airborneState ~= 0,
         animation = ReadByte(pointer + PLAYER.animationId, true),
         secondary = ReadByte(pointer + PLAYER.secondaryAnimationId, true),
         time = animationTime,
@@ -2530,8 +2809,17 @@ local function prepareNormalGroundAttack(player, chainOpen)
 end
 
 local function prepareNormalAirAttack(player)
-    if not isAirNormalContext(player) then return false end
-    local desiredAnimation = player.animation == 0xCC and 0xCD or 0xCE
+    if not player.airborne then return false end
+    local desiredAnimation = nil
+    if player.animation == 0xCC then
+        desiredAnimation = 0xCD
+    elseif player.animation == 0xCD then
+        desiredAnimation = 0xCE
+    elseif player.animation == 0xD1 or player.animation == 0xD6 then
+        -- A completed airborne Action Ability rejoins the normal cycle at CC.
+        desiredAnimation = 0xCC
+    end
+    if desiredAnimation == nil then return false end
     -- Complete aerial records are routed explicitly, so this path does not
     -- depend on the early save's native max-air-combo byte or combo counter.
     return true, nil, desiredAnimation
@@ -2680,6 +2968,9 @@ local function updateFinisherBuffer(player)
 end
 
 local function cancelPlayer(player, label)
+    if airGroundActionBridgeAnimation ~= nil then
+        restoreAirGroundActionBridge()
+    end
     WriteByte(player.pointer + PLAYER.actionControl, 0x03, true)
     log(string.format(
         "%s cancel: anim=0x%02X secondary=0x%02X time=%.2f",
@@ -2701,19 +2992,20 @@ end
 
 local function actionMatchesContext(action, player)
     if action == nil or action.animation == nil then return false end
+    if action.context == "both" then return true end
     if action.context == "air" then return player.airborne end
     return action.context == "ground" and not player.airborne
 end
 
-local function actionRouteState(action)
-    if action.context == "air" then
+local function actionRouteState(action, player)
+    if player.airborne then
         return airRouteKind, airRouteAnimation
     end
     return groundRouteKind, groundRouteAnimation
 end
 
 local function promotePrimedActionRoute(action, kind, player)
-    if action.context == "air" then
+    if player.airborne then
         airRouteKind = kind
         airRouteSourceAnimation = player.animation
         airRouteSourceTime = player.time
@@ -2743,8 +3035,10 @@ clearActionPrimeCombo = function(restoreOriginal)
     actionPrimeForcedComboPosition = nil
 end
 
-local function primeActionComboState(action, primeKind)
-    if action.context ~= "ground" or not action.finisher then
+local function primeActionComboState(action, primeKind, player)
+    local needsGroundFinisherContext = action.finisher
+        and (not player.airborne or action.airBridge == true)
+    if not needsGroundFinisherContext then
         clearActionPrimeCombo(true)
         return true
     end
@@ -2788,9 +3082,11 @@ local function requestActionAbility(player, slot, action, usesPhysicalInput)
         log(slot.label .. " ignored: reaction command is active.")
         return true
     end
+    local requestedFromAir = player.airborne
 
     local kind = actionKind(action)
-    local currentRouteKind, currentRouteAnimation = actionRouteState(action)
+    local currentRouteKind, currentRouteAnimation =
+        actionRouteState(action, player)
     if player.animation == action.animation then
         if usesPhysicalInput
             and physicalPrimeAcceptedActionId == action.id then
@@ -2814,6 +3110,8 @@ local function requestActionAbility(player, slot, action, usesPhysicalInput)
 
     local neutral = player.control == 0x03 and not isAttackContext(player)
     local canCancel = isCancelableAttack(player)
+        or (player.airborne and player.animation == 0xCE
+            and player.time >= CONFIG.airFinisherRestartTime)
     if not usesPhysicalInput and not neutral and not canCancel then
         log(string.format(
             "%s ignored: current action is outside its link window (0x%02X %.2f).",
@@ -2831,7 +3129,7 @@ local function requestActionAbility(player, slot, action, usesPhysicalInput)
 
     local comboPosition = nil
     local maximum = nil
-    if action.context == "ground" then
+    if not player.airborne or action.airBridge == true then
         local position
         position, maximum = readGroundComboState()
         if position == nil then
@@ -2873,7 +3171,7 @@ local function requestActionAbility(player, slot, action, usesPhysicalInput)
         comboPosition, usesPhysicalInput)
     transitionCheckFrames = math.max(
         transitionCheckFrames, CONFIG.actionRequestFrames)
-    if action.context == "air" then
+    if player.airborne then
         airRouteFrames = math.max(airRouteFrames, CONFIG.actionRequestFrames)
     else
         groundRouteFrames = math.max(
@@ -2881,9 +3179,10 @@ local function requestActionAbility(player, slot, action, usesPhysicalInput)
     end
     log(string.format(
         "%s requested by %s: anim=0x%02X context=%s route=%s%s",
-        action.name, slot.label, action.animation, action.context,
+        action.name, slot.label, action.animation,
+        requestedFromAir and "air-suspended" or "ground",
         routeWasPrimed and "prearmed" or "synthetic",
-        action.context == "ground"
+        comboPosition ~= nil
             and string.format(" combo=%d max=%d", comboPosition, maximum)
             or ""))
     return true
@@ -2915,6 +3214,27 @@ local function updateCrossActionPrime(player, buttons)
         currentPrimeKind = airRouteKind
     end
 
+    local currentPrimeMatchesPlayer = currentPrimeKind == nil
+        or (player.airborne and isActionPrimeKind(airRouteKind))
+        or (not player.airborne and isActionPrimeKind(groundRouteKind))
+    if not currentPrimeMatchesPlayer then
+        restoreActionRoutes()
+        currentPrimeKind = nil
+        log("Action Ability X prime moved to the current air/ground context.")
+    end
+
+    local bridgeActive = airGroundActionBridgeAnimation ~= nil
+        and player.animation == airGroundActionBridgeAnimation
+    if bridgeActive and currentPrimeKind == nil then
+        -- Holding the modifier after a non-X shortcut used to pre-arm its X
+        -- binding immediately. That replaced the live bridge animation (for
+        -- example D0 with D8) and released the height stall mid-action. An
+        -- explicit cancel can still route another non-X shortcut later, but a
+        -- passive X prime never takes ownership from the active move.
+        clearActionPrimeCombo(true)
+        return false
+    end
+
     local canStayPrimed = CONFIG.actionLoadout and desiredPrime ~= nil
         and action.recordAvailable == true
         and actionMatchesContext(action, player)
@@ -2936,12 +3256,12 @@ local function updateCrossActionPrime(player, buttons)
             log("Action Ability X prime cancelled by state change.")
             return false
         end
-        if not primeActionComboState(action, currentPrimeKind) then
+        if not primeActionComboState(action, currentPrimeKind, player) then
             restoreActionRoutes()
             log("Action Ability X prime cancelled: combo state unavailable.")
             return false
         end
-        if action.context == "air" then
+        if player.airborne then
             airRouteFrames = math.max(
                 airRouteFrames, CONFIG.actionRequestFrames)
         else
@@ -2960,13 +3280,13 @@ local function updateCrossActionPrime(player, buttons)
         return false
     end
 
-    if not primeActionComboState(action, desiredPrime) then
+    if not primeActionComboState(action, desiredPrime, player) then
         log(action.name .. " prime ignored: combo state unavailable.")
         return false
     end
     local routeArmed = beginActionRoute(desiredPrime, action, player)
     if routeArmed then
-        if action.context == "air" then
+        if player.airborne then
             airRouteFrames = math.max(
                 airRouteFrames, CONFIG.actionRequestFrames)
         else
@@ -3024,16 +3344,36 @@ local function updateModifierFaceRouting(buttons)
         { 0xFF, 0xFE })
 end
 
-local function updateAttackControlRouting()
+local function updateAttackControlRouting(buttons, player)
+    local suppressPhysicalCross = airGroundActionBridgeFakeGround
+    if not suppressPhysicalCross and buttons ~= nil and player ~= nil
+        and player.airborne then
+        local l2Held = (buttons & BUTTON.L2) ~= 0
+        local r2Held = (buttons & BUTTON.R2) ~= 0
+        local slot = nil
+        if l2Held and not r2Held then
+            slot = ACTION_SLOT_BY_ID.l2_cross
+        elseif r2Held and not l2Held then
+            slot = ACTION_SLOT_BY_ID.r2_cross
+        elseif l2Held and r2Held then
+            slot = ACTION_SLOT_BY_ID.dual_cross
+        end
+        local action = slot ~= nil and ACTION_BY_ID[loadout[slot.id]] or nil
+        suppressPhysicalCross = action ~= nil and action.airBridge == true
+            and action.recordAvailable == true
+            and (player.airborneState == 1 or player.airborneState == 2)
+    end
+
     if not CONFIG.triangleGroundFinisher then
         forceTriangleAttackFrames = 0
         return setByte("attackControlMap", ADDRESS.attackControlMap,
-            NORMAL.attackControlMap,
+            suppressPhysicalCross and 0xFE or NORMAL.attackControlMap,
             { 0xFF, CONTROL_INDEX.TRIANGLE, 0xFE })
     end
     return setByte("attackControlMap", ADDRESS.attackControlMap,
-        forceTriangleAttackFrames > 0 and CONTROL_INDEX.TRIANGLE
-            or NORMAL.attackControlMap,
+        suppressPhysicalCross and 0xFE
+            or (forceTriangleAttackFrames > 0 and CONTROL_INDEX.TRIANGLE
+                or NORMAL.attackControlMap),
         { 0xFF, CONTROL_INDEX.TRIANGLE, 0xFE })
 end
 
@@ -3171,6 +3511,14 @@ function _OnInit()
     airRouteKind = nil
     airRouteSourceAnimation = nil
     airRouteSourceTime = 0.0
+    airGroundActionBridgeAnimation = nil
+    airGroundActionBridgePositionPointer = nil
+    airGroundActionBridgeHeight = nil
+    airGroundActionBridgeLifted = false
+    airGroundActionBridgeUsesBranch = false
+    airGroundActionBridgePlayerPointer = nil
+    airGroundActionBridgeOriginalState = nil
+    airGroundActionBridgeFakeGround = false
 
     if not CONFIG.enabled then
         ConsolePrint("JokCombat Combat Prototype is disabled in CONFIG.")
@@ -3193,6 +3541,8 @@ function _OnInit()
         { 0x84, 0x82 }) and valid
     valid = normalizeByte("airDefense", ADDRESS.airDefenseBranch, 0x85,
         { 0x85, 0x82 }) and valid
+    valid = normalizeByte("airGroundAction", ADDRESS.airGroundActionBranch,
+        0x74, { 0x74, 0x73 }) and valid
     valid = normalizeByte("guardAvailability", ADDRESS.guardAvailabilityBranch,
         0x74, { 0x74, 0x72, 0xEB }) and valid
     valid = normalizeByte("guardSelection", ADDRESS.guardSelectionBranch,
@@ -3263,6 +3613,18 @@ function _OnInit()
         .. "show and edit the three rows KH1 currently renders.")
     log("native Ripple Drive/Stun Impact/Gravity Break/Zantetsuken "
         .. "selectors ready.")
+    log("airborne Action Ability routes ready: all 11 catalog actions; "
+        .. "ground-native moves use the complete ground dispatcher in a "
+        .. "temporary suspended fake-ground state.")
+    log(string.format("airborne action suspension ready: ground-native "
+        .. "actions lift by %.1f and lock vertical position until completion.",
+        CONFIG.airGroundActionLift))
+    log("airborne fake-ground lifecycle ready: raw70 is restored on complete, "
+        .. "cancel, route failure, script fault or player loss.")
+    log("airborne ground-native X shortcuts use a suppressed physical edge "
+        .. "followed by one synthetic ground-dispatch pulse.")
+    log("airborne bridge ownership ready: a passive X prime cannot replace "
+        .. "an active bridged action.")
     if staleSyntheticAttack then
         log("cleared stale synthetic Attack flags during reload.")
     end
@@ -3306,6 +3668,11 @@ function _OnFrame()
 
     local buttons = ReadByte(ADDRESS.rawButtons)
     local dpad = ReadByte(ADDRESS.dpadButtons)
+    updateAirGroundActionBridge(player)
+    if faulted then
+        restoreAllPatches()
+        return
+    end
     local controlDpadOwned, controlConsumed =
         HUD.updateOverlayControls(buttons, dpad)
     local directDpadOwned = HUD.updateDirectEditor(
@@ -3376,7 +3743,7 @@ function _OnFrame()
     end
     updateDefenseRouting(buttons, guardAvailable, dodgeActive)
     updateModifierFaceRouting(buttons)
-    updateAttackControlRouting()
+    updateAttackControlRouting(buttons, player)
     if faulted then
         restoreAllPatches()
         return
@@ -3476,8 +3843,18 @@ function _OnFrame()
                 actionConsumed = not isPhysicalCross
             elseif isPhysicalCross then
                 if actionMatchesContext(action, player) then
+                    local suspendedSynthetic = player.airborne
+                        and action.airBridge == true
+                        and (player.airborneState == 1
+                            or player.airborneState == 2)
+                    if suspendedSynthetic then
+                        -- The prior shoulder frame disabled native X and kept a
+                        -- harmless aerial prime. Replace it now: fake-ground must
+                        -- exist before KH1 consumes the synthetic Attack edge.
+                        restoreActionRoutes()
+                    end
                     actionConsumed = requestActionAbility(
-                        player, selectedSlot, action, true)
+                        player, selectedSlot, action, not suspendedSynthetic)
                 else
                     -- None or a ground/air mismatch deliberately preserves the
                     -- normal X combo rather than leaving the player inert.
@@ -3692,7 +4069,7 @@ function _OnFrame()
     forceTriangleAttackFrames = math.max(
         0, forceTriangleAttackFrames - 1)
     if forceTriangleAttackFrames == 0 then
-        updateAttackControlRouting()
+        updateAttackControlRouting(buttons, player)
     end
     if player.airborne then
         groundChainFrames = 0

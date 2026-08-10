@@ -155,7 +155,7 @@ La repository contiene tre probe read-only e il primo prototipo combat:
   faccia e valida gli indirizzi Steam portati prima che il prototipo scriva;
 - `JokCombat_CommandMenuProbe.lua`: confronta in sola lettura controller,
   transizioni e strutture delle quattro righe native del Command Menu;
-- `JokCombat_CombatPrototype.lua`: prototipo v0.5.1 con combo terrestre completa
+- `JokCombat_CombatPrototype.lua`: prototipo v0.6.9 con combo terrestre completa
   e combo aerea `CC -> CD -> CE`,
   e finisher su Croce, undici slot Action Ability configurabili,
   Triangolo non modificato lasciato nativo,
@@ -172,7 +172,7 @@ Requisito di design confermato: JokCombat fornisce dall'inizio un loadout
 runtime di sole Action Ability, indipendente dallo sblocco vanilla e senza
 inserirle nel salvataggio. Guard e Dodge Roll restano comandi fissi; abilita'
 passive, condivise, movimento, magia e Limit a consumo MP non compaiono
-nell'editor v0.5.1. Queste ultime richiedono un dispatcher diverso dalla route
+nell'editor v0.6.9. Queste ultime richiedono un dispatcher diverso dalla route
 Attack e verranno analizzate separatamente, senza fingere che siano gia'
 supportate.
 
@@ -198,8 +198,8 @@ pacchetto Critical Mix sono conservati, ma non caricati, nelle directory
 `C:\Users\<utente>\Documents\KH_mod\reference\CriticalMix`. Backup, log e
 copie runtime restano locali e non fanno parte del repository.
 
-Per verificare la v0.5.1, premi `F1` nella console LuaBackend. Il log iniziale
-deve mostrare `v0.5.1`, `ground action route ready`, `aerial action route ready`,
+Per verificare la v0.6.9, premi `F1` nella console LuaBackend. Il log iniziale
+deve mostrare `v0.6.9`, `ground action route ready`, `aerial action route ready`,
 `complete action records ready: 11/11`
 `native Command Menu overlay ready` e
 `native Ripple Drive/Stun Impact/Gravity Break/Zantetsuken selectors ready`.
@@ -222,7 +222,7 @@ Magic, Items o Summon e, mentre una direzione e' tenuta, nessuna mossa o tasto
 faccia deve raggiungere il dispatcher di combattimento.
 Rilasciare prima il modificatore mantiene questo blocco fino al rilascio del
 D-pad. La configurazione non richiede una conferma: rilasciare il modificatore
-salva automaticamente. Limite live noto della v0.5.1: premere Croce mentre il
+salva automaticamente. Limite live noto della v0.6.9: premere Croce mentre il
 cursore si trova sulla seconda o terza riga permette ancora a KH1 di aprire
 rispettivamente Magic o Items prima del ripristino su Attack. Fino alla fix,
 torna sulla prima riga oppure rilascia e ripremi il modificatore prima di usare
@@ -252,7 +252,7 @@ Gli undici default sono tutti differenti:
 | `R2 + Quadrato` | Zantetsuken |
 | `L2 + R2 + Croce` | Blitz |
 | `L2 + R2 + Triangolo` | Vortex |
-| `L2 + R2 + Cerchio` | Aerial Sweep |
+| `L2 + R2 + Cerchio` | Aerial Sweep, terra e aria |
 | `L2 + R2 + Quadrato` | Counterattack, contestuale |
 
 Il catalogo include tutte le azioni della tabella e anche `None`. Per eseguire
@@ -280,6 +280,23 @@ tempo `20` deve produrre `Cross ignored: combo finisher must end first` senza
 essere conservata. Una nuova Croce da `20` in poi deve mostrare
 `Aerial finisher cycle requested: CE -> CC`, quindi riaprire `CC` se Sora e'
 ancora in aria. L'atterraggio deve interrompere il ciclo normalmente.
+Per il test Action Ability aereo, tieni il modificatore almeno un frame. Tutte
+le undici azioni del catalogo sono ora instradabili in volo: Hurricane Blast
+`D1` e Aerial Sweep `D6` usano il percorso aereo nativo. Ogni azione
+ground-native entra invece nella sospensione fake-ground v0.6.9: Sora viene
+sollevato e mantenuto alla stessa quota, `raw70` passa temporaneamente a zero e
+KH1 riceve il record terrestre completo. Il log deve mostrare
+`airborne action suspension armed`, `context=air-suspended` e
+`all ground entries -> complete 0x.. record`. Per uno slot su Croce deve inoltre
+comparire un solo comando sintetico: l'input X fisico viene disabilitato durante
+la preparazione per evitare un attacco aereo parallelo.
+Verifica ogni azione prima senza bersaglio, poi su un nemico controllando
+animazione, VFX, hitbox, danno e stato applicato. Durante D7/D8 la State Probe
+deve mostrare `raw70=0` ma Sora deve restare visibilmente sospeso. Al termine
+deve apparire `airborne action suspension released: raw70=0x00000002`; da quel
+momento la gravita' deve riprendere normalmente. Ripple Drive, Stun Impact,
+Gravity Break e Zantetsuken devono inoltre mostrare il rispettivo
+`native selector armed`, cosi' il gioco usa il dispatcher finisher terrestre.
 Durante `DC`, Quadrato senza modificatori deve produrre
 `Dodge input ignored`; `L2 + Cerchio` deve dare Guard; Cerchio senza
 modificatori deve saltare e Triangolo senza modificatori deve restare vanilla.
@@ -432,7 +449,80 @@ La v0.5.1 rende la stringa ciclica mentre Sora resta realmente in aria:
 `20` vengono scartati e una nuova pressione valida instrada il record completo
 `CC`. Il ciclo non modifica quota, velocita' verticale o stato airborne, quindi
 la gravita' e l'atterraggio restano i limiti naturali della concatenazione.
+La v0.6.0 introduce il primo gruppo di Action Ability realmente utilizzabili
+in volo. Hurricane Blast conserva il proprio contesto aereo; Aerial Sweep e'
+ora `both` e sceglie dinamicamente la route ground o air in base allo stato di
+Sora. Entrambe usano il record completo nelle entry aeree. Le altre abilita'
+restano ground-only in questa versione.
+La v0.6.1 estende il contesto `both` alle altre nove Action Ability. Il port
+Steam validato dell'opcode Critical Mix `0x29EF9D` e' `0x2A376D`: JokCombat lo
+porta da `0x74` a `0x73` soltanto mentre una mossa ground-native viene richiesta
+o resta attiva in aria, poi ripristina il byte vanilla. I quattro finisher
+probabilistici conservano anche il selettore nativo e il contesto `max+1`, per
+richiedere a KH1 VFX, hitbox ed effetti completi invece della sola animazione.
+La patch non altera quota, gravita' o flag airborne; i risultati delle nove
+nuove route devono essere confermati live una mossa alla volta.
+La v0.6.2 corregge il primo test live: le route `D0`, `D7`, `D8` e `DA`
+venivano accettate con `airborne=true`, ma Sora toccava terra tra i tempi
+`15` e `22`, passando a Landing prima del frame attivo. Il puntatore Steam del
+transform di Sora e' stato verificato in sola lettura a `0x23F09D0`. Durante
+una sola mossa ground-native aerea, JokCombat conserva la coordinata verticale
+`+0x14` e ne impedisce soltanto la discesa; non scrive lo stato airborne, non
+blocca il movimento orizzontale e rilascia lo stall su fine azione,
+atterraggio, annullamento, cambio puntatore, reload o fault.
+Il test live della v0.6.2 ha poi mostrato che la coordinata catturata durante il
+salto iniziale resta `0.000`, cioe' la quota del pavimento: conservarla non evita
+Landing. La v0.6.3 applica quindi un sollevamento di 50 unita' soltanto nel frame
+in cui l'animazione bridged richiesta viene realmente accettata, mai durante il
+semplice prime del modificatore; da quel punto impedisce solo la discesa fino al
+rilascio della route.
+Il secondo test live ha confermato il lift `0.000 -> -50.000`, ma ha anche
+individuato un conflitto separato: rilasciando Quadrato e continuando a tenere
+L2, il prime passivo dello slot Croce sostituiva il bridge attivo `D0` con `D8`
+al tempo `10`, interrompendo lo stall e causando Landing al tempo `20`. La
+v0.6.4 assegna il bridge all'animazione realmente attiva: un prime passivo non
+puo' piu' sostituirla. Durante la mossa conserva inoltre soltanto l'eventuale
+selettore finisher appartenente alla stessa animazione.
+Il terzo test live ha mostrato che, anche con bridge e quota correttamente
+posseduti, KH1 portava `raw70` a zero durante `D0` (tempo `12`) e `D8` (tempo
+`25`). La causa era il record completo terrestre copiato nelle entry aeree: i
+suoi metadati comandavano direttamente il ritorno allo stato ground. La v0.6.5
+segue la route usata dal riferimento autorizzato per `D0/D3/D5`: nelle entry
+aeree sostituisce temporaneamente soltanto byte zero con l'animazione richiesta
+e conserva tutti i metadati aerei. I record completi restano riservati alle
+azioni realmente native del contesto scelto.
+Il quarto test live ha validato questa separazione per Sliding Dash: con il solo
+ID `D0` sui record aerei, la mossa resta airborne fino a tempo `31-35` e il
+colpo fisico funziona. Ripple Drive e Stun Impact completano l'animazione fino a
+tempo `35-36`, ma senza bolla/VFX: il record aereo non contiene il loro script
+effetto e il selettore ground da solo non viene consultato dal dispatcher aereo.
+Il quinto test live ha smentito la strategia v0.6.6: il record completo D7/D8
+accoda Fall al tempo `20-22` e riscrivere `raw70` nello stesso frame arriva dopo
+la decisione del motore. La v0.6.7 elimina quindi ogni scrittura dello stato
+airborne. Il dispatcher legge separatamente l'ID animazione al byte zero e la
+risorsa nativa nel dword `+4`; per `D7/D8/D9/DA` la route importa soltanto questi
+campi e conserva movimento, stato e hit-dispatch del record aereo (`+8..+19`).
+Inoltre lascia il branch `0x2A376D` al valore vanilla `0x74`: con `raw70=2`, KH1
+raggiunge cosi' il proprio dispatcher risorsa aereo. Il bridge sempre-preso
+`0x73` resta limitato alle mosse fisiche ground-native. In questo modo la mossa
+puo' raggiungere i frame tardivi di VFX/hit senza portare con se' la transizione
+terrestre a Fall.
+Il sesto test live ha mostrato che la v0.6.7 mantiene correttamente D7/D8 in
+aria fino al tempo `34`, ma il solo dispatcher risorsa aereo non genera ancora
+VFX o danno. La v0.6.8 adotta quindi il comportamento richiesto di "terreno
+sospeso": al trigger di ogni Action Ability ground-native salva stato e quota,
+porta `raw70` a zero prima del comando sintetico, usa la route terrestre completa
+e blocca soltanto la coordinata verticale. Alla fine o a un cancel ripristina lo
+stato aereo catturato, lasciando riprendere la gravita'. Gli slot su Croce
+disabilitano preventivamente l'edge fisico mentre il modificatore e' tenuto, poi
+inviano un singolo pulse sintetico quando la sospensione e' gia' attiva.
+Il primo test v0.6.8 ha pero' rilevato che il vecchio RVA globale posizione puo'
+valere zero durante gameplay: la sospensione risultava indisponibile e, per
+errore, annullava anche la route dell'abilita'. La v0.6.9 usa invece il vettore
+posizione interno all'oggetto player gia' validato (`player+0x10`, verticale
+`+0x14`). Se anche questa lettura fallisse, la sospensione viene saltata ma
+l'Action Ability prosegue obbligatoriamente tramite la route aerea v0.6.7.
 Prima di aggiungere Limit, movement o magic cancel, ogni voce del catalogo
-v0.5.1 deve essere validata live e le route devono
+v0.6.9 deve essere validata live e le route devono
 risultare sempre ripristinate dopo successo, timeout, Guard, Dodge, salto,
 reload e perdita del player object.
