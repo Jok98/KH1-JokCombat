@@ -1,7 +1,7 @@
 # JokCombat — mappatura combo ramificate X / Triangolo
 
-Stato: **IN STANDBY — passive native validate; mappatura da revisionare insieme,
-incluso il numero di copie Combo Plus/Air Combo Plus**
+Stato: **ARCHIVIATA — sostituita dalla mappa canonica univoca in
+`docs/JokCombat_BranchCombo_Mapping.md`**
 
 Ambito: KH1 Final Mix, Steam Global, Sora
 
@@ -22,28 +22,89 @@ sequenza già inserita, per esempio:
 La mappatura deve includere tutto il repertorio attivo utilizzabile da Sora,
 senza confondere un'animazione con l'azione completa del gioco.
 
-## 2. Perché servono fino a quattro input
+Decisione architetturale successiva alla prima bozza:
 
-Con due soli tasti, il numero di nodi disponibili è:
+- una sequenza composta soltanto da `X` appartiene sempre a KH1 e percorre la
+  combo vanilla completa;
+- Sora usa quattro Combo Plus, due Air Combo Plus e un Combo Master;
+- `T` da neutrale non avvia un ramo JokCombat e resta disponibile ai comandi
+  contestuali nativi;
+- il primo `T` dopo almeno una `X` apre la variante corrispondente alla posizione
+  corrente (`XT`, `XXT`, `XXXT` e così via);
+- dopo l'apertura, ulteriori `X/T` possono costruire continuazioni e finisher;
+- la mappa binaria originale della sezione 4 è conservata soltanto come
+  inventario preliminare e non deve essere implementata.
 
-| Profondità | Nuove sequenze | Totale cumulativo |
-|---:|---:|---:|
-| 1 input | 2 | 2 |
-| 2 input | 4 | 6 |
-| 3 input | 8 | 14 |
-| 4 input | 16 | 30 |
+## 2. Tronco X nativo e punti di deviazione
 
-I primi 14 nodi bastano appena per tre stadi fisici normali e le 11 Action
-Ability. Per integrare anche sette famiglie magiche, cinque Limit e terminali
-fisici/speciali, la profondità 4 non è opzionale: è il minimo ragionevole.
+La struttura non è più un albero binario che può iniziare con entrambi i tasti.
+Esiste un solo tronco, formato dalle `X` vanilla, e Triangolo indica il momento
+in cui abbandonarlo.
 
-La proposta usa quindi **30 nodi**. Le magie sono mappate per famiglia:
+La cattura live con `groundMax=7` e `airMax=5` ha identificato questa sequenza
+nativa completa:
 
-- `Fire` lancia il grado attualmente disponibile (`Fire`, `Fira` o `Firaga`).
+| Posizione | Terra | Aria |
+|---:|---|---|
+| 1 | normale nativo fra `0xC8/0xC9/0xCA` | normale nativo osservato `0xCC/0xCD` |
+| 2 | normale nativo fra `0xC8/0xC9/0xCA` | normale nativo osservato `0xCC/0xCD` |
+| 3 | normale nativo fra `0xC8/0xC9/0xCA` | normale nativo osservato `0xCC/0xCD` |
+| 4 | normale nativo fra `0xC8/0xC9/0xCA` | normale nativo osservato `0xCC/0xCD` |
+| 5 | normale nativo fra `0xC8/0xC9/0xCA` | `0xCE` finisher |
+| 6 | normale nativo fra `0xC8/0xC9/0xCA` | — |
+| 7 | `0xCB` finisher | — |
 
-Mappare separatamente tutti i 21 gradi magici, invece delle sette famiglie,
-richiederebbe molti più nodi e toglierebbe spazio alle mosse fisiche. Un quinto
-input porterebbe l'albero a 62 nodi, ma sarebbe molto meno leggibile e reattivo.
+La seconda cattura live ha mostrato `0xCA` alle posizioni 1, 2 e 3 e `0xC8` o
+`0xC9` in posizioni differenti fra stringhe successive. KH1 sceglie quindi il
+normale concreto in modo contestuale; non esiste una corrispondenza rigida fra
+posizione e ID. Il controller deve usare `comboPosition` come identità del nodo
+e conservare l'ID soltanto per scegliere la finestra di uscita corretta.
+
+Le due catture del detector read-only hanno coperto tutti i prefissi:
+
+| Contesto | Prefisso | Animazione e tempo osservati |
+|---|---|---|
+| terra | `XT` | `C8 @ 22` |
+| terra | `XXT` | `C8 @ 17/23/28/35`, `C9 @ 32/41` |
+| terra | `XXXT` | `C8 @ 26` |
+| terra | `XXXXT` | `C9 @ 35/45` |
+| terra | `XXXXXT` | `C8 @ 29` |
+| terra | `XXXXXXT` | `C9 @ 28/40` |
+| aria | `XT` | `CC @ 22/23` |
+| aria | `XXT` | `CD @ 19` |
+| aria | `XXXT` | `CC @ 21` |
+| aria | `XXXXT` | `CD @ 23` |
+
+Un Triangolo successivo al ritorno in neutrale è stato lasciato correttamente a
+KH1. Le ripetizioni sullo stesso nodo confermano inoltre che il controller
+esecutivo dovrà accettare un solo Triangolo per attacco.
+
+Il primo controller può riusare le finestre conservative già validate per la
+combo Croce: prebuffer da `14` su `C8/C9`, `16` su `CA`, `8` su `CC` e `10` su
+`CD`; esecuzione non prima di `18`, `34`, `20`, `12` e `14` rispettivamente.
+La separazione `C9: 14 -> 34` è intenzionale: ricorda un solo Triangolo ma non
+tronca l'affondo visibile. Ogni input prima del prebuffer viene scartato, il
+primo valido possiede il nodo e le ripetizioni vengono ignorate.
+
+I punti iniziali disponibili per una deviazione sono:
+
+- `XT`: deviazione immediata dopo il primo attacco;
+- `XXT`: deviazione dopo il secondo;
+- `XXXT`: deviazione dopo il terzo;
+- `XXXXT`, `XXXXXT` e `XXXXXXT`: le altre tre aperture a terra;
+- `XXXXT` è l'ultima apertura in aria prima di `0xCE`;
+- nessun Triangolo significa combo e finisher interamente vanilla.
+
+Le pressioni Croce inviate durante la parte iniziale di `CB` ai tempi `0`, `10`
+e `22` sono state correttamente scartate; il bridge terrestre si apre al tempo
+`67`. Il bridge aereo è stato confermato: a tempo `20` su `CE` riapre `CC` e
+mantiene la combo infinita finché Sora resta in aria.
+
+Il primo `T` deve eseguire subito una mossa: non è un semplice cambio modalità
+invisibile. Una volta iniziata la variante, ulteriori `X/T` possono scegliere
+continuazioni fisiche, magie o finisher, ma la loro profondità verrà decisa solo
+dopo aver assegnato le aperture. Le magie resteranno raggruppate per famiglia:
+per esempio il nodo `Fire` lancerà il grado disponibile fra Fire, Fira e Firaga.
 
 ## 3. Inventario completo dei candidati
 
@@ -124,8 +185,8 @@ infinito dopo `CB` o `CE`.
 
 | Passiva | Effetto nativo | Risultato live / domanda residua |
 |---|---|---|
-| Combo Plus | aggiunge un attacco alla combo terrestre e può essere cumulata | una copia equipaggiata e validata; decidere se restare a una o arrivare alle quattro copie vanilla |
-| Air Combo Plus | aggiunge un attacco alla combo aerea e può essere cumulata | una copia equipaggiata e validata; decidere se aggiungere la seconda copia vanilla |
+| Combo Plus | aggiunge un attacco alla combo terrestre e può essere cumulata | quattro copie attive; live `groundMax=7`, selezione contestuale `C8/C9/CA`, `CB` alla posizione 7 |
+| Air Combo Plus | aggiunge un attacco alla combo aerea e può essere cumulata | due copie attive; live `airMax=5`, normali osservati `CC/CD`, `CE` alla posizione 5 |
 | Combo Master | continua la combo quando un attacco non colpisce | validata: sostituisce i pulse target-free e la memoria custom |
 
 La richiesta iniziale di JokCombat era poter continuare la combo anche senza
@@ -141,8 +202,8 @@ Il test A/B isolato ha prodotto questi risultati:
 3. una Combo Plus e una Air Combo Plus estendono le rispettive stringhe native;
 4. la finisher e gli attacchi intermedi non richiedono più record normali
    forzati da JokCombat;
-5. resta da confrontare una copia con le quantità massime vanilla: quattro
-   Combo Plus e due Air Combo Plus.
+5. la configurazione scelta è il massimo vanilla: quattro Combo Plus e due Air
+   Combo Plus; la stringa completa `7/5` è stata catturata e verificata.
 
 La decisione è quindi usare abilità native realmente equipaggiate e persistenti
 nel salvataggio. La precedente proposta delle «Core Passive virtuali» è
@@ -193,7 +254,139 @@ isolato:
 4. condizione di uscita;
 5. compatibilità terra/aria.
 
-## 4. Prima mappa completa da revisionare
+## 4. Mappa completa proposta dopo la cattura live
+
+### 4.1 Regola di lettura
+
+Il tronco precedente al primo Triangolo è abbreviato con `P`:
+
+| Simbolo | Sequenza nativa già eseguita | Disponibile |
+|---|---|---|
+| `P1` | `X` | terra e aria |
+| `P2` | `XX` | terra e aria |
+| `P3` | `XXX` | terra e aria |
+| `P4` | `XXXX` | terra e aria |
+| `P5` | `XXXXX` | solo terra |
+| `P6` | `XXXXXX` | solo terra |
+
+Dopo `P` il ramo ammette al massimo tre input e comprende tutte le sette
+combinazioni possibili: `T`, `TX`, `TT`, `TXX`, `TXT`, `TTX`, `TTT`. La
+sequenza completa si ottiene concatenando le due parti: per esempio
+`P3 + TXT` significa `XXX` + `TXT`, cioè `XXXTXT`.
+
+Ogni input esegue una mossa. `T`, `TX` e `TT` sono nodi interni formati da
+Action Ability concatenabili; i quattro nodi di profondità 3 sono foglie e
+chiudono il ramo. In questo modo i Limit compaiono soltanto come terminali e,
+una volta iniziati, ricevono direttamente da KH1 i propri follow-up nativi.
+Non serve un quarto input di ramo: sei ingressi a terra e quattro in aria
+producono già 42 + 28 = 70 nodi completamente assegnati.
+
+Il tronco senza Triangolo resta interamente nativo:
+
+- terra: posizioni `1..6` normali contestuali, posizione `7` = `CB`;
+- aria: posizioni `1..4` normali, posizione `5` = `CE`;
+- il bridge post-finisher riapre poi una nuova stringa X;
+- `T` neutrale non appartiene alla mappa e resta un comando KH1.
+
+### 4.2 Terra — tutte le 42 combinazioni
+
+Categorie mnemoniche dei prefissi:
+
+- `P1`: rapidità e contrattacco;
+- `P2`: mobilità e finisher fisiche;
+- `P3`: magie elementali e cura;
+- `P4`: magie di controllo e area;
+- `P5`: Limit individuali;
+- `P6`: terminali massimi e ramo sperimentale.
+
+| Suffisso dopo P | `P1 = X` | `P2 = XX` | `P3 = XXX` | `P4 = XXXX` | `P5 = XXXXX` | `P6 = XXXXXX` |
+|---|---|---|---|---|---|---|
+| `T` | Slapshot | Sliding Dash | Slapshot | Vortex | Sliding Dash | Blitz |
+| `TX` | Vortex | Aerial Sweep | Vortex | Sliding Dash | Slapshot | Ripple Drive |
+| `TT` | Sliding Dash | Vortex | Aerial Sweep | Aerial Sweep | Aerial Sweep | Stun Impact |
+| `TXX` | Counterattack* | Hurricane Blast | Fire | Gravity | Sonic Blade* | Trinity Limit* |
+| `TXT` | Blitz | Blitz | Blizzard | Stop | Strike Raid* | Chain Attack / Burst* |
+| `TTX` | Aerial Sweep | Gravity Break | Thunder | Aero | Ars Arcanum* | Gravity Break |
+| `TTT` | Hurricane Blast | Zantetsuken | Cure | Stun Impact | Ragnarok* | Zantetsuken |
+
+Esempi espansi:
+
+- `XTT` = Sliding Dash;
+- `XXTXX` = Hurricane Blast;
+- `XXXTXX` = Fire;
+- `XXXXTXT` = Stop;
+- `XXXXXTXX` = Sonic Blade;
+- `XXXXXXTXX` = Trinity Limit.
+
+### 4.3 Aria — tutte le 28 combinazioni
+
+In aria i quattro prefissi devono contenere lo stesso repertorio completo. Le
+Action Ability ground-native usano la sospensione fake-ground già validata;
+Hurricane Blast e Aerial Sweep conservano il percorso aereo nativo.
+
+| Suffisso dopo P | `P1 = X` | `P2 = XX` | `P3 = XXX` | `P4 = XXXX` |
+|---|---|---|---|---|
+| `T` | Aerial Sweep | Vortex | Ripple Drive | Zantetsuken |
+| `TX` | Slapshot | Blitz | Stun Impact | Counterattack* |
+| `TT` | Sliding Dash | Hurricane Blast | Gravity Break | Aerial Sweep |
+| `TXX` | Hurricane Blast | Blizzard | Stop | Ars Arcanum* |
+| `TXT` | Blitz | Thunder | Aero | Ragnarok* |
+| `TTX` | Counterattack* | Gravity | Sonic Blade* | Trinity Limit* |
+| `TTT` | Fire | Cure | Strike Raid* | Chain Attack / Burst* |
+
+Esempi espansi:
+
+- `XTX` = Slapshot sospeso;
+- `XXTT` = Hurricane Blast;
+- `XXTXX` = Blizzard;
+- `XXXTXX` = Stop;
+- `XXXXTXT` = Ragnarok;
+- `XXXXTTX` = Trinity Limit.
+
+### 4.4 Copertura del repertorio
+
+La mappa contiene, sia complessivamente sia nel contesto aereo:
+
+- tutte le 11 Action Ability: Slapshot, Sliding Dash, Vortex, Aerial Sweep,
+  Counterattack, Blitz, Hurricane Blast, Ripple Drive, Stun Impact, Gravity
+  Break e Zantetsuken;
+- tutte le sette famiglie magiche: Fire, Blizzard, Thunder, Cure, Gravity, Stop
+  e Aero; KH1 sceglie il grado appreso più alto;
+- tutti i cinque Limit: Sonic Blade, Strike Raid, Ars Arcanum, Ragnarok e
+  Trinity Limit;
+- Chain Attack / Burst come terminale sperimentale derivato dal riferimento
+  autorizzato;
+- nessuna Summon, come richiesto.
+
+Guard, Dodge Roll, Combo Plus, Air Combo Plus, Combo Master e le abilità di
+movimento/passive restano sistemi globali e non occupano nodi.
+
+### 4.5 Terminali, fallback e reset
+
+Le voci con `*` richiedono una condizione nativa o un adapter ancora da
+validare. La mappa resta deterministica grazie a questi fallback:
+
+| Voce richiesta | Condizione mancante | Fallback terra | Fallback aria |
+|---|---|---|---|
+| Counterattack | nessuna finestra di contrattacco | Slapshot | Aerial Sweep |
+| Magia | magia non appresa o MP insufficienti | Blitz per `P3`, Stun Impact per `P4` | Hurricane Blast |
+| Sonic Blade / Strike Raid / Ars Arcanum | bersaglio o contesto non valido | Blitz | Hurricane Blast |
+| Ragnarok | bersaglio aereo/lock-on non valido | Aerial Sweep | Hurricane Blast |
+| Trinity Limit | party o MP non validi | Stun Impact | Hurricane Blast |
+| Chain Attack / Burst | Reaction sperimentale non disponibile | Blitz | Hurricane Blast |
+
+Una foglia chiude sempre l'albero. Dopo un'Action Ability o una magia, la
+prossima Croce apre una nuova stringa nativa; Triangolo torna vanilla finché non
+è stata accettata almeno una nuova Croce. Durante un Limit, invece, ogni X/T
+successivo appartiene esclusivamente alla macchina a stati del Limit. Guard,
+Dodge, salto, danno subito, cambio stato terra/aria o Reaction Command azzerano
+subito la cronologia JokCombat.
+
+## Appendice A — prima mappa completa superata, solo riferimento
+
+> Questa tabella precede la decisione «tutto X = vanilla, primo T = apertura».
+> Non va implementata: è stata sostituita dalla mappa esaustiva della sezione 4,
+> costruita dopo la cattura `groundMax=7` e `airMax=5`.
 
 Ogni riga indica la mossa eseguita **sull'ultimo input della sequenza**. Gli
 input precedenti hanno già eseguito i rispettivi nodi del loro prefisso.
@@ -264,48 +457,50 @@ spostare le righe prima di scrivere il controller.
 1. **Reaction Command nativo prima di Triangolo-combo.** Se il gioco mostra un
    comando contestuale reale, `T` lo attiva e il ramo JokCombat viene sospeso o
    azzerato.
-2. **Guard prima di Dodge, Dodge prima della combo.** Entrambe interrompono e
+2. **Nessun ramo da Triangolo neutrale.** JokCombat può catturare `T` soltanto
+   dopo almeno una `X` valida della stringa nativa.
+3. **Guard prima di Dodge, Dodge prima della combo.** Entrambe interrompono e
    azzerano il ramo; un Dodge non può cancellare un altro Dodge.
-3. **Le shortcut magia native restano native.** Per esempio `R1 + Quadrato` non
+4. **Le shortcut magia native restano native.** Per esempio `R1 + Quadrato` non
    deve diventare Dodge né alimentare l'albero.
-4. **Un solo input anticipato.** Durante una mossa viene conservato al massimo
+5. **Un solo input anticipato.** Durante una mossa viene conservato al massimo
    il più recente input valido nella finestra di link; lo spam precedente viene
    scartato.
-5. **Nessuna azione solo animata.** Action Ability, magia e Limit devono
+6. **Nessuna azione solo animata.** Action Ability, magia e Limit devono
    passare dal proprio record/selector/dispatcher completo.
-6. **Fallback invece di soft-lock.** Se mancano MP, bersaglio, party, abilità,
+7. **Fallback invece di soft-lock.** Se mancano MP, bersaglio, party, abilità,
    mondo o contesto, si esegue il fallback fisico associato e si registra la
    causa nel log.
-7. **Terra e aria sono dispatcher distinti.** La stessa sequenza può avere una
+8. **Terra e aria sono dispatcher distinti.** La stessa sequenza può avere una
    variante contestuale, ma non deve teletrasportare Sora a terra senza un ponte
    esplicitamente validato.
-8. **Una finisher di profondità 3 accetta il quarto input solo tardi.** Il link
-   può aprirsi dopo hit/effect attivo, mai prima; altrimenti si taglierebbero
-   bolle, shockwave e hitbox come nei vecchi prototipi.
-9. **I Limit possiedono i propri follow-up.** Durante Sonic Blade, Ars Arcanum,
+9. **Una finisher interna accetta il follow-up solo tardi.** Il link può aprirsi
+   dopo hit/effect attivo, mai prima; una finisher su foglia chiude invece il
+   ramo. Così non si tagliano bolle, shockwave e hitbox come nei vecchi prototipi.
+10. **I Limit possiedono i propri follow-up.** Durante Sonic Blade, Ars Arcanum,
    Strike Raid o Ragnarok, `X/T` viene consegnato alla macchina a stati nativa
    finché il Limit termina.
-10. **Nessun bersaglio non blocca la combo.** Questa responsabilità va delegata
+11. **Nessun bersaglio non blocca la combo.** Questa responsabilità va delegata
     prima a Combo Master; un fallback custom resterà solo per eventuali casi che
     il test nativo non copre.
-11. **Persistenza limitata e dichiarata.** AP massimi e tre passive combo sono
+12. **Persistenza limitata e dichiarata.** AP massimi e tre passive combo sono
     scritture native intenzionali; Action Ability, magie e Limit sbloccati da
     JokCombat restano runtime finché non viene approvata una politica diversa.
 
 ## 6. Rischi da validare prima del controller completo
 
-### Rischio A — continuare dopo una finisher al terzo input
+### Rischio A — continuare dopo una finisher interna
 
-Cinque nodi di profondità 3 sono finisher. Per raggiungere il quarto nodo senza
-tagliarne l'effetto serve una finestra di link tardiva, specifica per mossa. È
-il rischio tecnico principale della proposta.
+Alcuni nodi `T`, `TX` o `TT` usano Blitz, Ripple Drive, Stun Impact, Gravity
+Break o Zantetsuken. Per raggiungere la foglia successiva senza tagliarne
+animazione, VFX o hitbox serve una finestra di link tardiva specifica per mossa.
+È il rischio tecnico principale della proposta.
 
 Se una mossa non offre un'uscita sicura, le alternative sono:
 
-- spostarla alla profondità 4;
-- attendere la conclusione completa e trattare il quarto input come avvio del
-  ramo successivo;
-- sostituire quel nodo di profondità 3 con una Action Ability non-finisher.
+- spostarla su una delle foglie `TXX/TXT/TTX/TTT`;
+- conservare un solo follow-up e lanciarlo soltanto dopo la conclusione completa;
+- sostituire il nodo interno con una Action Ability non-finisher.
 
 ### Rischio B — Triangolo appartiene già al gioco
 
@@ -314,9 +509,9 @@ controller può usarlo soltanto quando nessun comando nativo valido è attivo.
 
 ### Rischio C — famiglie contro singole varianti
 
-Sette nodi magici coprono 21 magie solo se il grado è risolto automaticamente.
-Se vogliamo ogni grado come sequenza autonoma, quattro input non bastano senza
-sacrificare molte mosse fisiche.
+Sette foglie magiche coprono 21 magie solo se il grado è risolto automaticamente.
+Se vogliamo ogni grado come sequenza autonoma, anche i 70 nodi attuali perderebbero
+la leggibilità e richiederebbero di sacrificare molte mosse fisiche o Limit.
 
 ### Rischio D — costi e progressione
 
@@ -328,22 +523,22 @@ Va decisa una politica unica:
 
 ## 7. Decisioni richieste nella revisione
 
-Il test A/B delle tre passive è completato. Prima di implementare la mappatura
-bisognerà approvare o cambiare questi punti:
+Il test A/B delle tre passive e la mappa completa sono terminati. Prima di
+implementare il dispatcher bisognerà approvare o cambiare questi punti:
 
-1. scegliere se mantenere una copia di Combo Plus/Air Combo Plus oppure usare
-   le quantità massime vanilla, rispettivamente quattro e due;
-2. confermare la profondità massima di quattro input alla luce di Combo Plus e
-   Air Combo Plus;
-3. confermare che ogni famiglia magica usi il grado più alto disponibile;
-4. scegliere se il primo `T` debba davvero essere Slapshot o una normale fisica
-   alternativa;
-5. approvare la posizione delle cinque Limit;
-6. decidere il comportamento in aria di Sonic Blade, Strike Raid e Ars Arcanum;
-7. scegliere i fallback di Counterattack, Hurricane Blast, Ragnarok, Chain
-   Attack e Trinity Limit;
+1. **deciso:** usare le quantità massime vanilla, quattro Combo Plus e due Air
+   Combo Plus;
+2. **proposto:** massimo due follow-up dopo il primo Triangolo, cioè tutti i
+   suffissi fino a `TXX/TXT/TTX/TTT`;
+3. **proposto:** ogni famiglia magica usa il grado più alto appreso;
+4. **proposto:** usare integralmente le matrici terra/aria delle sezioni 4.2 e
+   4.3;
+5. **proposto:** mantenere tutti i Limit esclusivamente sulle foglie terminali;
+6. **proposto:** in aria gli adapter Limit tentano il contesto nativo e usano
+   i fallback della sezione 4.5 se questo non è valido;
+7. **proposto:** adottare i fallback deterministici della sezione 4.5;
 8. decidere se tutte le mosse sono runtime-unlocked dall'inizio;
-9. confermare `TTTX = Chain Attack / Burst`, oppure scegliere un'altra mossa;
+9. **proposto:** Chain Attack / Burst su `P6+TXT` a terra e `P4+TTT` in aria;
 10. decidere quali altre capacità Critical Mix del pool fase B meritano un nodo e quale
    mossa canonica eventualmente sostituirebbero.
 
@@ -353,12 +548,16 @@ bisognerà approvare o cambiare questi punti:
    Combo Plus;
 2. **completato:** rimozione dalla configurazione attiva della logica custom
    resa ridondante;
-3. controller input/history senza nuove mosse;
-4. albero fisico e 11 Action Ability con finestre di link individuali;
-5. adapter magia nativo per le sette famiglie;
-6. adapter Reaction/Limit, una mossa per volta;
-7. Chain Attack / Burst e pool sperimentale Critical Mix fase B;
-8. menu di configurazione e preset.
+3. **completato:** cattura della stringa X completa con `groundMax=7` e
+   `airMax=5`;
+4. **completato:** detector input/history read-only che riconosce il primo
+   Triangolo dopo X, senza consumare input né eseguire nuove mosse;
+5. **completato:** mappa esaustiva dei 42 nodi terra e 28 nodi aria;
+6. diramazioni fisiche e 11 Action Ability con finestre di link individuali;
+7. adapter magia nativo per le sette famiglie;
+8. adapter Reaction/Limit, una mossa per volta;
+9. Chain Attack / Burst e pool sperimentale Critical Mix fase B;
+10. menu di configurazione e preset.
 
 ## 9. Fonti di inventario
 
