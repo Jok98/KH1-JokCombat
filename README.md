@@ -1,8 +1,9 @@
 # KH1 JokCombat
 
 Mod combat-only sperimentale per **KINGDOM HEARTS FINAL MIX PC**. Il progetto
-mantiene storia, progressione, reward, chest, synthesis, boss e world flags
-vanilla.
+mantiene storia, reward, chest, synthesis, boss e world flags vanilla. La sola
+eccezione di progressione intenzionale e' il bootstrap nativo di Combo Plus,
+Air Combo Plus e Combo Master descritto sotto.
 
 ## Stato attuale
 
@@ -145,22 +146,33 @@ vanilla.
 > che KH1 muova pannello e cursore con la propria animazione completa.
 > `Sinistra/Destra` restano isolati e cambiano soltanto l'Action Ability; alla
 > chiusura entrambi gli slot vengono recuperati su Attack.
+>
+> **Candidato v0.6.12:** ogni Croce normale e' nuovamente posseduta da KH1.
+> Combo Master decide la continuazione a vuoto, Combo Plus/Air Combo Plus
+> lunghezza, attacchi intermedi e finisher; la pipeline JokCombat che forzava
+> `C8/C9/CA/CB` e `CC/CD/CE` resta disabilitata. Soltanto una nuova Croce nella
+> coda sicura di `CB` (tempo `67`) o `CE` (tempo `20`) resetta il cursore combo,
+> rilascia il finisher per un frame e pulsa Attack senza modificare alcun record
+> azione. Il dispatcher nativo sceglie quindi la nuova apertura terra/aria.
 
 La repository contiene tre probe read-only e il primo prototipo combat:
 
 - `JokCombat_StateProbe.lua`: rileva la build Steam Global, usa il player
-  pointer Steam verificato e registra lo stato action/animation senza scrivere
-  memoria;
+  pointer Steam verificato e registra stato action/animation e lunghezze combo
+  terra/aria senza scrivere memoria;
 - `JokCombat_InputProbe.lua`: registra in sola lettura D-pad, L2/R2 e tasti
   faccia e valida gli indirizzi Steam portati prima che il prototipo scriva;
 - `JokCombat_CommandMenuProbe.lua`: confronta in sola lettura controller,
   transizioni e strutture delle quattro righe native del Command Menu;
-- `JokCombat_CombatPrototype.lua`: prototipo v0.6.10 con combo terrestre completa
-  e combo aerea `CC -> CD -> CE`,
-  e finisher su Croce, undici slot Action Ability configurabili,
+- `JokCombat_CombatPrototype.lua`: prototipo v0.6.12 con combo normali delegate
+  a KH1 e un bridge post-finisher per i cicli infiniti terra/aria, undici slot
+  Action Ability configurabili,
   Triangolo non modificato lasciato nativo,
   jump-cancel terra -> aria, Guard universale su L2 + Cerchio e Dodge Roll
   fisso su Quadrato;
+- `JokCombat_NativeAbilities.lua`: imposta 99 AP massimi e assegna tramite la
+  lista abilita' nativa una copia equipaggiata di Combo Plus, Air Combo Plus e
+  Combo Master, senza duplicati e usando sempre il primo slot libero;
 - `docs/CMix_AnimCancel_AbilityHandler_analysis.md`: analisi tecnica dei primi
   due script Critical Mix e architettura minima proposta.
 
@@ -168,13 +180,50 @@ Il prototipo combat e' stato attivato dopo la conferma live della probe input.
 Perfect Guard, counter, launcher del nemico e aerial chase non sono ancora
 implementati.
 
-Requisito di design confermato: JokCombat fornisce dall'inizio un loadout
-runtime di sole Action Ability, indipendente dallo sblocco vanilla e senza
-inserirle nel salvataggio. Guard e Dodge Roll restano comandi fissi; abilita'
-passive, condivise, movimento, magia e Limit a consumo MP non compaiono
-nell'editor v0.6.10. Queste ultime richiedono un dispatcher diverso dalla route
-Attack e verranno analizzate separatamente, senza fingere che siano gia'
-supportate.
+Il loadout Action Ability resta runtime-only e non inserisce le undici mosse
+nel salvataggio. Guard e Dodge Roll restano comandi fissi; magie e Limit non
+compaiono ancora nell'editor. Le tre passive combo costituiscono invece una
+scelta strutturale del moveset e vengono apprese/equipaggiate nativamente.
+
+## Passive combo native
+
+`JokCombat_NativeAbilities.lua` adatta il percorso `learn_ability` del
+riferimento Critical Mix autorizzato alla build Steam verificata. Nel blocco
+save Steam a `0x2DE9360`, il record `Character` di Sora segue l'header di 4
+byte: gli AP massimi sono a `Character+0x05` (`0x2DE9369`) e la lista delle
+abilita' parte da `Character+0x40` (`0x2DE93A4`). La lista contiene 48 byte: il
+bit alto indica che l'abilita' e' appresa ma disattivata; la forma con il solo
+ID base e' quella equipaggiata. Il primo `0x00` e' lo slot in cui KH1 aggiunge
+la prossima abilita'. JokCombat assegna ed equipaggia una sola copia di:
+
+- `0x06` Combo Plus (`0x86` quando disattivata);
+- `0x07` Air Combo Plus (`0x87` quando disattivata);
+- `0x41` Combo Master (`0xC1` quando disattivata).
+
+Se una delle tre e' gia' appresa con il bit alto, viene equipaggiata nello stesso
+slot. Se e' gia' equipaggiata non viene riscritta; se manca, viene inserita nel
+primo slot libero per mantenere la lista contigua e visibile al dispatcher
+nativo. Il vecchio esperimento che usava l'ultimo slot libero e un falso
+"mirror" e' stato rimosso.
+
+Il modulo porta inoltre gli AP massimi di Sora a `99`: in questo modo le tre
+passive e le future Action Ability possono essere realmente equipaggiate dal
+motore nativo anche all'inizio della partita, senza dipendere dagli AP ancora
+non ottenuti dalla progressione vanilla.
+
+La v0.2.0 ripara inoltre in modo condizionale i quattro byte che la v0.1.x
+aveva scritto dieci byte prima della lista reale a causa di una conversione
+EGS -> Steam uniforme non valida. Vengono ripristinati soltanto se contengono
+ancora gli esatti valori iniettati da JokCombat; qualsiasi valore inatteso
+disattiva il modulo senza sovrascrivere dati.
+
+La v0.2.1 corregge la polarita' del flag nativo: `0x80` significa disabilitata,
+non equipaggiata. Le tre forme `0x86/0x87/0xC1` create dalla v0.2.0 vengono
+quindi convertite in-place in `0x06/0x07/0x41`, senza aggiungere duplicati.
+
+Questa assegnazione e' intenzionalmente persistente: dopo un salvataggio le tre
+abilita' fanno parte della partita. Prima del primo test e' stata creata una
+copia locale di `KHFM_WW.png` sotto `KH_mod/backups/saves`.
 
 ## Directory runtime prevista
 
@@ -191,18 +240,25 @@ questa sorgente assoluta:
 scripts = [{ path = "C:\\Users\\<utente>\\Documents\\KH_mod\\scripts\\kh1", relative = false }]
 ```
 
-La directory runtime contiene `JokCombat_StateProbe.lua` e
-`JokCombat_CombatPrototype.lua`. La Input Probe validata e i 40 script del
+La directory runtime contiene `JokCombat_StateProbe.lua`,
+`JokCombat_CombatPrototype.lua` e `JokCombat_NativeAbilities.lua`. La Input
+Probe validata e i 40 script del
 pacchetto Critical Mix sono conservati, ma non caricati, nelle directory
 `reference` sotto
 `C:\Users\<utente>\Documents\KH_mod\reference\CriticalMix`. Backup, log e
 copie runtime restano locali e non fanno parte del repository.
 
-Per verificare la v0.6.10, premi `F1` nella console LuaBackend. Il log iniziale
-deve mostrare `v0.6.10`, `ground action route ready`, `aerial action route ready`,
+Per verificare la v0.6.12, premi `F1` nella console LuaBackend. Il log iniziale
+deve mostrare `v0.6.12`, `Native Abilities v0.2.1 ready`,
+`ground action route ready`, `aerial action route ready`,
 `complete action records ready: 11/11`
 `native Command Menu overlay ready` e
 `native Ripple Drive/Stun Impact/Gravity Break/Zantetsuken selectors ready`.
+Deve inoltre comparire `native normal combo ownership ready`; durante i colpi
+intermedi non devono piu' apparire `normal route armed` o
+`target-free normal pulse`. Dopo una Croce valida su `CB`/`CE`, il solo bridge
+registra `infinite combo restart requested natively` e poi una transizione
+`restart` scelta dal dispatcher KH1.
 
 Tieni un modificatore per visualizzare e configurare il relativo gruppo: `L2`,
 `R2` oppure entrambi per `L2+R2`. Il riepilogo mostra sempre un massimo di
@@ -526,6 +582,12 @@ La v0.6.10 assegna priorita' alle shortcut magiche native quando L1 o R1 e'
 tenuto: Quadrato non prearma piu' Dodge, non forza il dispatcher difensivo e
 raggiunge invariato la magia associata. Senza modifier, Quadrato conserva il
 Dodge Roll fisso e universale.
+La v0.6.12 ritira dalla configurazione attiva il controller dei normali creato
+fra v0.4.11 e v0.5.1. Le tre passive combo native gestiscono ora l'intera
+stringa; JokCombat interviene esclusivamente dopo `CB`/`CE` per riaprire una
+nuova stringa tramite un Attack nativo non instradato. Le vecchie funzioni
+restano temporaneamente nel file dietro `nativeNormalAttacks=false` come
+rollback diagnostico e non vengono eseguite nella configurazione distribuita.
 Prima di aggiungere Limit, movement o magic cancel, ogni voce del catalogo
 v0.6.10 deve essere validata live e le route devono
 risultare sempre ripristinate dopo successo, timeout, Guard, Dodge, salto,

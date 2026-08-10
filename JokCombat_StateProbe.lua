@@ -21,6 +21,7 @@ local STEAM_GL = {
     playerPointerAddress = 0x2537E48,
     comboPositionAddress = 0x296B221,
     maxGroundComboAddress = 0x2D5CCE4,
+    maxAirComboAddress = 0x2D5CCE5,
 }
 
 local PLAYER = {
@@ -83,6 +84,7 @@ local function readSnapshot(playerPointer)
         slotReference = slotReference,
         comboPosition = ReadByte(STEAM_GL.comboPositionAddress),
         maxGroundCombo = ReadByte(STEAM_GL.maxGroundComboAddress),
+        maxAirCombo = ReadByte(STEAM_GL.maxAirComboAddress),
     }
 end
 
@@ -108,7 +110,7 @@ local function logSnapshot(snapshot, reason)
     ConsolePrint(string.format(
         "[state:%s] ptr=0x%X control=0x%02X anim=0x%02X "
         .. "secondary=0x%02X time=%.2f airborne=%s raw70=0x%08X "
-        .. "slotRef=0x%04X combo=%d/%d",
+        .. "slotRef=0x%04X combo=%d/%d airMax=%d",
         reason,
         snapshot.pointer,
         snapshot.actionControl,
@@ -119,7 +121,8 @@ local function logSnapshot(snapshot, reason)
         snapshot.airborneRaw,
         snapshot.slotReference,
         snapshot.comboPosition,
-        snapshot.maxGroundCombo))
+        snapshot.maxGroundCombo,
+        snapshot.maxAirCombo))
 end
 
 function _OnInit()
@@ -178,13 +181,14 @@ function _OnFrame()
     waitingWasLogged = false
 
     local stateKey = string.format(
-        "%X:%X:%X:%s:%X:%X",
+        "%X:%X:%X:%s:%X:%X:%X",
         snapshot.actionControl,
         snapshot.animationId,
         snapshot.secondaryAnimationId,
         tostring(snapshot.airborne),
         snapshot.comboPosition,
-        snapshot.maxGroundCombo)
+        snapshot.maxGroundCombo,
+        snapshot.maxAirCombo)
 
     local pointerChanged = playerPointer ~= lastPlayerPointer
     local stateChanged = stateKey ~= lastStateKey

@@ -2,7 +2,7 @@ LUAGUI_NAME = "JokCombat Combat Prototype"
 LUAGUI_AUTH = "Jok; Critical Mix reference by Xendra / KSX"
 LUAGUI_DESC = "Cross combo, configurable Action Ability loadout, universal Guard/Dodge cancels and jump branch."
 
--- JokCombat v0.6.10 prototype for the current Steam Global executable.
+-- JokCombat v0.6.12 prototype for the current Steam Global executable.
 -- Critical Mix was used as an authorized technical reference. This script is
 -- intentionally limited to combat/input state and does not touch save data,
 -- story flags, rewards, inventory, AP, levels, worlds, chests, or synthesis.
@@ -10,6 +10,12 @@ LUAGUI_DESC = "Cross combo, configurable Action Ability loadout, universal Guard
 local CONFIG = {
     enabled = true,
     debugLog = true,
+
+    -- KH1 owns every ordinary Cross input. Native Combo Master, Combo Plus
+    -- and Air Combo Plus therefore decide whiff continuation, combo length,
+    -- intermediate attacks and finishers. The legacy routed-normal pipeline
+    -- remains below only as a disabled rollback path.
+    nativeNormalAttacks = true,
 
     attackBuffer = true,
     crossGroundFinisher = true,
@@ -32,7 +38,14 @@ local CONFIG = {
     -- Set false later to respect vanilla ability acquisition/equipment.
     unlockDefensiveActions = true,
 
-    -- A press made early in an attack is remembered until the native link
+    -- Only a fresh Cross during the completed phase of CB/CE reopens the
+    -- native string. No intermediate normal record is routed by JokCombat.
+    groundFinisherRestartTime = 67.0,
+    airFinisherRestartTime = 20.0,
+
+    -- Legacy routed-normal rollback settings (inactive while
+    -- nativeNormalAttacks=true). A press made early in an attack is remembered
+    -- until the native link
     -- window opens. The short delay lets a native accepted press win first,
     -- which prevents one physical input from creating two attacks.
     attackBufferFrames = 45,
@@ -46,7 +59,6 @@ local CONFIG = {
     -- CE remains protected through its hit/recovery. Unlike CC/CD, presses
     -- before this time are discarded rather than buffered; a fresh press at
     -- or after the threshold may explicitly restart the aerial string at CC.
-    airFinisherRestartTime = 20.0,
     -- Ground-native actions otherwise touch the floor before their active
     -- frame. Once (and only once) the requested animation is actually active,
     -- move Sora upward on KH1's inverted vertical axis and clamp descent there.
@@ -67,7 +79,7 @@ local CONFIG = {
 
 local EXPECTED_GAME_ID = 0xAF71841E
 local FINGERPRINT = 0x7265737563697065 -- "epicures", little endian
-local VERSION = "v0.6.10"
+local VERSION = "v0.6.12"
 
 local ADDRESS = {
     fingerprint = 0x3B2271,
@@ -2544,6 +2556,50 @@ local function queueAttackAfterRelease(player, kind, comboPosition,
     return true
 end
 
+local function requestNativeFinisherRestart(player)
+    if not CONFIG.nativeNormalAttacks
+        or ReadByte(ADDRESS.commandMenuSlot) ~= 0
+        or deferredLinkKind ~= nil or transitionKind ~= nil then
+        return false
+    end
+
+    local finisher = nil
+    local threshold = nil
+    if not player.airborne and player.animation == 0xCB then
+        finisher = "ground"
+        threshold = CONFIG.groundFinisherRestartTime
+    elseif player.airborne and player.animation == 0xCE then
+        finisher = "aerial"
+        threshold = CONFIG.airFinisherRestartTime
+    else
+        return false
+    end
+
+    if player.time < threshold then
+        log(string.format(
+            "%s finisher restart ignored before native recovery: "
+            .. "time=%.2f opens=%.2f.",
+            finisher, player.time, threshold))
+        return false
+    end
+
+    -- Reset only the native combo cursor. The following Attack edge is not
+    -- associated with a forced C8/CC record: KH1 chooses the opening attack
+    -- from the real ground/air state and all three equipped combo passives.
+    clearAttackBuffer()
+    clearFinisherBuffer()
+    groundChainFrames = 0
+    WriteByte(ADDRESS.comboPosition, 1)
+    if not queueAttackAfterRelease(player, "restart", 1, nil) then
+        return false
+    end
+    log(string.format(
+        "%s infinite combo restart requested natively: "
+        .. "anim=0x%02X time=%.2f.",
+        finisher, player.animation, player.time))
+    return true
+end
+
 local function updateDeferredAttackCommand(player)
     if deferredLinkKind == nil then return false, nil end
 
@@ -3635,11 +3691,22 @@ function _OnInit()
         log("cleared stale synthetic Attack flags during reload.")
     end
 
-    local position, maximum = readGroundComboState()
-    if position ~= nil then
+    if CONFIG.nativeNormalAttacks then
+        log("native normal combo ownership ready: KH1 controls every "
+            .. "intermediate Cross, Combo Plus/Air Combo Plus length and "
+            .. "Combo Master whiff continuation.")
         log(string.format(
-            "combo controller ready: position=%d maxGround=%d",
-            position, maximum))
+            "infinite native combo bridge ready: CB>=%.1f and CE>=%.1f; "
+            .. "no normal action records are routed.",
+            CONFIG.groundFinisherRestartTime,
+            CONFIG.airFinisherRestartTime))
+    else
+        local position, maximum = readGroundComboState()
+        if position ~= nil then
+            log(string.format(
+                "legacy combo controller ready: position=%d maxGround=%d",
+                position, maximum))
+        end
     end
 end
 
@@ -3939,6 +4006,16 @@ function _OnFrame()
         actionConsumed = false
     end
 
+    if CONFIG.nativeNormalAttacks then
+        -- Ordinary Cross input is never consumed, buffered or routed here.
+        -- Only a modifier-free edge in the safe tail of CB/CE is converted
+        -- into a fresh native Attack after releasing the completed finisher.
+        if not actionConsumed and crossPressed
+            and not l2Held and not r2Held and not nativeShortcutHeld
+            and not finisherRequested then
+            actionConsumed = requestNativeFinisherRestart(player)
+        end
+    else
     local physicalCrossConsumedByFreshNative = crossPressed
         and acceptedKind ~= "normal"
         and (isGroundNormalContext(player) or isAirNormalContext(player))
@@ -4066,6 +4143,7 @@ function _OnFrame()
         if finisherBufferFrames <= 0 then
             updateAttackBuffer(player)
         end
+    end
     end
 
     setByte("forceCircle", ADDRESS.forceCircleBranch,
