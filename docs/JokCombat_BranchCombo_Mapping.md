@@ -1,6 +1,6 @@
 # JokCombat — mappa combo contestuale A / Y
 
-Stato: **v0.13.2 — MAPPA TERRA 13 NODI; ACTION 8/8 + LIMIT NATIVI 5/5; PROTEZIONE STATO LIMIT**
+Stato: **v0.13.3 — MAPPA TERRA 13 NODI; ACTION 8/8 + LIMIT NATIVI 5/5; PRIORITA REACTION NATIVA**
 
 Ambito: KH1 Final Mix, Steam Global, Sora
 Input abbreviati: `A` = Croce, `Y` = Triangolo
@@ -18,8 +18,10 @@ Input abbreviati: `A` = Croce, `Y` = Triangolo
 5. Ogni Action Ability ha un solo ruolo contestuale. Le otto Action terrestri
    sono nella mappa offensiva; Hurricane Blast e Aerial Sweep restano nella
    famiglia aerea; Counterattack appartiene alla Guard riuscita.
-6. I Reaction Command hanno priorità su `Y`. Magie, menu, shortcut e costi MP
-   vanilla non vengono modificati. Summon è esclusa.
+6. I Reaction Command hanno priorità su `Y`. Il Reaction ID viene controllato
+   nello stesso frame fisico, prima di aprire Strong: Salva, Esamina e Parla non
+   possono quindi armare per errore `Y -> Vortex`. Magie, menu, shortcut e costi
+   MP vanilla non vengono modificati. Summon è esclusa.
 
 ## 2. Mappa terrestre completa
 
@@ -147,9 +149,7 @@ Quando `raw70 >= 0x20`, KH1 possiede lo stato Limit completo. JokCombat lascia
 fisici gli input di follow-up ma neutralizza ogni propria route, pulse, Guard,
 Dodge e Action Ability fino all'uscita nativa. Cancellare soltanto l'animazione
 di un Limit puo lasciare `raw70` orfano e bloccare permanentemente il movimento,
-come osservato interrompendo Strike Raid in `ED/EE`. Durante il collaudo il log
-registra inoltre ogni variazione del Reaction Command nativo e ogni `Y` di
-follow-up, cosi da isolare Impact senza forzarne l'ID alla cieca.
+come osservato interrompendo Strike Raid in `ED/EE`.
 
 ## 6. Combo Guide
 

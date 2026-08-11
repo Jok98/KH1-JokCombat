@@ -2,7 +2,7 @@ LUAGUI_NAME = "JokCombat Combat Prototype"
 LUAGUI_AUTH = "Jok; Critical Mix reference by Xendra / KSX"
 LUAGUI_DESC = "Native Cross combo, Pirate-style Y Action/Limit families, configurable loadout and universal defense."
 
--- JokCombat v0.13.2 prototype for the current Steam Global executable.
+-- JokCombat v0.13.3 prototype for the current Steam Global executable.
 -- Critical Mix was used as an authorized technical reference. This script is
 -- intentionally limited to combat/input state and does not persist changes to
 -- story flags, rewards, inventory, AP, levels, worlds, chests, or synthesis.
@@ -103,7 +103,7 @@ local CONFIG = {
 
 local EXPECTED_GAME_ID = 0xAF71841E
 local FINGERPRINT = 0x7265737563697065 -- "epicures", little endian
-local VERSION = "v0.13.2"
+local VERSION = "v0.13.3"
 
 local ADDRESS = {
     fingerprint = 0x3B2271,
@@ -4538,6 +4538,24 @@ function JokCombatBranch.update(player, buttons, crossPressed,
                     "[branch] %s final Y delegated to native %s.",
                     limit.path, limit.name))
             end
+        end
+        return false
+    end
+    -- Native contextual commands (Save, Examine, Talk, etc.) own Triangle.
+    -- At a Save point the root Command Menu can still report slot 0 on the
+    -- physical Y frame, so menu state alone is one frame too late. Starting
+    -- Vortex there left its synthetic route waiting for D3 and suppressed the
+    -- first two confirmation presses. The live Reaction ID is the earlier,
+    -- authoritative gate already used by the native Limit armer.
+    local nativeReaction = ReadShort(ADDRESS.reactionCommandId)
+    if nativeReaction ~= 0 then
+        if JokCombatBranch.active then
+            JokCombatBranch.reset("native Reaction Command took priority")
+        end
+        if trianglePressed then
+            log(string.format(
+                "[branch] Y delegated to native Reaction 0x%04X; "
+                    .. "Pirate family not opened.", nativeReaction))
         end
         return false
     end

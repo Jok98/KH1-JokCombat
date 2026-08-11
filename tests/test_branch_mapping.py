@@ -236,7 +236,7 @@ def assert_guard_counter() -> None:
 
 def assert_integration() -> None:
     guards = (
-        'VERSION = "v0.13.2"',
+        'VERSION = "v0.13.3"',
         "branchActionAbilities = true",
         "branchLimits = true",
         "comboGuide = true",
@@ -251,6 +251,10 @@ def assert_integration() -> None:
         "native Limit owns input",
         "if configurationInputActive or nativeLimitActive then",
         "updateDefenseRouting(buttons, false, false, true)",
+        "local nativeReaction = ReadShort(ADDRESS.reactionCommandId)",
+        "native Reaction Command took priority",
+        "Y delegated to native Reaction 0x%04X",
+        "Pirate family not opened",
         "function JokCombatBranch.guideEntries",
         "function JokCombatBranch.familyGuideEntries",
         'local sequence = "[Y]"',
@@ -261,6 +265,21 @@ def assert_integration() -> None:
     )
     for guard in guards:
         assert guard in SOURCE, f"missing integration guard: {guard}"
+
+    branch_start = SOURCE.index("function JokCombatBranch.update")
+    branch_end = SOURCE.index("local function updateCrossActionPrime", branch_start)
+    branch_update = SOURCE[branch_start:branch_end]
+    selector_gate = branch_update.index("JokCombatNativeLimit.selectorOwned()")
+    reaction_gate = branch_update.index(
+        "local nativeReaction = ReadShort(ADDRESS.reactionCommandId)"
+    )
+    strong_dispatch = branch_update.index(
+        'if root == "T" then return JokCombatBranch.execute(player, root) end'
+    )
+    assert selector_gate < reaction_gate < strong_dispatch, (
+        "native Limit selector must keep priority; contextual Reaction must "
+        "then gate neutral Strong dispatch"
+    )
     assert "branchMagic" not in SOURCE
     assert "JokCombatMagic" not in SOURCE
     assert '"[A] Continua vanilla"' not in SOURCE

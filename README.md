@@ -286,8 +286,11 @@ Air Combo Plus e Combo Master descritto sotto.
 > possiede completamente input e recovery del Limit. Guard, Dodge, Action
 > Ability, route e pulse JokCombat vengono neutralizzati: interrompere Strike
 > Raid in `ED/EE` cancellava la posa ma lasciava `raw70=0x27`, bloccando Sora.
-> Il logger segue ora anche le variazioni del Reaction Command e i `Y` nativi
-> durante Ragnarok, per identificare con certezza il mancato Impact.
+>
+> **Fix v0.13.3 — priorita ai comandi contestuali:** un Reaction ID nativo
+> diverso da zero impedisce ora l'apertura della famiglia Strong nello stesso
+> frame di Triangolo. Salva, Esamina e Parla restano quindi native e il primo
+> Cross di conferma non viene piu soppresso da una route Vortex in attesa.
 
 La repository contiene tre probe read-only e il primo prototipo combat:
 
@@ -299,7 +302,7 @@ La repository contiene tre probe read-only e il primo prototipo combat:
   faccia e valida gli indirizzi Steam portati prima che il prototipo scriva;
 - `JokCombat_CommandMenuProbe.lua`: confronta in sola lettura controller,
   transizioni e strutture delle quattro righe native del Command Menu;
-- `JokCombat_CombatPrototype.lua`: prototipo v0.13.2 con combo normali delegate
+- `JokCombat_CombatPrototype.lua`: prototipo v0.13.3 con combo normali delegate
   a KH1 e un bridge post-finisher per i cicli infiniti terra/aria, quattro slot
   R2 configurabili, otto Action Ability e cinque Limit nativi nelle famiglie
   Pirate terrestri, due Action aeree separate e Counterattack contestuale,
@@ -400,8 +403,8 @@ pacchetto Critical Mix sono conservati, ma non caricati, nelle directory
 `C:\Users\<utente>\Documents\KH_mod\reference\CriticalMix`. Backup, log e
 copie runtime restano locali e non fanno parte del repository.
 
-Per verificare la v0.13.2, premi `F1` nella console LuaBackend. Il log iniziale
-deve mostrare `v0.13.2`, `Native Abilities v0.3.0 ready`,
+Per verificare la v0.13.3, premi `F1` nella console LuaBackend. Il log iniziale
+deve mostrare `v0.13.3`, `Native Abilities v0.3.0 ready`,
 `ground action route ready`, `aerial action route ready`,
 `complete action records ready: 11/11`
 `native Command Menu overlay + Combo Guide ready` e
