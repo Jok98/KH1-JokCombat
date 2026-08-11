@@ -26,19 +26,11 @@ EXPECTED = {
     "XXTTT": ("action", "ripple_drive"),
     "XXXT": ("action", "counterattack"),
     "XXXXT": ("action", "zantetsuken"),
-    "TXT": ("magic", "fire"),
-    "TXXT": ("magic", "blizzard"),
-    "TTXT": ("magic", "thunder"),
-    "TTXXT": ("magic", "aero"),
-    "TTTXT": ("magic", "cure"),
-    "XTTTXT": ("magic", "gravity"),
-    "XXTTTXT": ("magic", "stop"),
     "TXXXT": ("limit", "sonic_blade"),
     "TTXXXT": ("limit", "ars_arcanum"),
     "TTTXXT": ("limit", "strike_raid"),
     "XTTTXXT": ("limit", "ragnarok"),
     "XXTTTXXT": ("limit", "trinity_limit"),
-    "TTTXXXT": ("experimental", "chain_attack_burst"),
 }
 
 
@@ -75,8 +67,8 @@ def main() -> None:
     nodes = parse_nodes()
     actual = {path: (node["kind"], node["id"]) for path, node in nodes.items()}
     assert actual == EXPECTED, "runtime tree differs from the approved map"
-    assert len(nodes) == 24
-    assert len(set(actual.values())) == 24, "canonical actions are duplicated"
+    assert len(nodes) == 16
+    assert len(set(actual.values())) == 16, "canonical moves are duplicated"
 
     action_nodes = {
         node["id"] for node in nodes.values() if node["kind"] == "action"
@@ -143,9 +135,9 @@ def main() -> None:
     assert sum(len(family) for family in action_families.values()) == 11
 
     assert "branchActionAbilities = true" in SOURCE
-    assert "branchMagic = true" in SOURCE
+    assert "branchMagic" not in SOURCE
     assert "branchLimits = false" in SOURCE
-    assert 'VERSION = "v0.10.5"' in SOURCE
+    assert 'VERSION = "v0.10.6"' in SOURCE
     slot_start = SOURCE.index("local ACTION_SLOTS = {")
     slot_end = SOURCE.index("local ACTION_SLOT_BY_ID = {}", slot_start)
     slot_source = SOURCE[slot_start:slot_end]
@@ -247,22 +239,14 @@ def main() -> None:
     for guard in guide_guards:
         assert guard in SOURCE, f"missing Combo Guide guard: {guard}"
 
-    magic_ids = {
-        node["id"] for node in nodes.values() if node["kind"] == "magic"
-    }
-    assert magic_ids == {
-        "fire", "blizzard", "thunder", "aero", "cure", "gravity", "stop"
-    }
-    magic_start = SOURCE.index("JokCombatMagic = {")
+    assert all(node["kind"] != "magic" for node in nodes.values())
+    assert all(node["kind"] != "experimental" for node in nodes.values())
+    magic_start = SOURCE.index("LegacyMagicRecovery = {")
     magic_end = SOURCE.index(
         "-- Pirate-style modifier-free X/T families", magic_start
     )
     magic_source = SOURCE[magic_start:magic_end]
-    for magic_id in magic_ids:
-        assert re.search(rf'^        {magic_id} = \{{', magic_source, re.M), (
-            f"missing native magic metadata for {magic_id}"
-        )
-    magic_guards = (
+    retired_magic_guards = (
         "magicLevelBase = 0x2DE97E2",
         "nativeShortcutTriangle = 0x2DE9B94",
         "l2ControlMap = 0x22C9340",
@@ -272,26 +256,18 @@ def main() -> None:
         "carrierRecoverySignature = 0x323047414D4B4F4A",
         "directMapRecoverySignature = 0x333047414D4B4F4A",
         "recoverySignature = 0x343047414D4B4F4A",
-        "function JokCombatMagic.recoverStale",
-        "function JokCombatMagic.publishRecovery",
-        "function JokCombatMagic.prearm",
-        "function JokCombatMagic.restorePrearm",
-        "function JokCombatMagic.restoreSyntheticInput",
-        "function JokCombatMagic.request",
-        "function JokCombatMagic.update",
-        "JokCombatMagic.writeCost(family, address, 0)",
-        "WriteByte(ADDRESS.l2ControlMap, CONTROL_INDEX.TRIANGLE)",
-        "WriteByte(ADDRESS.shortcutControlSelector, 0x20)",
-        "WriteByte(journal + 0x16, JokCombatMagic.l2ControlOriginal)",
-        "JokCombatMagic.prearm(prefix)",
-        "or JokCombatMagic.prearmed",
-        "JokCombatMagic.recoverStale()",
-        "local magicValid, magicCount = JokCombatMagic.initialize()",
-        "native combo magic adapter %s: %d/7 families",
-        "JokCombatMagic.inputRestorePending",
+        "function LegacyMagicRecovery.recoverStale",
+        "LegacyMagicRecovery.recoverStale()",
+        "legacy combo-magic recovery ready; no combo path can cast magic.",
     )
-    for guard in magic_guards:
-        assert guard in SOURCE, f"missing native magic guard: {guard}"
+    for guard in retired_magic_guards:
+        assert guard in SOURCE, f"missing retired magic recovery guard: {guard}"
+    branch_start = SOURCE.index("JokCombatBranch = {")
+    branch_end = SOURCE.index("function _OnInit()", branch_start)
+    assert "LegacyMagicRecovery" not in SOURCE[branch_start:branch_end]
+    assert "JokCombatMagic" not in SOURCE
+    assert "local magicValid, magicCount" not in SOURCE
+    assert "native combo magic adapter" not in SOURCE
     assert "shortcutControlCarrier" not in SOURCE
     assert "shortcutControlMap" not in SOURCE
     assert "WriteByte(ADDRESS.rawButtons, JokCombatMagic.rawInjected)" not in SOURCE
@@ -299,8 +275,8 @@ def main() -> None:
     assert "notification buffers unavailable" not in SOURCE
     assert '"[A] Continua vanilla"' not in SOURCE
     print(
-        "PASS: 24 unique Y-ended moves; 11/11 Action and 7/7 native magic "
-        "routes enabled; Limits parked"
+        "PASS: 16 unique Y-ended moves; 11/11 Action routes enabled; "
+        "combo magic retired; 5/5 Limits parked"
     )
 
 

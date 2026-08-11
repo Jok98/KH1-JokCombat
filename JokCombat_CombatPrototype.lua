@@ -2,7 +2,7 @@ LUAGUI_NAME = "JokCombat Combat Prototype"
 LUAGUI_AUTH = "Jok; Critical Mix reference by Xendra / KSX"
 LUAGUI_DESC = "Native Cross combo, Pirate-style Y Action/magic families, configurable loadout and universal defense."
 
--- JokCombat v0.10.5 prototype for the current Steam Global executable.
+-- JokCombat v0.10.6 prototype for the current Steam Global executable.
 -- Critical Mix was used as an authorized technical reference. This script is
 -- intentionally limited to combat/input state and does not persist changes to
 -- story flags, rewards, inventory, AP, levels, worlds, chests, or synthesis.
@@ -22,13 +22,11 @@ local CONFIG = {
     -- Modifier-free Triangle selects the Pirate-style Strong/C2/C3/C4/C5
     -- family. The eleven validated Action Ability slots are active and every
     -- named move ends in Triangle; Cross remains a physical continuation.
-    -- Seven reverse magic extensions use KH1's complete native shortcut
-    -- dispatcher. Their MP costs are zero only while JokCombat owns the cast;
-    -- ordinary menu/shortcut magic keeps its vanilla cost. Limits stay parked
-    -- until their complete Steam dispatchers are validated independently.
+    -- The failed reverse-magic adapter is retired: normal menu/R1 magic remains
+    -- entirely native. Five unique Limit leaves stay mapped but parked until
+    -- their complete Steam Reaction dispatchers are validated independently.
     branchCombos = true,
     branchActionAbilities = true,
-    branchMagic = true,
     branchLimits = false,
     branchInputTimeoutFrames = 150,
 
@@ -98,16 +96,15 @@ local CONFIG = {
 
 local EXPECTED_GAME_ID = 0xAF71841E
 local FINGERPRINT = 0x7265737563697065 -- "epicures", little endian
-local VERSION = "v0.10.5"
+local VERSION = "v0.10.6"
 
 local ADDRESS = {
     fingerprint = 0x3B2271,
     playerPointer = 0x2537E48,
     dpadButtons = 0x22C9300,
     rawButtons = 0x22C9301,
-    -- Steam ports of the two coordinated Critical Mix control layers used by
-    -- native magic. l2ControlMap maps logical L2 to a physical control; the
-    -- Shortcut selector chooses logical L2 (0x20) as its modifier.
+    -- Control layers retained for normal input recovery and one-version cleanup
+    -- of a stale pre-v0.10.6 combo-magic journal.
     l2ControlMap = 0x22C9340,
     shortcutControlSelector = 0x22C9342,
     commandMenuState = 0x2852790,
@@ -130,16 +127,12 @@ local ADDRESS = {
     triggerMenu2 = 0x232DDC4,
     defenseAbilityFlags = 0x2D5EC10,
 
-    -- Steam ports of KH1's seven learned magic levels and native shortcut
-    -- assignments. The first shortcut is the Triangle/Y slot. JokCombat only
-    -- borrows it for one physical Y edge routed through coordinated L2 and
-    -- Shortcut control layers, then restores both conditionally.
+    -- Migration-only native magic fields. v0.10.6 never writes them during
+    -- gameplay; they are retained solely to restore a stale older cast.
     magicLevelBase = 0x2DE97E2,
     nativeShortcutTriangle = 0x2DE9B94,
 
-    -- Reload-safe journal for the transient shortcut, learned-level and cost
-    -- edits owned by one combo magic cast. This area is separate from the HUD
-    -- native-row journal and prompt text buffers used above it.
+    -- Migration-only reload journal written by v0.9.1-v0.10.5.
     magicRecovery = 0x2DB79B0,
 
     -- Steam ports of Critical Mix's transient combo byte and Sora's active
@@ -3043,53 +3036,39 @@ local function requestActionAbility(player, slot, action, usesPhysicalInput,
     return true
 end
 
--- Native combo-magic adapter. It borrows KH1's first shortcut slot and, while a
--- reverse prefix is ready, maps logical L2 to physical Triangle and selects L2
--- as KH1's Shortcut modifier. Both layers are armed before the final Triangle
--- edge, so that one real input is evaluated as L2 plus its Triangle face
--- selection.
--- This preserves native animation, targeting, VFX, hitbox and spell grade;
--- writing rawButtons alone only changes the observable snapshot and is not
--- consumed as a new input event. Only the selected family's three MP records
--- are zero while that owned cast is alive; menu/shortcut magic is untouched
--- before and after the cast. Keep this global to avoid Lua 5.3's 200-local
--- limit in the main chunk.
-JokCombatMagic = {
+-- Legacy v0.9.1-v0.10.5 combo-magic state. The active adapter was retired in
+-- v0.10.6 after live tests showed that its remapped physical Y never entered
+-- KH1's native shortcut dispatcher. Only recoverStale() is called now, once at
+-- reload, so an interrupted older cast can restore fields it still owns.
+LegacyMagicRecovery = {
     catalog = {
         fire = {
-            id = "fire", name = "Fire", index = 0, costWidth = 1,
+            name = "Fire", index = 0, costWidth = 1,
             costs = { 0x2D28C98, 0x2D28D08, 0x2D28D78 },
-            animations = { [0x36] = true, [0x3D] = true, [0x8A] = true },
         },
         blizzard = {
-            id = "blizzard", name = "Blizzard", index = 1, costWidth = 1,
+            name = "Blizzard", index = 1, costWidth = 1,
             costs = { 0x2D28DE8, 0x2D28E58, 0x2D28EC8 },
-            animations = { [0x37] = true, [0x84] = true },
         },
         thunder = {
-            id = "thunder", name = "Thunder", index = 2, costWidth = 2,
+            name = "Thunder", index = 2, costWidth = 2,
             costs = { 0x2D28F38, 0x2D28FA8, 0x2D29018 },
-            animations = { [0x38] = true, [0x85] = true },
         },
         cure = {
-            id = "cure", name = "Cure", index = 3, costWidth = 2,
+            name = "Cure", index = 3, costWidth = 2,
             costs = { 0x2D29088, 0x2D290F8, 0x2D29168 },
-            animations = { [0x39] = true, [0x86] = true },
         },
         gravity = {
-            id = "gravity", name = "Gravity", index = 4, costWidth = 1,
+            name = "Gravity", index = 4, costWidth = 1,
             costs = { 0x2D291D8, 0x2D29248, 0x2D292B8 },
-            animations = { [0x3A] = true, [0x87] = true },
         },
         stop = {
-            id = "stop", name = "Stop", index = 5, costWidth = 2,
+            name = "Stop", index = 5, costWidth = 2,
             costs = { 0x2D29328, 0x2D29398, 0x2D29408 },
-            animations = { [0x3B] = true, [0x88] = true },
         },
         aero = {
-            id = "aero", name = "Aero", index = 6, costWidth = 2,
+            name = "Aero", index = 6, costWidth = 2,
             costs = { 0x2D29478, 0x2D294E8, 0x2D29558 },
-            animations = { [0x3C] = true, [0x89] = true },
         },
     },
     rawRecoverySignature = 0x313047414D4B4F4A, -- "JOKMAG01"
@@ -3097,41 +3076,21 @@ JokCombatMagic = {
     directMapRecoverySignature = 0x333047414D4B4F4A, -- "JOKMAG03"
     recoverySignature = 0x343047414D4B4F4A, -- "JOKMAG04"
     recoveryMarker = 0xA5,
-    valid = false,
-    active = false,
-    family = nil,
-    path = nil,
-    phase = nil,
-    frames = 0,
-    exitFrames = 0,
-    shortcutOriginal = nil,
-    levelOriginal = nil,
-    levelForced = nil,
-    costOriginal = nil,
-    rawOriginal = nil,
-    rawInjected = nil,
-    l2ControlOriginal = nil,
-    shortcutControlOriginal = nil,
-    inputRestorePending = false,
-    prearmed = false,
-    prearmPrefix = nil,
-    prearmL2Original = nil,
-    prearmShortcutOriginal = nil,
 }
 
-function JokCombatMagic.familyByIndex(index)
-    for _, family in pairs(JokCombatMagic.catalog) do
+function LegacyMagicRecovery.familyByIndex(index)
+    for _, family in pairs(LegacyMagicRecovery.catalog) do
         if family.index == index then return family end
     end
     return nil
 end
 
-function JokCombatMagic.readCost(family, address)
+function LegacyMagicRecovery.readCost(family, address)
     if family.costWidth == 1 then return ReadByte(address) end
     return ReadShort(address)
 end
 
-function JokCombatMagic.writeCost(family, address, value)
+function LegacyMagicRecovery.writeCost(family, address, value)
     if family.costWidth == 1 then
         WriteByte(address, value)
     else
@@ -3139,43 +3098,23 @@ function JokCombatMagic.writeCost(family, address, value)
     end
 end
 
-function JokCombatMagic.clearRecovery()
+function LegacyMagicRecovery.clearRecovery()
     WriteLong(ADDRESS.magicRecovery, 0)
 end
 
-function JokCombatMagic.publishRecovery(family)
-    local journal = ADDRESS.magicRecovery
-    -- Publish the signature last: an interrupted partial journal is ignored.
-    WriteLong(journal, 0)
-    WriteByte(journal + 0x08, family.index)
-    WriteByte(journal + 0x09, JokCombatMagic.recoveryMarker)
-    WriteByte(journal + 0x0A, JokCombatMagic.shortcutOriginal)
-    WriteByte(journal + 0x0B, JokCombatMagic.levelOriginal)
-    WriteByte(journal + 0x0C, JokCombatMagic.levelForced)
-    WriteByte(journal + 0x0D, JokCombatMagic.rawOriginal)
-    WriteByte(journal + 0x0E, JokCombatMagic.rawInjected)
-    WriteByte(journal + 0x0F, JokCombatMagic.shortcutControlOriginal)
-    for index = 1, 3 do
-        WriteShort(journal + 0x0E + index * 2,
-            JokCombatMagic.costOriginal[index])
-    end
-    WriteByte(journal + 0x16, JokCombatMagic.l2ControlOriginal)
-    WriteLong(journal, JokCombatMagic.recoverySignature)
-end
-
-function JokCombatMagic.recoverStale()
+function LegacyMagicRecovery.recoverStale()
     local journal = ADDRESS.magicRecovery
     local signature = ReadLong(journal)
-    if signature ~= JokCombatMagic.recoverySignature
-        and signature ~= JokCombatMagic.directMapRecoverySignature
-        and signature ~= JokCombatMagic.carrierRecoverySignature
-        and signature ~= JokCombatMagic.rawRecoverySignature then
+    if signature ~= LegacyMagicRecovery.recoverySignature
+        and signature ~= LegacyMagicRecovery.directMapRecoverySignature
+        and signature ~= LegacyMagicRecovery.carrierRecoverySignature
+        and signature ~= LegacyMagicRecovery.rawRecoverySignature then
         return false
     end
-    local family = JokCombatMagic.familyByIndex(ReadByte(journal + 0x08))
+    local family = LegacyMagicRecovery.familyByIndex(ReadByte(journal + 0x08))
     if family == nil
-        or ReadByte(journal + 0x09) ~= JokCombatMagic.recoveryMarker then
-        JokCombatMagic.clearRecovery()
+        or ReadByte(journal + 0x09) ~= LegacyMagicRecovery.recoveryMarker then
+        LegacyMagicRecovery.clearRecovery()
         ConsolePrint("[JokCombat:magic:recovery] invalid journal cleared; "
             .. "no unowned memory was overwritten.")
         return false
@@ -3195,8 +3134,8 @@ function JokCombatMagic.recoverStale()
         restored = restored + 1
     end
     for index, address in ipairs(family.costs) do
-        if JokCombatMagic.readCost(family, address) == 0 then
-            JokCombatMagic.writeCost(
+        if LegacyMagicRecovery.readCost(family, address) == 0 then
+            LegacyMagicRecovery.writeCost(
                 family, address, ReadShort(journal + 0x0E + index * 2))
             restored = restored + 1
         end
@@ -3208,11 +3147,11 @@ function JokCombatMagic.recoverStale()
         WriteByte(ADDRESS.rawButtons, rawOriginal)
         restored = restored + 1
     end
-    if signature == JokCombatMagic.carrierRecoverySignature
-        or signature == JokCombatMagic.directMapRecoverySignature
-        or signature == JokCombatMagic.recoverySignature then
+    if signature == LegacyMagicRecovery.carrierRecoverySignature
+        or signature == LegacyMagicRecovery.directMapRecoverySignature
+        or signature == LegacyMagicRecovery.recoverySignature then
         local shortcutControlOriginal = ReadByte(journal + 0x0F)
-        local ownedValue = signature == JokCombatMagic.directMapRecoverySignature
+        local ownedValue = signature == LegacyMagicRecovery.directMapRecoverySignature
             and CONTROL_INDEX.TRIANGLE or 0x20
         if ReadByte(ADDRESS.shortcutControlSelector) == ownedValue then
             WriteByte(ADDRESS.shortcutControlSelector,
@@ -3220,315 +3159,15 @@ function JokCombatMagic.recoverStale()
             restored = restored + 1
         end
     end
-    if signature == JokCombatMagic.recoverySignature
+    if signature == LegacyMagicRecovery.recoverySignature
         and ReadByte(ADDRESS.l2ControlMap) == CONTROL_INDEX.TRIANGLE then
         WriteByte(ADDRESS.l2ControlMap, ReadByte(journal + 0x16))
         restored = restored + 1
     end
-    JokCombatMagic.clearRecovery()
+    LegacyMagicRecovery.clearRecovery()
     ConsolePrint(string.format(
         "[JokCombat:magic:recovery] stale %s cast restored (%d owned fields).",
         family.name, restored))
-    return true
-end
-
-function JokCombatMagic.restorePrearm()
-    if not JokCombatMagic.prearmed then return false end
-    if ReadByte(ADDRESS.shortcutControlSelector) == 0x20 then
-        WriteByte(ADDRESS.shortcutControlSelector,
-            JokCombatMagic.prearmShortcutOriginal)
-    end
-    if ReadByte(ADDRESS.l2ControlMap) == CONTROL_INDEX.TRIANGLE then
-        WriteByte(ADDRESS.l2ControlMap, JokCombatMagic.prearmL2Original)
-    end
-    JokCombatMagic.prearmed = false
-    JokCombatMagic.prearmPrefix = nil
-    JokCombatMagic.prearmL2Original = nil
-    JokCombatMagic.prearmShortcutOriginal = nil
-    return true
-end
-
-function JokCombatMagic.prearm(prefix)
-    local childPath = prefix ~= nil and prefix .. "T" or nil
-    local child = childPath ~= nil and JokCombatBranch ~= nil
-        and JokCombatBranch.nodes[childPath] or nil
-    local family = child ~= nil and JokCombatMagic.catalog[child.id] or nil
-    if not JokCombatMagic.valid or JokCombatMagic.active
-        or child == nil or child.kind ~= "magic"
-        or family == nil then
-        JokCombatMagic.restorePrearm()
-        return false
-    end
-
-    if JokCombatMagic.prearmed then
-        JokCombatMagic.prearmPrefix = prefix
-        return true
-    end
-    local l2Original = ReadByte(ADDRESS.l2ControlMap)
-    local shortcutOriginal = ReadByte(ADDRESS.shortcutControlSelector)
-    if l2Original ~= NORMAL.l2ControlMap
-        or shortcutOriginal ~= NORMAL.shortcutControlSelector then
-        log(string.format(
-            "[magic] %s prearm rejected: L2/Shortcut maps are 0x%02X/0x%02X.",
-            family.name, l2Original, shortcutOriginal))
-        return false
-    end
-
-    JokCombatMagic.prearmL2Original = l2Original
-    JokCombatMagic.prearmShortcutOriginal = shortcutOriginal
-    JokCombatMagic.prearmPrefix = prefix
-    JokCombatMagic.prearmed = true
-    WriteByte(ADDRESS.l2ControlMap, CONTROL_INDEX.TRIANGLE)
-    WriteByte(ADDRESS.shortcutControlSelector, 0x20)
-    if ReadByte(ADDRESS.l2ControlMap) ~= CONTROL_INDEX.TRIANGLE
-        or ReadByte(ADDRESS.shortcutControlSelector) ~= 0x20 then
-        JokCombatMagic.restorePrearm()
-        log("[magic] L2<-Y + Shortcut<-L2 prearm was not retained.")
-        return false
-    end
-    log(string.format(
-        "[magic] %s prearmed at %s: L2<-physical Y + Shortcut<-L2.",
-        family.name, prefix))
-    return true
-end
-
-function JokCombatMagic.initialize()
-    JokCombatMagic.active = false
-    JokCombatMagic.family = nil
-    JokCombatMagic.path = nil
-    JokCombatMagic.phase = nil
-    JokCombatMagic.frames = 0
-    JokCombatMagic.exitFrames = 0
-    JokCombatMagic.l2ControlOriginal = nil
-    JokCombatMagic.shortcutControlOriginal = nil
-    JokCombatMagic.inputRestorePending = false
-    JokCombatMagic.prearmed = false
-    JokCombatMagic.prearmPrefix = nil
-    JokCombatMagic.prearmL2Original = nil
-    JokCombatMagic.prearmShortcutOriginal = nil
-
-    local count = 0
-    local valid = true
-    local shortcut = ReadByte(ADDRESS.nativeShortcutTriangle)
-    if shortcut ~= 0xFF and (shortcut < 0 or shortcut > 6) then
-        ConsolePrint(string.format(
-            "[JokCombat:magic:fault] native Y shortcut is 0x%02X.",
-            shortcut))
-        valid = false
-    end
-    for _, family in pairs(JokCombatMagic.catalog) do
-        count = count + 1
-        local level = ReadByte(ADDRESS.magicLevelBase + family.index)
-        if level > 3 or #family.costs ~= 3
-            or (family.costWidth ~= 1 and family.costWidth ~= 2) then
-            ConsolePrint(string.format(
-                "[JokCombat:magic:fault] %s metadata/level rejected "
-                .. "(level=%d width=%d costs=%d).",
-                family.name, level, family.costWidth, #family.costs))
-            valid = false
-        end
-        for _, address in ipairs(family.costs) do
-            local cost = JokCombatMagic.readCost(family, address)
-            if cost < 0 or cost > 2000 then
-                ConsolePrint(string.format(
-                    "[JokCombat:magic:fault] %s cost at 0x%X is %d.",
-                    family.name, address, cost))
-                valid = false
-            end
-        end
-    end
-    if count ~= 7 then valid = false end
-    JokCombatMagic.valid = valid and count == 7
-    return JokCombatMagic.valid, count
-end
-
-function JokCombatMagic.restoreSyntheticInput()
-    if not JokCombatMagic.inputRestorePending then return false end
-    if ReadByte(ADDRESS.shortcutControlSelector) == 0x20 then
-        WriteByte(ADDRESS.shortcutControlSelector,
-            JokCombatMagic.shortcutControlOriginal)
-    end
-    if ReadByte(ADDRESS.l2ControlMap) == CONTROL_INDEX.TRIANGLE then
-        WriteByte(ADDRESS.l2ControlMap, JokCombatMagic.l2ControlOriginal)
-    end
-    -- Retain conditional recovery for a stale v0.9.1 synthetic raw pulse. The
-    -- current dispatcher never writes rawButtons.
-    if JokCombatMagic.rawInjected ~= JokCombatMagic.rawOriginal
-        and ReadByte(ADDRESS.rawButtons) == JokCombatMagic.rawInjected then
-        WriteByte(ADDRESS.rawButtons, JokCombatMagic.rawOriginal)
-    end
-    JokCombatMagic.inputRestorePending = false
-    return true
-end
-
-function JokCombatMagic.restore(reason)
-    if not JokCombatMagic.active then
-        JokCombatMagic.restoreSyntheticInput()
-        return false
-    end
-    local family = JokCombatMagic.family
-    JokCombatMagic.restoreSyntheticInput()
-    local restored = 0
-    if family ~= nil then
-        if ReadByte(ADDRESS.nativeShortcutTriangle) == family.index then
-            WriteByte(ADDRESS.nativeShortcutTriangle,
-                JokCombatMagic.shortcutOriginal)
-            restored = restored + 1
-        end
-        local levelAddress = ADDRESS.magicLevelBase + family.index
-        if ReadByte(levelAddress) == JokCombatMagic.levelForced then
-            WriteByte(levelAddress, JokCombatMagic.levelOriginal)
-            restored = restored + 1
-        end
-        for index, address in ipairs(family.costs) do
-            if JokCombatMagic.readCost(family, address) == 0 then
-                JokCombatMagic.writeCost(
-                    family, address, JokCombatMagic.costOriginal[index])
-                restored = restored + 1
-            end
-        end
-    end
-    JokCombatMagic.clearRecovery()
-    JokCombatMagic.active = false
-    JokCombatMagic.family = nil
-    JokCombatMagic.path = nil
-    JokCombatMagic.phase = nil
-    JokCombatMagic.frames = 0
-    JokCombatMagic.exitFrames = 0
-    JokCombatMagic.shortcutOriginal = nil
-    JokCombatMagic.levelOriginal = nil
-    JokCombatMagic.levelForced = nil
-    JokCombatMagic.costOriginal = nil
-    JokCombatMagic.rawOriginal = nil
-    JokCombatMagic.rawInjected = nil
-    JokCombatMagic.l2ControlOriginal = nil
-    JokCombatMagic.shortcutControlOriginal = nil
-    JokCombatMagic.prearmed = false
-    JokCombatMagic.prearmPrefix = nil
-    JokCombatMagic.prearmL2Original = nil
-    JokCombatMagic.prearmShortcutOriginal = nil
-    if family ~= nil then
-        log(string.format("[magic] %s transient cast restored (%d fields)%s.",
-            family.name, restored,
-            reason ~= nil and ": " .. reason or ""))
-    end
-    return true
-end
-
-function JokCombatMagic.matchesAnimation(player)
-    return JokCombatMagic.family ~= nil
-        and JokCombatMagic.family.animations[player.animation] == true
-end
-
-function JokCombatMagic.request(player, path, node)
-    local family = node ~= nil and JokCombatMagic.catalog[node.id] or nil
-    if not JokCombatMagic.valid or JokCombatMagic.active
-        or family == nil then
-        log("[magic] " .. tostring(path)
-            .. " rejected: native magic adapter unavailable or busy.")
-        return false
-    end
-    local expectedPrefix = path:sub(1, #path - 1)
-    if not JokCombatMagic.prearmed
-        or JokCombatMagic.prearmPrefix ~= expectedPrefix
-        or ReadByte(ADDRESS.l2ControlMap) ~= CONTROL_INDEX.TRIANGLE
-        or ReadByte(ADDRESS.shortcutControlSelector) ~= 0x20 then
-        log("[magic] " .. tostring(path)
-            .. " rejected: L2<-Y + Shortcut<-L2 was not prearmed.")
-        JokCombatMagic.restorePrearm()
-        return false
-    end
-
-    clearComboIntent()
-    clearTransitionCheck()
-    clearDeferredAttackCommand()
-    restoreActionRoutes()
-    HUD.hideOwned()
-
-    JokCombatMagic.family = family
-    JokCombatMagic.path = path
-    JokCombatMagic.phase = "waiting"
-    JokCombatMagic.frames = CONFIG.branchInputTimeoutFrames
-    JokCombatMagic.exitFrames = 0
-    JokCombatMagic.shortcutOriginal =
-        ReadByte(ADDRESS.nativeShortcutTriangle)
-    JokCombatMagic.levelOriginal =
-        ReadByte(ADDRESS.magicLevelBase + family.index)
-    JokCombatMagic.levelForced = math.max(1, JokCombatMagic.levelOriginal)
-    JokCombatMagic.costOriginal = {}
-    for index, address in ipairs(family.costs) do
-        JokCombatMagic.costOriginal[index] =
-            JokCombatMagic.readCost(family, address)
-    end
-    JokCombatMagic.rawOriginal = ReadByte(ADDRESS.rawButtons)
-    JokCombatMagic.rawInjected = JokCombatMagic.rawOriginal
-    JokCombatMagic.l2ControlOriginal = JokCombatMagic.prearmL2Original
-    JokCombatMagic.shortcutControlOriginal =
-        JokCombatMagic.prearmShortcutOriginal
-    -- Transfer both already-written layers from prefix ownership to the cast.
-    -- Do not restore them before KH1 consumes this frame's physical Y edge.
-    JokCombatMagic.prearmed = false
-    JokCombatMagic.prearmPrefix = nil
-    JokCombatMagic.prearmL2Original = nil
-    JokCombatMagic.prearmShortcutOriginal = nil
-    JokCombatMagic.active = true
-    JokCombatMagic.publishRecovery(family)
-
-    WriteByte(ADDRESS.nativeShortcutTriangle, family.index)
-    WriteByte(ADDRESS.magicLevelBase + family.index,
-        JokCombatMagic.levelForced)
-    for _, address in ipairs(family.costs) do
-        JokCombatMagic.writeCost(family, address, 0)
-    end
-    WriteByte(player.pointer + PLAYER.actionControl, 0x03, true)
-    JokCombatMagic.inputRestorePending = true
-    JokCombatBranch.pendingPath = nil
-    JokCombatBranch.pendingSourceAnimation = nil
-    JokCombatBranch.pendingSourceTime = 0.0
-    JokCombatBranch.pendingRelease = 0.0
-    JokCombatBranch.waitingPath = nil
-    JokCombatBranch.active = true
-    log(string.format(
-        "[magic] %s requested by %s through prearmed L2<-Y + Shortcut<-L2; MP cost owned at zero.",
-        family.name, path))
-    return true
-end
-
-function JokCombatMagic.update(player)
-    if not JokCombatMagic.active then return false end
-    JokCombatMagic.frames = JokCombatMagic.frames - 1
-    if JokCombatMagic.phase == "waiting" then
-        if JokCombatMagic.matchesAnimation(player) then
-            JokCombatMagic.phase = "active"
-            JokCombatMagic.frames = 360
-            JokCombatBranch.path = JokCombatMagic.path
-            JokCombatBranch.animation = player.animation
-            log(string.format(
-                "[magic] %s accepted natively: anim=0x%02X context=%s.",
-                JokCombatMagic.family.name, player.animation,
-                player.airborne and "air" or "ground"))
-        elseif JokCombatMagic.frames <= 0 then
-            local name = JokCombatMagic.family.name
-            JokCombatMagic.restore("native entry timeout")
-            JokCombatBranch.reset(name .. " native entry timed out", true)
-        end
-        return true
-    end
-
-    if JokCombatMagic.matchesAnimation(player) then
-        JokCombatMagic.exitFrames = 0
-    else
-        -- Fire may pass through its wind-up and cast records. A short grace
-        -- keeps all three native costs zero across that internal transition.
-        JokCombatMagic.exitFrames = JokCombatMagic.exitFrames + 1
-    end
-    if JokCombatMagic.exitFrames >= 12
-        or JokCombatMagic.frames <= 0 then
-        local timedOut = JokCombatMagic.frames <= 0
-        local name = JokCombatMagic.family.name
-        JokCombatMagic.restore(timedOut and "animation timeout" or "complete")
-        JokCombatBranch.reset(name .. " complete", true)
-    end
     return true
 end
 
@@ -3537,8 +3176,8 @@ end
 -- carries the validated loadout, HUD and route state in the same chunk.
 -- Every named move ends in T: X is always a physical/light continuation and
 -- can never unexpectedly dispatch an Action Ability. Seven magic reverse
--- extensions use the native adapter above; Limit paths remain declared but
--- disabled so runtime and docs cannot silently drift during their later port.
+    -- extensions are reserved only for the five native Limits. The failed magic
+    -- adapter and experimental Chain Attack leaf are no longer part of the map.
 JokCombatBranch = {
     nodes = {
         -- Strong combo: Y Y Y.
@@ -3561,23 +3200,13 @@ JokCombatBranch = {
         XXXT = { kind = "action", id = "counterattack" },
         XXXXT = { kind = "action", id = "zantetsuken" },
 
-        -- Reverse extensions. Their final T is the only named move; intervening
-        -- X inputs are physical links. Magic is active in v0.9.4; Limit and the
-        -- experimental Chain Attack path remain parked.
-        TXT = { kind = "magic", id = "fire" },
-        TXXT = { kind = "magic", id = "blizzard" },
-        TTXT = { kind = "magic", id = "thunder" },
-        TTXXT = { kind = "magic", id = "aero" },
-        TTTXT = { kind = "magic", id = "cure" },
-        XTTTXT = { kind = "magic", id = "gravity" },
-        XXTTTXT = { kind = "magic", id = "stop" },
-
+        -- Reverse Limit reservations. Their final T is the named move and each
+        -- intervening X remains a real native physical continuation.
         TXXXT = { kind = "limit", id = "sonic_blade" },
         TTXXXT = { kind = "limit", id = "ars_arcanum" },
         TTTXXT = { kind = "limit", id = "strike_raid" },
         XTTTXXT = { kind = "limit", id = "ragnarok" },
         XXTTTXXT = { kind = "limit", id = "trinity_limit" },
-        TTTXXXT = { kind = "experimental", id = "chain_attack_burst" },
     },
 
     -- `open` accepts exactly one buffered edge; `release` is the earliest
@@ -3645,13 +3274,7 @@ function JokCombatBranch.kindReady(node)
     if node.kind == "action" or node.kind == "air_finisher" then
         return CONFIG.branchActionAbilities
     end
-    if node.kind == "magic" then
-        return CONFIG.branchMagic and JokCombatMagic ~= nil
-            and JokCombatMagic.valid
-    end
-    if node.kind == "limit" or node.kind == "experimental" then
-        return CONFIG.branchLimits
-    end
+    if node.kind == "limit" then return CONFIG.branchLimits end
     return false
 end
 
@@ -3705,13 +3328,6 @@ function JokCombatBranch.initialize()
                     node.id, path))
                 valid = false
             end
-        elseif node.kind == "magic"
-            and (JokCombatMagic == nil
-                or JokCombatMagic.catalog[node.id] == nil) then
-            ConsolePrint(string.format(
-                "[JokCombat:branch:fault] unknown magic %s at %s.",
-                node.id, path))
-            valid = false
         end
         if node.cross ~= nil and JokCombatBranch.nodes[node.cross] == nil then
             ConsolePrint(string.format(
@@ -3727,9 +3343,9 @@ function JokCombatBranch.initialize()
             valid = false
         end
     end
-    if count ~= 24 or actionCount ~= 11 then
+    if count ~= 16 or actionCount ~= 11 then
         ConsolePrint(string.format(
-            "[JokCombat:branch:fault] Pirate map count mismatch: nodes=%d/24 "
+            "[JokCombat:branch:fault] Pirate map count mismatch: nodes=%d/16 "
             .. "actions=%d/11.", count, actionCount))
         valid = false
     end
@@ -3742,12 +3358,6 @@ function JokCombatBranch.reset(reason, quiet, skipCleanup)
         or JokCombatBranch.pendingPath ~= nil
         or JokCombatBranch.waitingPath ~= nil
         or JokCombatBranch.reverseWaitingKind ~= nil
-        or (JokCombatMagic ~= nil
-            and (JokCombatMagic.active or JokCombatMagic.prearmed))
-    if JokCombatMagic ~= nil and JokCombatMagic.active then
-        JokCombatMagic.restore(reason or "branch reset")
-    end
-    if JokCombatMagic ~= nil then JokCombatMagic.restorePrearm() end
     if wasActive and not skipCleanup and canRun then
         if JokCombatBranch.waitingPath ~= nil
             or JokCombatBranch.reverseWaitingKind ~= nil then
@@ -3869,7 +3479,6 @@ function JokCombatBranch.observePhysicalLink(player, acceptedKind)
     log(string.format(
         "[branch] reverse prefix %s accepted through physical A: anim=0x%02X.",
         prefix, player.animation))
-    JokCombatMagic.prearm(prefix)
     return true
 end
 
@@ -3929,9 +3538,6 @@ function JokCombatBranch.execute(player, path)
     end
     if node.kind == "action" or node.kind == "air_finisher" then
         return JokCombatBranch.dispatch(player, path)
-    end
-    if node.kind == "magic" then
-        if JokCombatMagic.request(player, path, node) then return true end
     end
     return JokCombatBranch.fallback(player, path)
 end
@@ -4043,9 +3649,6 @@ function JokCombatBranch.nodeName(node)
     if node.kind == "air_finisher" then return node.name end
     local action = ACTION_BY_ID[node.id]
     if node.kind == "action" and action ~= nil then return action.name end
-    local magic = JokCombatMagic ~= nil
-        and JokCombatMagic.catalog[node.id] or nil
-    if node.kind == "magic" and magic ~= nil then return magic.name end
     local label = tostring(node.id):gsub("_", " ")
     return label:gsub("^%l", string.upper)
 end
@@ -4138,8 +3741,7 @@ function JokCombatBranch.guideEntries(player, buttons)
     end
     if JokCombatBranch.pendingPath ~= nil
         or JokCombatBranch.waitingPath ~= nil
-        or JokCombatBranch.reverseWaitingKind ~= nil
-        or (JokCombatMagic ~= nil and JokCombatMagic.active) then
+        or JokCombatBranch.reverseWaitingKind ~= nil then
         return nil
     end
     if HUD.directEditGroup ~= nil
@@ -4173,9 +3775,6 @@ end
 function JokCombatBranch.update(player, buttons, crossPressed,
         trianglePressed)
     if not CONFIG.branchCombos or not JokCombatBranch.valid then return false end
-    if JokCombatMagic ~= nil and JokCombatMagic.active then
-        return JokCombatMagic.update(player)
-    end
 
     local modified = (buttons & (BUTTON.L1 | BUTTON.R1
         | BUTTON.L2 | BUTTON.R2)) ~= 0
@@ -4414,9 +4013,6 @@ local function updateModifierFaceRouting(buttons)
     local reactionActive = not HUD.nativeRootSelectionAvailable()
     local branchOwnsTriangle = CONFIG.branchCombos
         and JokCombatBranch ~= nil and JokCombatBranch.active
-        and not (JokCombatMagic ~= nil
-            and (JokCombatMagic.inputRestorePending
-                or JokCombatMagic.prearmed))
     return setByte("triangleControlMap", ADDRESS.triangleControlMap,
         (actionModifierHeld or branchOwnsTriangle)
             and not reactionActive and 0xFE
@@ -4588,7 +4184,7 @@ function _OnInit()
 
     -- Recover before any later validation can return early. Every field is
     -- restored only if it still contains JokCombat's owned patched value.
-    JokCombatMagic.recoverStale()
+    LegacyMagicRecovery.recoverStale()
 
     local staleSyntheticAttack = ReadInt(ADDRESS.triggerMenu1) ~= 0
         or ReadInt(ADDRESS.triggerMenu2) ~= 0
@@ -4652,7 +4248,6 @@ function _OnInit()
     local groundRouteValid = normalizeGroundActionRoute()
     local airRouteValid = normalizeAirActionRoute()
     local validActionRecordCount = validateCanonicalActionRecords()
-    local magicValid, magicCount = JokCombatMagic.initialize()
     local branchValid, branchNodeCount, branchActionCount =
         JokCombatBranch.initialize()
     loadActionLoadout()
@@ -4670,13 +4265,11 @@ function _OnInit()
     log(string.format("complete action records ready: %d/%d.",
         validActionRecordCount, #ACTION_CATALOG - 1))
     log(string.format("Pirate Y map %s: %d unique moves, "
-        .. "%d Action Ability slots enabled; magic adapter=%s, Limits parked.",
+        .. "%d Action Ability slots enabled; combo magic retired, "
+        .. "five Limits parked.",
         branchValid and "ready" or "disabled",
-        branchNodeCount, branchActionCount,
-        magicValid and "enabled" or "disabled"))
-    log(string.format("native combo magic adapter %s: %d/7 families; "
-        .. "combo casts use transient zero MP and conditional recovery.",
-        magicValid and "ready" or "disabled", magicCount))
+        branchNodeCount, branchActionCount))
+    log("legacy combo-magic recovery ready; no combo path can cast magic.")
     log("direct Action Loadout ready: hold exact R2; "
         .. "D-pad Up/Down selects, Left/Right changes, release saves.")
     log("native editor cursor delegation ready: Up/Down uses KH1's complete "
@@ -4746,9 +4339,6 @@ function _OnFrame()
         return
     end
 
-    -- Release the owned L2/Shortcut control layers before sampling this frame's
-    -- real controls. Conditional restoration never overwrites a newer state.
-    JokCombatMagic.restoreSyntheticInput()
     local buttons = ReadByte(ADDRESS.rawButtons)
     local dpad = ReadByte(ADDRESS.dpadButtons)
     local controlDpadOwned, controlConsumed =

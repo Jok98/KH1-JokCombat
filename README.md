@@ -244,6 +244,12 @@ Air Combo Plus e Combo Master descritto sotto.
 > **Fix v0.10.5 — finisher prima di Hurricane Blast:** il ramo aereo apre ora
 > direttamente con `CE`; dopo la sua recovery, `Y` esegue Hurricane Blast e il
 > successivo `Y` chiude con Aerial Sweep. La combo normale su `A` resta invariata.
+>
+> **Cleanup v0.10.6 — magia rimossa dalle combo:** i sette rami reverse magici
+> e Chain Attack non appartengono più alla mappa Pirate. I test live hanno
+> confermato che il remap di `Y` non entrava nel dispatcher Shortcut nativo. Le
+> magie da menu e `R1` restano vanilla; sopravvive soltanto il recupero
+> condizionale di un eventuale journal lasciato dalle versioni precedenti.
 
 La repository contiene tre probe read-only e il primo prototipo combat:
 
@@ -255,19 +261,18 @@ La repository contiene tre probe read-only e il primo prototipo combat:
   faccia e valida gli indirizzi Steam portati prima che il prototipo scriva;
 - `JokCombat_CommandMenuProbe.lua`: confronta in sola lettura controller,
   transizioni e strutture delle quattro righe native del Command Menu;
-- `JokCombat_CombatPrototype.lua`: prototipo v0.10.5 con combo normali delegate
+- `JokCombat_CombatPrototype.lua`: prototipo v0.10.6 con combo normali delegate
   a KH1 e un bridge post-finisher per i cicli infiniti terra/aria, quattro slot
   R2 configurabili, undici Action Ability nelle famiglie Pirate
-  Strong/C2/C3/C4/C5 e sette
-  reverse magiche native a costo MP zero soltanto dentro la combo,
+  Strong/C2/C3/C4/C5, cinque foglie Limit ancora parcheggiate,
   jump-cancel terra -> aria, Guard universale su L2 + Cerchio e Dodge Roll
   fisso su Quadrato;
 - `JokCombat_NativeAbilities.lua`: imposta 99 AP massimi e assegna tramite la
   lista abilita' nativa le quantita' massime vanilla richieste: quattro Combo
   Plus, due Air Combo Plus e un Combo Master, tutte equipaggiate;
-- `docs/JokCombat_BranchCombo_Mapping.md`: mappa Pirate di 24 mosse uniche,
-  con undici Action Ability e sette famiglie magiche attive soltanto su `Y`;
-  cinque Limit e Chain Attack restano riservati, senza Summon;
+- `docs/JokCombat_BranchCombo_Mapping.md`: mappa Pirate di 16 mosse uniche,
+  con undici Action Ability attive e cinque Limit riservati, senza magie in
+  combo, Chain Attack o Summon;
 - `docs/JokCombat_BranchCombo_Mapping_Draft.md`: archivio delle proposte
   precedenti, incluse le matrici scartate perché duplicavano le abilità;
 - `docs/CMix_AnimCancel_AbilityHandler_analysis.md`: analisi tecnica dei primi
@@ -355,25 +360,22 @@ pacchetto Critical Mix sono conservati, ma non caricati, nelle directory
 `C:\Users\<utente>\Documents\KH_mod\reference\CriticalMix`. Backup, log e
 copie runtime restano locali e non fanno parte del repository.
 
-Per verificare la v0.10.5, premi `F1` nella console LuaBackend. Il log iniziale
-deve mostrare `v0.10.5`, `Native Abilities v0.3.0 ready`,
+Per verificare la v0.10.6, premi `F1` nella console LuaBackend. Il log iniziale
+deve mostrare `v0.10.6`, `Native Abilities v0.3.0 ready`,
 `ground action route ready`, `aerial action route ready`,
 `complete action records ready: 11/11`
 `native Command Menu overlay + Combo Guide ready` e
 `native Ripple Drive/Stun Impact/Gravity Break/Zantetsuken selectors ready`.
 Deve inoltre comparire
-`Pirate Y map ready: 24 unique moves, 11 Action Ability slots enabled` e
-`native combo magic adapter ready: 7/7 families` e
+`Pirate Y map ready: 16 unique moves, 11 Action Ability slots enabled; combo
+magic retired, five Limits parked` e `legacy combo-magic recovery ready` e
 `Combo Guide ready`. Dopo una `A`, il Command Menu deve mostrare
 `[Y] Slapshot`, `[Y][Y] Sliding Dash` e `[Y][Y][Y] Blitz`; dopo due `A` deve
 mostrare Aerial Sweep, Hurricane Blast e Ripple Drive con le stesse profondità
 di `Y`. Dopo Slapshot, la Guide deve aggiornarsi a `[Y] Sliding Dash` e
 `[Y][Y] Blitz`, senza mai proporre una Action Ability su `[A]`.
-Una reverse magica deve registrare
-`prearmed at ...: L2<-physical Y + Shortcut<-L2` prima dell'ultimo input e poi
-`through prearmed L2<-Y + Shortcut<-L2`, entrare subito in una delle
-animazioni native attese e produrre VFX/effetto; non deve più terminare con
-`native entry timeout`. La Guide deve aprirsi anche se i puntatori colore delle
+Nessuna sequenza deve più registrare `[magic]`, modificare lo slot Shortcut o
+azzerare costi MP. La Guide deve aprirsi anche se i puntatori colore delle
 notification box non coincidono con il baseline Steam, purché le box non siano
 effettivamente in uso.
 Deve inoltre comparire `native normal combo ownership ready`; durante i colpi

@@ -1,6 +1,6 @@
 # JokCombat — mappa combo Pirate A / Y
 
-Stato: **ACTION TERRA 11/11 + FINISHER CE + ACTION ARIA NATIVE 2/2 IN v0.10.5; MAGIE IN PROVA; LIMIT PARCHEGGIATI**
+Stato: **ACTION TERRA 11/11 + FINISHER CE + ACTION ARIA NATIVE 2/2 IN v0.10.6; MAGIE COMBO RITIRATE; LIMIT 5/5 PARCHEGGIATI**
 
 Ambito: KH1 Final Mix, Steam Global, Sora
 Input abbreviati: `A` = Croce, `Y` = Triangolo
@@ -10,8 +10,8 @@ Input abbreviati: `A` = Croce, `Y` = Triangolo
 1. La stringa composta soltanto da `A` resta completamente nativa: Combo
    Master, Combo Plus, Air Combo Plus, attacchi contestuali e finisher
    appartengono a KH1.
-2. `Y` è l'unico input che può eseguire un'Action Ability, una magia o un
-   Limit nominato.
+2. `Y` è l'unico input che può eseguire un'Action Ability o, dopo validazione,
+   un Limit nominato. Le magie restano esclusivamente vanilla.
 3. `A` dopo una mossa speciale produce sempre una continuazione fisica e non
    può selezionare un'altra abilità.
 4. Ogni input della sequenza produce un'azione; le combinazioni non sono
@@ -97,42 +97,17 @@ Ripple Drive resta ground-only e non viene proposta dalla Guide aerea.
 Nessuna Action Ability è duplicata e nessuna viene eseguita da `A`. La copertura
 terrestre resta 11/11; la copertura aerea intenzionale è 2/2 record nativi.
 
-## 3. Reverse e magie native
+## 3. Reverse Limit (ancora riservate)
 
-La v0.9.4 conserva il prefisso della famiglia mentre ogni `A` intermedio
-esegue un vero attacco fisico KH1. La mossa nominata parte esclusivamente sul
-`Y` finale. Se non esiste più una magia raggiungibile, il ramo viene chiuso e
-gli `A` successivi restano completamente vanilla.
+La v0.10.6 ritira le sette reverse magiche: il remap dell'ultimo `Y` non
+generava un ingresso reale nel dispatcher Shortcut. Menu e shortcut magiche
+restano vanilla e conservano i propri costi MP. Il codice runtime mantiene
+soltanto il recupero condizionale di un journal eventualmente lasciato dalle
+versioni precedenti; nessuna combo può più scrivere slot, livello o costi magia.
 
-Le sette magie usano il dispatcher Shortcut nativo. Quando il prefisso reverse
-è stato accettato, JokCombat prearma due livelli autorizzati da Critical Mix:
-la mappa L2 punta al controllo fisico Y (`0x04`) e il selettore Shortcut punta
-al controllo logico L2 (`0x20`). La mappa nativa della selezione Y resta attiva,
-quindi il `Y` finale vale nello stesso frame come L2 e come prima casella
-Shortcut, anziché essere simulato scrivendo lo snapshot `rawButtons`. KH1
-sceglie grado,
-animazione terra/aria, bersaglio, VFX, hitbox ed effetto. Per il solo cast
-avviato dalla combo, JokCombat porta a zero i tre costi della famiglia e li
-ripristina alla fine. Le magie lanciate normalmente dal menu o dalle shortcut
-mantengono quindi il consumo MP vanilla. Anche il livello magia e lo slot
-Shortcut presi in prestito vengono ripristinati e un journal condizionale
-copre reload/F1 durante il cast, incluse entrambe le mappe di controllo. Il
-journal v0.9.4 sa inoltre recuperare eventuali cast transitori lasciati dalle
-v0.9.1, v0.9.2 e v0.9.3.
-
-### Magie
-
-| Sequenza attiva | Famiglia |
-|---|---|
-| `Y A Y` | Fire |
-| `Y A A Y` | Blizzard |
-| `Y Y A Y` | Thunder |
-| `Y Y A A Y` | Aero |
-| `Y Y Y A Y` | Cure |
-| `A Y Y Y A Y` | Gravity |
-| `A A Y Y Y A Y` | Stop |
-
-### Limit e speciale (ancora riservati)
+Le cinque sequenze reverse rimaste sono riservate ai Limit. Ogni `A` intermedio
+sarà un vero attacco fisico KH1 e soltanto il `Y` finale potrà consegnare il
+controllo alla Reaction nativa.
 
 | Sequenza riservata | Mossa |
 |---|---|
@@ -141,9 +116,8 @@ v0.9.1, v0.9.2 e v0.9.3.
 | `Y Y Y A A Y` | Strike Raid |
 | `A Y Y Y A A Y` | Ragnarok |
 | `A A Y Y Y A A Y` | Trinity Limit |
-| `Y Y Y A A A Y` | Chain Attack / Burst |
 
-Queste sei assegnazioni restano riserve univoche, non funzionalità dichiarate
+Queste cinque assegnazioni restano riserve univoche, non funzionalità dichiarate
 come già giocabili. Saranno abilitate soltanto dopo un collaudo separato del
 dispatcher nativo completo e del costo MP transitorio dei Limit.
 
@@ -175,22 +149,11 @@ Dopo avere eseguito Slapshot, la prima voce già consumata scompare:
 [Y][Y] Blitz
 ```
 
-Dopo Vortex, le quattro righe mostrano sia il seguito Strong sia le reverse
-magiche raggiungibili:
+Dopo Vortex, la v0.10.6 mostra soltanto il seguito Strong attivo:
 
 ```text
 [Y] Stun Impact
 [Y][Y] Gravity Break
-[A][Y] Fire
-[A][A][Y] Blizzard
-```
-
-Dopo il primo `A` fisico della reverse, il prefisso viene accorciato alla
-scelta effettivamente rimasta:
-
-```text
-[Y] Fire
-[A][Y] Blizzard
 -
 -
 ```
@@ -213,9 +176,9 @@ a Guard e la combinazione L2+R2 non seleziona più un gruppo Action Ability.
   del player object chiudono sempre la famiglia.
 - Un `A` durante una famiglia usa il percorso fisico target-free già validato:
   prima rilascia l'azione corrente, poi genera un singolo nuovo edge Attack e
-  conserva il prefisso soltanto se conduce ancora a una magia attiva.
-- Un cast combo modifica soltanto la famiglia scelta: slot Shortcut, livello e
-  tre record MP vengono ripristinati condizionalmente alla fine o dopo reload.
+  conserverà il prefisso soltanto quando conduce a un Limit validato.
+- Nessuna combo modifica slot Shortcut, livelli o costi magia. Il journal
+  storico viene letto soltanto a reload e poi cancellato condizionalmente.
 - Se un adapter completo non è disponibile, la mossa riservata non compare
   nella Guide e non viene sostituita da un'altra abilità.
 - I follow-up nativi dei Limit apparterranno al Limit dopo la sua attivazione.
