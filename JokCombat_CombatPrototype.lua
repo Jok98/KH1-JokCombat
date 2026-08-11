@@ -1,8 +1,8 @@
 LUAGUI_NAME = "JokCombat Combat Prototype"
 LUAGUI_AUTH = "Jok; Critical Mix reference by Xendra / KSX"
-LUAGUI_DESC = "Native Cross combo, canonical X/T Action tree, configurable loadout and universal defense."
+LUAGUI_DESC = "Native Cross combo, Pirate-style Y Action families, configurable loadout and universal defense."
 
--- JokCombat v0.7.1 prototype for the current Steam Global executable.
+-- JokCombat v0.9.0 prototype for the current Steam Global executable.
 -- Critical Mix was used as an authorized technical reference. This script is
 -- intentionally limited to combat/input state and does not touch save data,
 -- story flags, rewards, inventory, AP, levels, worlds, chests, or synthesis.
@@ -17,16 +17,22 @@ local CONFIG = {
     -- remains below only as a disabled rollback path.
     nativeNormalAttacks = true,
 
-    -- A modifier-free Triangle pressed during a native X string enters the
-    -- canonical branch tree. v0.7.1 enables the eleven already validated
-    -- Action Ability nodes. Magic and Limit nodes remain in the canonical map
-    -- but deliberately use a safe native-attack fallback until their complete
+    -- Modifier-free Triangle selects the Pirate-style Strong/C2/C3/C4/C5
+    -- family. The eleven validated Action Ability slots are active and every
+    -- named move ends in Triangle; Cross remains a physical continuation.
+    -- Magic and Limit reverse extensions stay parked until their complete
     -- Steam dispatchers (effect, cost, target and follow-ups) are validated.
     branchCombos = true,
     branchActionAbilities = true,
     branchMagic = false,
     branchLimits = false,
     branchInputTimeoutFrames = 150,
+
+    -- While KH1 owns a normal Cross string, reuse the native Command Menu as
+    -- a read-only guide for the current Pirate-style family. Named Action
+    -- Abilities are dispatched only by Triangle/Y; Cross/A always remains a
+    -- physical continuation. The existing overlay master toggle controls it.
+    comboGuide = true,
 
     attackBuffer = true,
     crossGroundFinisher = true,
@@ -90,7 +96,7 @@ local CONFIG = {
 
 local EXPECTED_GAME_ID = 0xAF71841E
 local FINGERPRINT = 0x7265737563697065 -- "epicures", little endian
-local VERSION = "v0.7.1"
+local VERSION = "v0.9.0"
 
 local ADDRESS = {
     fingerprint = 0x3B2271,
@@ -707,7 +713,7 @@ local function loadActionLoadout()
 
     local file = io.open(loadoutPath, "r")
     if file == nil then
-        log("loadout file not found; using v0.6.10 defaults.")
+        log("loadout file not found; using current defaults.")
         return
     end
 
@@ -738,8 +744,9 @@ local function saveActionLoadout()
         return false
     end
 
-    file:write("# JokCombat v0.6.10 Action Ability loadout\n")
+    file:write("# JokCombat v0.9.0 Action Ability loadout\n")
     file:write("# Guard remains fixed on L2+Circle; Dodge Roll on Square.\n")
+    file:write("# action_overlay controls both loadout labels and Combo Guide.\n")
     file:write("action_overlay=", HUD.enabled and "true" or "false", "\n")
     for _, slot in ipairs(ACTION_SLOTS) do
         file:write(slot.id, "=", loadout[slot.id] or "none", "\n")
@@ -1283,14 +1290,16 @@ function HUD.nativeOverlayFailure(reason)
     return false
 end
 
-function HUD.showOverlay(groupId)
+function HUD.showOverlay(groupId, suppliedEntries, suppliedLabel)
     if not CONFIG.actionLoadoutOverlay then return false end
     if not HUD.initialize(true, HUD.boxCount) then
         return HUD.nativeOverlayFailure("notification buffers unavailable")
     end
     local group = LOADOUT_MENU_GROUPS[groupId]
-    local entries = HUD.overlayEntries(groupId)
-    if group == nil or entries == nil or #entries ~= 4 then return false end
+    local entries = suppliedEntries or HUD.overlayEntries(groupId)
+    local groupLabel = suppliedLabel
+        or (group ~= nil and group.label or groupId)
+    if entries == nil or #entries ~= 4 then return false end
 
     local menuObject = ReadLong(ADDRESS.commandMenuObject)
     if menuObject < BASE_ADDR
@@ -1374,7 +1383,7 @@ function HUD.showOverlay(groupId)
     HUD.overlaySignature = signature
     log(string.format(
         "native Command Menu labels active: %s ids=%02X/%02X/%02X/%02X visible=%d/4%s.",
-        group.label, commands[1], commands[2], commands[3], commands[4],
+        groupLabel, commands[1], commands[2], commands[3], commands[4],
         visibleCount, visibleCount == 3 and " (Summon locked)" or ""))
     return true
 end
@@ -2298,7 +2307,7 @@ function HUD.updateOverlayControls(buttons, dpad)
             HUD.enabled = not HUD.enabled
             HUD.hideOverlay()
             saveActionLoadout()
-            log("native Command Menu overlay "
+            log("native Command Menu overlay + Combo Guide "
                 .. (HUD.enabled and "enabled" or "disabled")
                 .. " after releasing L1+R1+L2+R2.")
         end
@@ -2414,15 +2423,22 @@ function HUD.updateDirectEditor(buttons, dpad, player, controlConsumed)
 end
 
 function HUD.updateOverlay(buttons, player)
-
     local groupId = HUD.shoulderGroup(buttons)
     local show = HUD.overlayEligible(buttons, player)
         and (buttons & FACE_BUTTON_MASK) == 0
-    if not show then
-        HUD.hideOverlay()
-        return false
+    if show then return HUD.showOverlay(groupId) end
+
+    local guideEntries = nil
+    if JokCombatBranch ~= nil
+        and JokCombatBranch.guideEntries ~= nil then
+        guideEntries = JokCombatBranch.guideEntries(player, buttons)
     end
-    return HUD.showOverlay(groupId)
+    if guideEntries ~= nil then
+        return HUD.showOverlay("guide", guideEntries, "Combo Guide")
+    end
+
+    HUD.hideOverlay()
+    return false
 end
 
 local function isCancelableAttack(player)
@@ -3262,50 +3278,52 @@ local function requestActionAbility(player, slot, action, usesPhysicalInput,
     return true
 end
 
--- Canonical modifier-free X/T tree. Keep this as one global controller table:
+-- Pirate-style modifier-free X/T families. Keep this as one global table:
 -- Lua 5.3 limits a chunk to 200 local variables and this prototype already
 -- carries the validated loadout, HUD and route state in the same chunk.
--- Every node name is unique. The unavailable magic/Limit adapters are retained
--- here so the runtime map and docs cannot silently drift while those native
--- dispatchers are being ported.
+-- Every named move ends in T: X is always a physical/light continuation and
+-- can never unexpectedly dispatch an Action Ability. The unavailable
+-- magic/Limit reverse extensions remain declared so runtime and docs cannot
+-- silently drift while their complete Steam dispatchers are being ported.
 JokCombatBranch = {
     nodes = {
-        XT = { kind = "action", id = "slapshot",
-            cross = "XTX", triangle = "XTT" },
-        XTX = { kind = "action", id = "vortex",
-            cross = "XTXX", triangle = "XTXT" },
-        XTXX = { kind = "magic", id = "fire" },
-        XTXT = { kind = "magic", id = "blizzard" },
-        XTT = { kind = "action", id = "sliding_dash",
-            cross = "XTTX", triangle = "XTTT" },
-        XTTX = { kind = "action", id = "counterattack" },
-        XTTT = { kind = "magic", id = "cure" },
+        -- Strong combo: Y Y Y.
+        T = { kind = "action", id = "vortex", triangle = "TT" },
+        TT = { kind = "action", id = "stun_impact", triangle = "TTT" },
+        TTT = { kind = "action", id = "gravity_break" },
 
-        XXT = { kind = "action", id = "aerial_sweep",
-            cross = "XXTX", triangle = "XXTT" },
-        XXTX = { kind = "action", id = "hurricane_blast",
-            cross = "XXTXX", triangle = "XXTXT" },
-        XXTXX = { kind = "magic", id = "thunder" },
-        XXTXT = { kind = "magic", id = "aero" },
-        XXTT = { kind = "limit", id = "ragnarok" },
+        -- C2: A Y Y Y.
+        XT = { kind = "action", id = "slapshot", triangle = "XTT" },
+        XTT = { kind = "action", id = "sliding_dash", triangle = "XTTT" },
+        XTTT = { kind = "action", id = "blitz" },
 
-        XXXT = { kind = "action", id = "ripple_drive",
-            cross = "XXXTX", triangle = "XXXTT" },
-        XXXTX = { kind = "action", id = "stun_impact",
-            cross = "XXXTXX", triangle = "XXXTXT" },
-        XXXTXX = { kind = "magic", id = "gravity" },
-        XXXTXT = { kind = "magic", id = "stop" },
-        XXXTT = { kind = "action", id = "gravity_break",
-            cross = "XXXTTX", triangle = "XXXTTT" },
-        XXXTTX = { kind = "limit", id = "ars_arcanum" },
-        XXXTTT = { kind = "experimental", id = "chain_attack_burst" },
+        -- C3: A A Y Y Y. D6 keeps the validated ground-to-air bridge into D1.
+        XXT = { kind = "action", id = "aerial_sweep", triangle = "XXTT" },
+        XXTT = { kind = "action", id = "hurricane_blast",
+            triangle = "XXTTT" },
+        XXTTT = { kind = "action", id = "ripple_drive" },
 
-        XXXXT = { kind = "action", id = "blitz",
-            cross = "XXXXTX", triangle = "XXXXTT" },
-        XXXXTX = { kind = "action", id = "zantetsuken" },
-        XXXXTT = { kind = "limit", id = "strike_raid" },
-        XXXXXT = { kind = "limit", id = "sonic_blade" },
-        XXXXXXT = { kind = "limit", id = "trinity_limit" },
+        -- C4 / C5 single-Y finishers.
+        XXXT = { kind = "action", id = "counterattack" },
+        XXXXT = { kind = "action", id = "zantetsuken" },
+
+        -- Reserved reverse extensions. Their final T is the only named move;
+        -- intervening X inputs will become physical links when those complete
+        -- magic/Limit dispatchers are enabled.
+        TXT = { kind = "magic", id = "fire" },
+        TXXT = { kind = "magic", id = "blizzard" },
+        TTXT = { kind = "magic", id = "thunder" },
+        TTXXT = { kind = "magic", id = "aero" },
+        TTTXT = { kind = "magic", id = "cure" },
+        XTTTXT = { kind = "magic", id = "gravity" },
+        XXTTTXT = { kind = "magic", id = "stop" },
+
+        TXXXT = { kind = "limit", id = "sonic_blade" },
+        TTXXXT = { kind = "limit", id = "ars_arcanum" },
+        TTTXXT = { kind = "limit", id = "strike_raid" },
+        XTTTXXT = { kind = "limit", id = "ragnarok" },
+        XXTTTXXT = { kind = "limit", id = "trinity_limit" },
+        TTTXXXT = { kind = "experimental", id = "chain_attack_burst" },
     },
 
     -- `open` accepts exactly one buffered edge; `release` is the earliest
@@ -3329,7 +3347,7 @@ JokCombatBranch = {
         [0xD9] = { open = 32.0, release = 36.0 }, -- Gravity Break
     },
 
-    slot = { id = "branch_combo", label = "X/T branch" },
+    slot = { id = "branch_combo", label = "Pirate Y family" },
     valid = false,
     active = false,
     path = nil,
@@ -3396,7 +3414,7 @@ function JokCombatBranch.initialize()
     end
     if count ~= 24 or actionCount ~= 11 then
         ConsolePrint(string.format(
-            "[JokCombat:branch:fault] canonical count mismatch: nodes=%d/24 "
+            "[JokCombat:branch:fault] Pirate map count mismatch: nodes=%d/24 "
             .. "actions=%d/11.", count, actionCount))
         valid = false
     end
@@ -3456,16 +3474,16 @@ function JokCombatBranch.dispatch(player, path)
         JokCombatBranch.refreshAirState(player)
     end
 
-    -- Hurricane Blast is natively air-only. In the canonical ground tree it
-    -- is legal only after Aerial Sweep: D6 is already the validated bridge
+    -- Hurricane Blast is natively air-only. In C3 it is legal on the ground
+    -- only after Aerial Sweep: D6 is already the validated bridge
     -- into that aerial-style branch, so do not broaden the normal shortcut's
     -- context or make Hurricane Blast independently ground-callable.
-    local branchContextAuthorized = path == "XXTX"
+    local branchContextAuthorized = path == "XXTT"
         and JokCombatBranch.path == "XXT"
         and player.animation == 0xD6
         and not player.airborne
     if branchContextAuthorized then
-        log("[branch] XXTX context bridge authorized: "
+        log("[branch] XXTT context bridge authorized: "
             .. "ground Aerial Sweep -> Hurricane Blast.")
     end
 
@@ -3510,6 +3528,24 @@ function JokCombatBranch.fallback(player, path)
     if not queueAttackAfterRelease(
             player, "branch-fallback:" .. path, nil, nil) then
         log("[branch] " .. path .. " fallback could not be queued.")
+    end
+    return true
+end
+
+function JokCombatBranch.continuePhysical(player)
+    local sourcePath = JokCombatBranch.path or "unknown"
+    log("[branch] " .. sourcePath
+        .. " + A -> native physical continuation; no named ability dispatched.")
+    JokCombatBranch.reset("physical A continuation", true)
+    clearComboIntent()
+    clearTransitionCheck()
+    clearDeferredAttackCommand()
+    restoreActionRoutes()
+    JokCombatBranch.refreshAirState(player)
+    if not queueAttackAfterRelease(
+            player, "pirate-light:" .. sourcePath, nil, nil) then
+        log("[branch] " .. sourcePath
+            .. " physical continuation could not be queued.")
     end
     return true
 end
@@ -3605,11 +3641,91 @@ function JokCombatBranch.rootPath(player)
     elseif isAirNormalContext(player) then
         maximum = ReadByte(ADDRESS.maxAirComboLength)
     else
-        return nil
+        local neutral = player.control == 0x03
+            and not isAttackContext(player) and player.animation <= 0x07
+        return neutral and "T" or nil
     end
     local position = ReadByte(ADDRESS.comboPosition)
     if position < 1 or position >= maximum then return nil end
     return string.rep("X", position) .. "T"
+end
+
+function JokCombatBranch.nodeName(node)
+    if node == nil then return nil end
+    local action = ACTION_BY_ID[node.id]
+    if node.kind == "action" and action ~= nil then return action.name end
+    local label = tostring(node.id):gsub("_", " ")
+    return label:gsub("^%l", string.upper)
+end
+
+function JokCombatBranch.guideLine(sequence, node)
+    if node == nil or not JokCombatBranch.kindReady(node) then
+        return sequence .. " -"
+    end
+    return sequence .. " " .. (JokCombatBranch.nodeName(node) or "-")
+end
+
+function JokCombatBranch.familyGuideEntries(node, includeCurrent)
+    if node == nil then return nil end
+    local entries = {}
+    local current = node
+    if not includeCurrent then
+        current = node.triangle ~= nil
+            and JokCombatBranch.nodes[node.triangle] or nil
+    end
+    local sequence = "[Y]"
+    while current ~= nil and #entries < 4
+        and JokCombatBranch.kindReady(current) do
+        table.insert(entries, JokCombatBranch.guideLine(sequence, current))
+        sequence = sequence .. "[Y]"
+        current = current.triangle ~= nil
+            and JokCombatBranch.nodes[current.triangle] or nil
+    end
+    if #entries == 0 then return nil end
+    while #entries < 4 do table.insert(entries, "-") end
+    return entries
+end
+
+function JokCombatBranch.branchGuideEntries(player)
+    if JokCombatBranch.path == nil
+        or player.animation ~= JokCombatBranch.animation then
+        return nil
+    end
+    return JokCombatBranch.familyGuideEntries(
+        JokCombatBranch.nodes[JokCombatBranch.path], false)
+end
+
+function JokCombatBranch.guideEntries(player, buttons)
+    if not CONFIG.comboGuide or not CONFIG.branchCombos
+        or not JokCombatBranch.valid or not HUD.enabled then
+        return nil
+    end
+    if JokCombatBranch.pendingPath ~= nil
+        or JokCombatBranch.waitingPath ~= nil then
+        return nil
+    end
+    if HUD.directEditGroup ~= nil
+        or (buttons & (BUTTON.L1 | BUTTON.R1 | BUTTON.L2 | BUTTON.R2
+            | BUTTON.TRIANGLE)) ~= 0
+        or not HUD.nativeRootSelectionAvailable() then
+        return nil
+    end
+
+    if JokCombatBranch.path ~= nil then
+        return JokCombatBranch.branchGuideEntries(player)
+    end
+    if JokCombatBranch.active then return nil end
+
+    local path = JokCombatBranch.rootPath(player)
+    local node = path ~= nil and JokCombatBranch.nodes[path] or nil
+    -- Never advertise a reserved adapter as executable. The late vanilla
+    -- positions currently mapped to magic/Limit therefore keep the ordinary
+    -- Command Menu until those complete Steam dispatchers are enabled.
+    if node == nil or not JokCombatBranch.kindReady(node) then return nil end
+    -- Do not cover the normal Command Menu permanently while Sora is idle.
+    -- The neutral Strong family becomes visible immediately after its first Y.
+    if path == "T" then return nil end
+    return JokCombatBranch.familyGuideEntries(node, true)
 end
 
 function JokCombatBranch.update(player, buttons, crossPressed,
@@ -3657,8 +3773,11 @@ function JokCombatBranch.update(player, buttons, crossPressed,
         end
         if not crossPressed and not trianglePressed then return false end
 
+        if crossPressed then
+            return JokCombatBranch.continuePhysical(player)
+        end
         local node = JokCombatBranch.nodes[JokCombatBranch.path]
-        local child = crossPressed and node.cross or node.triangle
+        local child = node.triangle
         if child == nil then
             log("[branch] " .. JokCombatBranch.path
                 .. " is terminal; new input discarded until recovery.")
@@ -3680,6 +3799,7 @@ function JokCombatBranch.update(player, buttons, crossPressed,
             .. node.kind .. " adapter is not enabled yet.")
         return false
     end
+    if root == "T" then return JokCombatBranch.execute(player, root) end
     return JokCombatBranch.queue(player, root)
 end
 
@@ -4109,18 +4229,20 @@ function _OnInit()
         "unavailable."))
     log(string.format("complete action records ready: %d/%d.",
         validActionRecordCount, #ACTION_CATALOG - 1))
-    log(string.format("canonical X/T tree %s: %d unique nodes, "
-        .. "%d Action Ability nodes enabled; magic/Limit adapters parked.",
+    log(string.format("Pirate Y map %s: %d unique moves, "
+        .. "%d Action Ability slots enabled; reverse magic/Limit adapters parked.",
         branchValid and "ready" or "disabled",
         branchNodeCount, branchActionCount))
     log("direct Action Loadout ready: hold L2/R2/L2+R2; "
         .. "D-pad Up/Down selects, Left/Right changes, release saves.")
     log("native editor cursor delegation ready: Up/Down uses KH1's complete "
         .. "native transition; Left/Right remains isolated for editing.")
-    log("native Command Menu overlay ready: up to four native rows; "
+    log("native Command Menu overlay + Combo Guide ready: up to four native rows; "
         .. "release L1+R1+L2+R2 to toggle it; add D-pad Down to reset "
         .. "defaults; overlay is currently "
         .. (HUD.enabled and "on." or "off."))
+    log("Combo Guide ready: Strong/C2/C3/C4/C5 show only remaining Y "
+        .. "actions; A stays a native physical continuation.")
     log("fourth loadout row follows the native Summon unlock; early saves "
         .. "show and edit the three rows KH1 currently renders.")
     log("native Ripple Drive/Stun Impact/Gravity Break/Zantetsuken "
@@ -4342,10 +4464,10 @@ function _OnFrame()
         end
     end
 
-    -- Modifier-free Triangle enters the canonical tree only from a validated
-    -- native normal. While the tree owns a node, both X and Triangle are read
-    -- as raw edges and the physical mappings stay suppressed; each child is
-    -- then dispatched once through the existing complete Action route.
+    -- Modifier-free Triangle selects Strong/C2/C3/C4/C5 from neutral or from
+    -- the validated native combo position. While a family owns a node, X and
+    -- Triangle are read as raw edges: Triangle advances to the next named
+    -- Action, while X closes the family and requests one physical attack.
     if not actionConsumed then
         actionConsumed = JokCombatBranch.update(
             player, buttons, crossPressed, trianglePressed)

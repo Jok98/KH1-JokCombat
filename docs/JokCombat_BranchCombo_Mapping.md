@@ -1,205 +1,165 @@
-# JokCombat — mappa canonica X / Triangolo
+# JokCombat — mappa combo Pirate A / Y
 
-Stato: **MAPPA APPROVATA; ACTION TREE 11/11 IMPLEMENTATO IN v0.7.1**
-
-La tabella runtime contiene tutti i 24 nodi. La prima fase abilita le undici
-Action Ability; magie e Limit restano dichiarati ma usano un fallback fisico
-nativo finché i rispettivi dispatcher Steam completi non saranno validati.
+Stato: **CORE ACTION 11/11 IMPLEMENTATO IN v0.9.0**
 
 Ambito: KH1 Final Mix, Steam Global, Sora
+Input abbreviati: `A` = Croce, `Y` = Triangolo
 
-Input abbreviati: `X` = Croce, `T` = Triangolo
+## 1. Regole del nuovo sistema
 
-## 1. Regole definitive della mappa
+1. La stringa composta soltanto da `A` resta completamente nativa: Combo
+   Master, Combo Plus, Air Combo Plus, attacchi contestuali e finisher
+   appartengono a KH1.
+2. `Y` è l'unico input che può eseguire un'Action Ability, una magia o un
+   Limit nominato.
+3. `A` dopo una mossa speciale produce sempre una continuazione fisica e non
+   può selezionare un'altra abilità.
+4. Ogni input della sequenza produce un'azione; le combinazioni non sono
+   password eseguite soltanto all'ultimo tasto.
+5. I Reaction Command conservano la priorità su `Y`. Lo Strong combo neutrale
+   esiste soltanto quando il Command Menu non espone una reaction.
+6. Lo stesso schema viene usato a terra e in aria; gli adapter già validati
+   gestiscono le differenze tecniche.
+7. Summon resta esclusa.
 
-1. Una sequenza canonica identifica una sola abilità.
-2. Nessuna abilità compare in due sequenze diverse.
-3. Ogni input del ramo esegue una mossa: la sequenza non è una password da
-   completare prima di vedere un attacco.
-4. Tutte le sole `X` restano la combo nativa completa gestita da KH1.
-5. `T` neutrale resta nativo; il ramo esiste soltanto dopo almeno una `X`
-   accettata.
-6. La stessa sequenza identifica la stessa abilità a terra e in aria. Cambia
-   soltanto l'adapter tecnico usato per eseguirla.
-7. Magie, Limit, Counterattack e Zantetsuken sono foglie: dopo la loro
-   esecuzione il ramo generico termina.
-8. I Limit conservano il possesso dei propri follow-up nativi.
-9. Le combinazioni non assegnate restano riservate a mosse future; non vengono
-   riempite duplicando abilità esistenti.
-10. Summon è esclusa.
+## 2. Core Action Ability
 
-La mappa contiene esattamente 24 azioni uniche:
+La struttura ispirata a Pirate Warriors offre esattamente undici posizioni
+attivate da `Y`, tante quante le Action Ability disponibili.
 
-- 11 Action Ability;
-- sette famiglie magiche;
-- cinque Limit;
-- Chain Attack / Burst sperimentale.
+### Strong combo — `Y Y Y`
 
-## 2. Tronco X nativo
-
-- Terra: le posizioni `1..6` sono normali contestuali e la posizione `7` è
-  `CB`. Dopo la finestra sicura il bridge riapre una nuova stringa.
-- Aria: le posizioni `1..4` sono normali e la posizione `5` è `CE`. Il bridge
-  riapre `CC` finché Sora resta in aria.
-- Le diramazioni fino a quattro `X` sono disponibili sia a terra sia in aria.
-- `XXXXXT` e `XXXXXXT` sono terminali tardivi disponibili soltanto a terra,
-  perché la combo aerea raggiunge la propria finisher alla quinta posizione.
-
-## 3. Mappa canonica completa
-
-La colonna «continuazione» indica quale input può essere premuto nella finestra
-sicura della mossa corrente. Un trattino indica una foglia terminale.
-
-### 3.1 Ramo `X` — rapido, elementale e supporto
-
-| Sequenza | Mossa eseguita dall'ultimo input | Tipo | Continuazione |
-|---|---|---|---|
-| `XT` | Slapshot | Action Ability | `X` → `XTX`; `T` → `XTT` |
-| `XTX` | Vortex | Action Ability | `X` → `XTXX`; `T` → `XTXT` |
-| `XTXX` | Fire | Magia, grado più alto appreso | — |
-| `XTXT` | Blizzard | Magia, grado più alto appreso | — |
-| `XTT` | Sliding Dash | Action Ability | `X` → `XTTX`; `T` → `XTTT` |
-| `XTTX` | Counterattack* | Action Ability contestuale | — |
-| `XTTT` | Cure | Magia, grado più alto appreso | — |
-
-Esecuzione di `XTTT`: attacco X nativo → Slapshot → Sliding Dash → Cure.
-
-### 3.2 Ramo `XX` — mobilità aerea ed elementi
-
-| Sequenza | Mossa eseguita dall'ultimo input | Tipo | Continuazione |
-|---|---|---|---|
-| `XXT` | Aerial Sweep | Action Ability | `X` → `XXTX`; `T` → `XXTT` |
-| `XXTX` | Hurricane Blast | Action Ability | `X` → `XXTXX`; `T` → `XXTXT` |
-| `XXTXX` | Thunder | Magia, grado più alto appreso | — |
-| `XXTXT` | Aero | Magia, grado più alto appreso | — |
-| `XXTT` | Ragnarok* | Limit | follow-up nativi Ragnarok |
-
-Esecuzione di `XXTXT`: due X native → Aerial Sweep → Hurricane Blast → Aero.
-Hurricane Blast resta `air-only` nel loadout normale; a terra `XXTX` usa un
-ponte contestuale riservato esclusivamente al precedente Aerial Sweep `XXT`.
-
-### 3.3 Ramo `XXX` — area, controllo e speciali
-
-| Sequenza | Mossa eseguita dall'ultimo input | Tipo | Continuazione |
-|---|---|---|---|
-| `XXXT` | Ripple Drive | Action Ability | `X` → `XXXTX`; `T` → `XXXTT` |
-| `XXXTX` | Stun Impact | Action Ability | `X` → `XXXTXX`; `T` → `XXXTXT` |
-| `XXXTXX` | Gravity | Magia, grado più alto appreso | — |
-| `XXXTXT` | Stop | Magia, grado più alto appreso | — |
-| `XXXTT` | Gravity Break | Action Ability | `X` → `XXXTTX`; `T` → `XXXTTT` |
-| `XXXTTX` | Ars Arcanum* | Limit | follow-up nativi Ars Arcanum |
-| `XXXTTT` | Chain Attack / Burst* | Reaction sperimentale | follow-up nativi / sperimentali |
-
-Esecuzione di `XXXTXT`: tre X native → Ripple Drive → Stun Impact → Stop.
-
-### 3.4 Ramo `XXXX` — finisher fisiche pesanti
-
-| Sequenza | Mossa eseguita dall'ultimo input | Tipo | Continuazione |
-|---|---|---|---|
-| `XXXXT` | Blitz | Action Ability | `X` → `XXXXTX`; `T` → `XXXXTT` |
-| `XXXXTX` | Zantetsuken | Action Ability terminale | — |
-| `XXXXTT` | Strike Raid* | Limit | follow-up nativi Strike Raid |
-
-Esecuzione di `XXXXTX`: quattro X native → Blitz → Zantetsuken.
-
-### 3.5 Terminali tardivi terrestri
-
-| Sequenza | Mossa | Tipo | Continuazione |
-|---|---|---|---|
-| `XXXXXT` | Sonic Blade* | Limit | follow-up nativi Sonic Blade |
-| `XXXXXXT` | Trinity Limit* | Limit | follow-up nativi Trinity Limit |
-
-Questi due ingressi sostituiscono volontariamente una diramazione profonda con
-un terminale immediato: dopo cinque X parte Sonic Blade; dopo sei X parte
-Trinity Limit. Non sono raggiungibili dalla combo aerea, che chiude a cinque.
-
-## 4. Verifica di unicità e copertura
-
-### Action Ability — 11/11
-
-| Action Ability | Unica sequenza canonica |
+| Sequenza | Mossa dell'ultimo `Y` |
 |---|---|
-| Slapshot | `XT` |
-| Vortex | `XTX` |
-| Sliding Dash | `XTT` |
-| Counterattack | `XTTX` |
-| Aerial Sweep | `XXT` |
-| Hurricane Blast | `XXTX` |
-| Ripple Drive | `XXXT` |
-| Stun Impact | `XXXTX` |
-| Gravity Break | `XXXTT` |
-| Blitz | `XXXXT` |
-| Zantetsuken | `XXXXTX` |
+| `Y` | Vortex |
+| `Y Y` | Stun Impact |
+| `Y Y Y` | Gravity Break |
 
-Tutte sono entro `XXXX`, quindi tutte le Action Ability restano richiamabili
-anche in aria con la medesima sequenza.
+Lo Strong combo può partire da neutrale. Dopo il primo colpo, la Guide mostra
+soltanto i `Y` ancora disponibili nella famiglia.
 
-### Magie — 7/7
+### C2 — `A Y Y Y`
 
-| Famiglia | Unica sequenza canonica |
+| Sequenza | Mossa dell'ultimo `Y` |
 |---|---|
-| Fire | `XTXX` |
-| Blizzard | `XTXT` |
-| Cure | `XTTT` |
-| Thunder | `XXTXX` |
-| Aero | `XXTXT` |
-| Gravity | `XXXTXX` |
-| Stop | `XXXTXT` |
+| `A Y` | Slapshot |
+| `A Y Y` | Sliding Dash |
+| `A Y Y Y` | Blitz |
 
-La famiglia sceglie il grado più alto appreso: Fire/Fira/Firaga e così via.
+È la famiglia rapida e di avanzamento.
 
-### Limit e speciale — 6/6
+### C3 — `A A Y Y Y`
 
-| Mossa | Unica sequenza canonica |
+| Sequenza | Mossa dell'ultimo `Y` |
 |---|---|
-| Ragnarok | `XXTT` |
-| Ars Arcanum | `XXXTTX` |
-| Chain Attack / Burst | `XXXTTT` |
-| Strike Raid | `XXXXTT` |
-| Sonic Blade | `XXXXXT` |
-| Trinity Limit | `XXXXXXT` |
+| `A A Y` | Aerial Sweep |
+| `A A Y Y` | Hurricane Blast |
+| `A A Y Y Y` | Ripple Drive |
 
-## 5. Input non assegnati
+L'ordine mantiene il ponte Steam già validato: Aerial Sweep `D6` autorizza
+Hurricane Blast `D1` anche quando la famiglia è iniziata a terra.
 
-Una combinazione non presente nelle tabelle non richiama un'altra abilità già
-mappata. Il comportamento dipende dallo stato:
+### C4 e C5
 
-- dopo una foglia Action Ability o magia, il ramo si chiude e una nuova `X`
-  avvia/riapre la stringa nativa;
-- durante un Limit, X e T appartengono al Limit;
-- un Triangolo successivo alla chiusura torna nativo;
-- gli spazi liberi restano disponibili per Unsealing Strikes, Sky Climber,
-  Ripple Slide, Stun Blitz, Zantetsu Prime e altre mosse future, soltanto dopo
-  averne validato record, hitbox, effetti e uscita.
+| Famiglia | Sequenza | Mossa |
+|---|---|---|
+| C4 | `A A A Y` | Counterattack |
+| C5 | `A A A A Y` | Zantetsuken |
 
-## 6. Timing e buffer
+### Copertura
 
-Il ramo usa un solo buffer; input ripetuti non creano una coda:
+| Famiglia | Slot |
+|---|---:|
+| Strong | 3 |
+| C2 | 3 |
+| C3 | 3 |
+| C4 | 1 |
+| C5 | 1 |
+| Totale | **11** |
 
-| Animazione corrente | Apertura prebuffer | Esecuzione minima |
-|---|---:|---:|
-| `C8` | 14 | 18 |
-| `C9` | 14 | 34 |
-| `CA` | 16 | 20 |
-| `CC` | 8 | 12 |
-| `CD` | 10 | 14 |
+Nessuna Action Ability è duplicata e nessuna viene eseguita da `A`.
 
-Le Action Ability interne con VFX o hitbox tardivi ricevono una finestra di
-uscita individuale. Finché non si raggiunge quella finestra viene ricordato un
-solo follow-up; lo spam precedente o successivo è ignorato.
+## 3. Reverse ed estensioni riservate
 
-## 7. Priorità e fallback
+La v0.9.0 rende già sicuro il primo passo delle reverse: premendo `A` dopo
+un'Action Ability, il ramo speciale viene chiuso e KH1 riceve un nuovo attacco
+fisico. Non viene eseguita alcuna abilità nominata.
 
-1. Reaction Command nativo prima del ramo Triangolo.
-2. Guard e Dodge cancellano e azzerano la cronologia.
-3. L1/R1/L2/R2 con un tasto faccia non alimentano questo albero.
-4. Se Counterattack non possiede una finestra valida, oppure una magia/Limit
-   non è disponibile, KH1 riceve un normale/finisher fisico del contesto e il
-   ramo termina. Nessun'altra abilità canonica viene duplicata come fallback.
-5. Se un adapter ground-native fallisce in aria, KH1 riceve la finisher aerea
-   nativa e il ramo termina.
-6. Un cambio terra/aria inatteso, danno subito, menu, reload o perdita del
-   player object azzera il ramo e ripristina ogni route temporanea.
+Le estensioni seguenti sono dichiarate nella mappa, tutte con un `Y` finale,
+ma restano disabilitate finché magia e Limit non possiedono dispatcher Steam
+completi per effetto, costo, bersaglio e follow-up.
 
-Le voci con `*` richiedono ancora la validazione del dispatcher nativo prima
-dell'implementazione definitiva.
+### Magie
+
+| Sequenza riservata | Famiglia |
+|---|---|
+| `Y A Y` | Fire |
+| `Y A A Y` | Blizzard |
+| `Y Y A Y` | Thunder |
+| `Y Y A A Y` | Aero |
+| `Y Y Y A Y` | Cure |
+| `A Y Y Y A Y` | Gravity |
+| `A A Y Y Y A Y` | Stop |
+
+### Limit e speciale
+
+| Sequenza riservata | Mossa |
+|---|---|
+| `Y A A A Y` | Sonic Blade |
+| `Y Y A A A Y` | Ars Arcanum |
+| `Y Y Y A A Y` | Strike Raid |
+| `A Y Y Y A A Y` | Ragnarok |
+| `A A Y Y Y A A Y` | Trinity Limit |
+| `Y Y Y A A A Y` | Chain Attack / Burst |
+
+Queste assegnazioni sono riserve univoche, non funzionalità dichiarate come
+già giocabili. La futura reverse manterrà il contesto durante i colpi fisici
+intermedi e chiamerà la mossa soltanto sul `Y` conclusivo.
+
+## 4. Combo Guide
+
+La Guide usa le righe native del Command Menu e mostra la famiglia relativa
+alla posizione vanilla corrente.
+
+Dopo un `A`, per esempio:
+
+```text
+[Y] Slapshot
+[Y][Y] Sliding Dash
+[Y][Y][Y] Blitz
+```
+
+Dopo `A A`:
+
+```text
+[Y] Aerial Sweep
+[Y][Y] Hurricane Blast
+[Y][Y][Y] Ripple Drive
+```
+
+Dopo avere eseguito Slapshot, la prima voce già consumata scompare:
+
+```text
+[Y] Sliding Dash
+[Y][Y] Blitz
+```
+
+La Guide non mostra `[A] Continua vanilla`: la stringa fisica è sempre
+implicita. Non rimane inoltre aperta mentre Sora è neutrale, evitando di
+coprire permanentemente il Command Menu; dopo il primo `Y` dello Strong combo
+mostra immediatamente i follow-up rimasti.
+
+Il toggle condiviso con l'Action Loadout resta `L1+R1+L2+R2`, rilasciato senza
+D-pad.
+
+## 5. Timing, sicurezza e fallback
+
+- Ogni Action Ability concatenabile conserva la propria finestra di prebuffer
+  e release; viene memorizzato al massimo un input.
+- Guard, Dodge, salto, modificatori, reaction command, menu, reload e perdita
+  del player object chiudono sempre la famiglia.
+- Un `A` durante una famiglia usa il percorso fisico target-free già validato:
+  prima rilascia l'azione corrente, poi genera un singolo nuovo edge Attack.
+- Se un adapter completo non è disponibile, la mossa riservata non compare
+  nella Guide e non viene sostituita da un'altra abilità.
+- I follow-up nativi dei Limit apparterranno al Limit dopo la sua attivazione.

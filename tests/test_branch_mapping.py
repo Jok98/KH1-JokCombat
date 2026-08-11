@@ -1,4 +1,4 @@
-"""Static regression checks for the canonical JokCombat X/T tree.
+"""Static regression checks for the Pirate-style JokCombat X/T families.
 
 The production script is Lua 5.3 and is loaded by LuaBackendHook.  This test
 keeps the data table reviewable without emulating KH1 memory or dispatch code.
@@ -15,30 +15,30 @@ SOURCE = (ROOT / "JokCombat_CombatPrototype.lua").read_text(encoding="utf-8")
 
 
 EXPECTED = {
+    "T": ("action", "vortex"),
+    "TT": ("action", "stun_impact"),
+    "TTT": ("action", "gravity_break"),
     "XT": ("action", "slapshot"),
-    "XTX": ("action", "vortex"),
-    "XTXX": ("magic", "fire"),
-    "XTXT": ("magic", "blizzard"),
     "XTT": ("action", "sliding_dash"),
-    "XTTX": ("action", "counterattack"),
-    "XTTT": ("magic", "cure"),
+    "XTTT": ("action", "blitz"),
     "XXT": ("action", "aerial_sweep"),
-    "XXTX": ("action", "hurricane_blast"),
-    "XXTXX": ("magic", "thunder"),
-    "XXTXT": ("magic", "aero"),
-    "XXTT": ("limit", "ragnarok"),
-    "XXXT": ("action", "ripple_drive"),
-    "XXXTX": ("action", "stun_impact"),
-    "XXXTXX": ("magic", "gravity"),
-    "XXXTXT": ("magic", "stop"),
-    "XXXTT": ("action", "gravity_break"),
-    "XXXTTX": ("limit", "ars_arcanum"),
-    "XXXTTT": ("experimental", "chain_attack_burst"),
-    "XXXXT": ("action", "blitz"),
-    "XXXXTX": ("action", "zantetsuken"),
-    "XXXXTT": ("limit", "strike_raid"),
-    "XXXXXT": ("limit", "sonic_blade"),
-    "XXXXXXT": ("limit", "trinity_limit"),
+    "XXTT": ("action", "hurricane_blast"),
+    "XXTTT": ("action", "ripple_drive"),
+    "XXXT": ("action", "counterattack"),
+    "XXXXT": ("action", "zantetsuken"),
+    "TXT": ("magic", "fire"),
+    "TXXT": ("magic", "blizzard"),
+    "TTXT": ("magic", "thunder"),
+    "TTXXT": ("magic", "aero"),
+    "TTTXT": ("magic", "cure"),
+    "XTTTXT": ("magic", "gravity"),
+    "XXTTTXT": ("magic", "stop"),
+    "TXXXT": ("limit", "sonic_blade"),
+    "TTXXXT": ("limit", "ars_arcanum"),
+    "TTTXXT": ("limit", "strike_raid"),
+    "XTTTXXT": ("limit", "ragnarok"),
+    "XXTTTXXT": ("limit", "trinity_limit"),
+    "TTTXXXT": ("experimental", "chain_attack_burst"),
 }
 
 
@@ -112,29 +112,31 @@ def main() -> None:
             )
 
     for path, node in nodes.items():
-        if "cross" in node:
-            assert node["cross"] == path + "X"
-            assert node["cross"] in nodes
+        assert path.endswith("T"), f"named move {path} does not end in Y/T"
+        assert "cross" not in node, f"A/X dispatches a named move at {path}"
         if "triangle" in node:
             assert node["triangle"] == path + "T"
             assert node["triangle"] in nodes
 
-    roots = {"XT", "XXT", "XXXT", "XXXXT", "XXXXXT", "XXXXXXT"}
-    reachable = set(roots)
-    frontier = list(roots)
-    while frontier:
-        path = frontier.pop()
-        for field in ("cross", "triangle"):
-            child = nodes[path].get(field)
-            if child and child not in reachable:
-                reachable.add(child)
-                frontier.append(child)
-    assert reachable == set(nodes), "one or more canonical nodes are unreachable"
+    action_families = {
+        "strong": ("T", "TT", "TTT"),
+        "c2": ("XT", "XTT", "XTTT"),
+        "c3": ("XXT", "XXTT", "XXTTT"),
+        "c4": ("XXXT",),
+        "c5": ("XXXXT",),
+    }
+    family_actions = {
+        path for family in action_families.values() for path in family
+    }
+    assert family_actions == {
+        path for path, node in nodes.items() if node["kind"] == "action"
+    }
+    assert sum(len(family) for family in action_families.values()) == 11
 
     assert "branchActionAbilities = true" in SOURCE
     assert "branchMagic = false" in SOURCE
     assert "branchLimits = false" in SOURCE
-    assert 'VERSION = "v0.7.1"' in SOURCE
+    assert 'VERSION = "v0.9.0"' in SOURCE
     assert 'return string.rep("X", position) .. "T"' in SOURCE
     assert re.search(
         r'id = "hurricane_blast", name = "Hurricane Blast", context = "air"',
@@ -142,7 +144,7 @@ def main() -> None:
     ), "normal Hurricane Blast shortcut must remain air-only"
 
     hurricane_bridge_guards = (
-        'path == "XXTX"',
+        'path == "XXTT"',
         'JokCombatBranch.path == "XXT"',
         'player.animation == 0xD6',
         'and not player.airborne',
@@ -159,10 +161,27 @@ def main() -> None:
         "JokCombatBranch.reset(\"loadout editor opened\", true)",
         "and JokCombatBranch.active",
         "new input discarded until recovery",
+        "function JokCombatBranch.continuePhysical",
+        "+ A -> native physical continuation; no named ability dispatched",
+        'if root == "T" then return JokCombatBranch.execute(player, root) end',
     )
     for guard in integration_guards:
         assert guard in SOURCE, f"missing branch integration guard: {guard}"
-    print("PASS: 24 unique reachable nodes; 11/11 Action Ability adapters enabled")
+    guide_guards = (
+        "comboGuide = true",
+        "function JokCombatBranch.guideEntries",
+        "function JokCombatBranch.branchGuideEntries",
+        "function JokCombatBranch.familyGuideEntries",
+        'local sequence = "[Y]"',
+        'sequence = sequence .. "[Y]"',
+        'if path == "T" then return nil end',
+        'return HUD.showOverlay("guide", guideEntries, "Combo Guide")',
+        "not JokCombatBranch.kindReady(node)",
+    )
+    for guard in guide_guards:
+        assert guard in SOURCE, f"missing Combo Guide guard: {guard}"
+    assert '"[A] Continua vanilla"' not in SOURCE
+    print("PASS: 24 unique Y-ended moves; 11/11 Pirate Action slots enabled")
 
 
 if __name__ == "__main__":
