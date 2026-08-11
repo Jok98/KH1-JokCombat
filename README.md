@@ -223,6 +223,11 @@ Air Combo Plus e Combo Master descritto sotto.
 > record completo anche nelle route terrestri. È quindi eseguibile direttamente
 > a terra dalle combo e dallo slot configurabile, oltre a conservare la route
 > aerea nativa; non vengono riattivati fake-ground o scritture di quota.
+>
+> **Fix v0.9.9 — shortcut Action solo R2:** il loadout diretto espone soltanto
+> `R2 + Y/X/A/B`. `L2` non apre più un gruppo Action e `L2+R2` non esegue più
+> Action Ability; `L2 + Cerchio` resta riservato esclusivamente a Guard. La mappa
+> Pirate continua comunque a contenere tutte le undici Action Ability.
 
 La repository contiene tre probe read-only e il primo prototipo combat:
 
@@ -234,9 +239,10 @@ La repository contiene tre probe read-only e il primo prototipo combat:
   faccia e valida gli indirizzi Steam portati prima che il prototipo scriva;
 - `JokCombat_CommandMenuProbe.lua`: confronta in sola lettura controller,
   transizioni e strutture delle quattro righe native del Command Menu;
-- `JokCombat_CombatPrototype.lua`: prototipo v0.9.8 con combo normali delegate
-  a KH1 e un bridge post-finisher per i cicli infiniti terra/aria, undici slot
-  Action Ability configurabili, famiglie Pirate Strong/C2/C3/C4/C5 e sette
+- `JokCombat_CombatPrototype.lua`: prototipo v0.9.9 con combo normali delegate
+  a KH1 e un bridge post-finisher per i cicli infiniti terra/aria, quattro slot
+  R2 configurabili, undici Action Ability nelle famiglie Pirate
+  Strong/C2/C3/C4/C5 e sette
   reverse magiche native a costo MP zero soltanto dentro la combo,
   jump-cancel terra -> aria, Guard universale su L2 + Cerchio e Dodge Roll
   fisso su Quadrato;
@@ -333,8 +339,8 @@ pacchetto Critical Mix sono conservati, ma non caricati, nelle directory
 `C:\Users\<utente>\Documents\KH_mod\reference\CriticalMix`. Backup, log e
 copie runtime restano locali e non fanno parte del repository.
 
-Per verificare la v0.9.8, premi `F1` nella console LuaBackend. Il log iniziale
-deve mostrare `v0.9.8`, `Native Abilities v0.3.0 ready`,
+Per verificare la v0.9.9, premi `F1` nella console LuaBackend. Il log iniziale
+deve mostrare `v0.9.9`, `Native Abilities v0.3.0 ready`,
 `ground action route ready`, `aerial action route ready`,
 `complete action records ready: 11/11`
 `native Command Menu overlay + Combo Guide ready` e
@@ -385,9 +391,9 @@ MP a zero: devono produrre il cast completo senza diminuire gli MP. Subito
 dopo, una magia lanciata dalla shortcut o dal menu deve tornare a consumare il
 costo vanilla. I nodi Limit non fanno ancora parte del collaudo.
 
-Tieni un modificatore per visualizzare e configurare il relativo gruppo: `L2`,
-`R2` oppure entrambi per `L2+R2`. Il riepilogo mostra sempre un massimo di
-quattro righe nel Command Menu originale in basso a sinistra. Premi `Su/Giu`
+Tieni `R2` da solo per visualizzare e configurare l'unico gruppo Action. Il
+riepilogo mostra sempre un massimo di quattro righe nel Command Menu originale
+in basso a sinistra. Premi `Su/Giu`
 per selezionare lo slot: keyblade e riquadro colorato devono seguire la riga,
 senza prefisso `+`. Premi `Sinistra/Destra` per scegliere l'Action Ability
 precedente o successiva. Le
@@ -409,7 +415,7 @@ rispettivamente Magic o Items prima del ripristino su Attack. Fino alla fix,
 torna sulla prima riga oppure rilascia e ripremi il modificatore prima di usare
 la scorciatoia su Croce. Se Summon non e' ancora sbloccato, il menu espone
 soltanto le prime tre righe e il log indica
-`visible=3/4 (Summon locked)`. Il quarto shortcut R2/L2+R2 resta eseguibile con
+`visible=3/4 (Summon locked)`. Il quarto shortcut R2 resta eseguibile con
 il valore gia' presente nel file di configurazione, ma diventa selezionabile
 nel menu solo quando KH1 crea naturalmente la quarta riga. Da quel momento il
 log passa a `visible=4/4` e l'editor la include automaticamente.
@@ -420,21 +426,15 @@ shoulder, premi `D-pad Giu` e poi rilascia: il reset viene salvato e non cambia
 lo stato on/off del riepilogo. Il precedente editor nei box di notifica e' stato
 rimosso.
 
-Gli undici default sono tutti differenti:
+I quattro default R2 sono tutti differenti; le altre Action Ability rimangono
+disponibili nella mappa Pirate:
 
 | Slot | Action Ability |
 | --- | --- |
-| `L2 + Croce` | Stun Impact |
-| `L2 + Triangolo` | Slapshot |
-| `L2 + Quadrato` | Sliding Dash |
 | `R2 + Croce` | Gravity Break |
 | `R2 + Triangolo` | Ripple Drive |
 | `R2 + Cerchio` | Hurricane Blast, terra e aria |
 | `R2 + Quadrato` | Zantetsuken |
-| `L2 + R2 + Croce` | Blitz |
-| `L2 + R2 + Triangolo` | Vortex |
-| `L2 + R2 + Cerchio` | Aerial Sweep, terra e aria |
-| `L2 + R2 + Quadrato` | Counterattack, contestuale |
 
 Il catalogo include tutte le azioni della tabella e anche `None`. Per eseguire
 uno slot, tieni il modificatore almeno un frame prima del tasto faccia. Questo

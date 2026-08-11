@@ -1,6 +1,6 @@
 # JokCombat — mappa combo Pirate A / Y
 
-Stato: **ACTION TERRA 11/11 + ACTION ARIA NATIVE 2/2 IN v0.9.8; MAGIE IN PROVA; LIMIT PARCHEGGIATI**
+Stato: **ACTION TERRA 11/11 + ACTION ARIA NATIVE 2/2 IN v0.9.9; MAGIE IN PROVA; LIMIT PARCHEGGIATI**
 
 Ambito: KH1 Final Mix, Steam Global, Sora
 Input abbreviati: `A` = Croce, `Y` = Triangolo
@@ -200,6 +200,8 @@ mostra immediatamente i follow-up rimasti.
 
 Il toggle condiviso con l'Action Loadout resta `L1+R1+L2+R2`, rilasciato senza
 D-pad.
+Il loadout diretto v0.9.9 espone soltanto i quattro slot `R2`; L2 resta dedicato
+a Guard e la combinazione L2+R2 non seleziona più un gruppo Action Ability.
 
 ## 5. Timing, sicurezza e fallback
 

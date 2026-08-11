@@ -145,7 +145,18 @@ def main() -> None:
     assert "branchActionAbilities = true" in SOURCE
     assert "branchMagic = true" in SOURCE
     assert "branchLimits = false" in SOURCE
-    assert 'VERSION = "v0.9.8"' in SOURCE
+    assert 'VERSION = "v0.9.9"' in SOURCE
+    slot_start = SOURCE.index("local ACTION_SLOTS = {")
+    slot_end = SOURCE.index("local ACTION_SLOT_BY_ID = {}", slot_start)
+    slot_source = SOURCE[slot_start:slot_end]
+    assert set(re.findall(r'id = "([^"]+)"', slot_source)) == {
+        "r2_cross", "r2_triangle", "r2_circle", "r2_square"
+    }
+    assert 'if modifier == BUTTON.R2 then return "r2" end' in SOURCE
+    assert 'return "l2"' not in SOURCE
+    assert 'return "dual"' not in SOURCE
+    assert "and r2Held and not l2Held then" in SOURCE
+    assert 'slot = ACTION_SLOT_BY_ID.r2_cross' in SOURCE
     assert 'return string.rep("X", position) .. "T"' in SOURCE
     assert 'if isAirNormalContext(player) then' in SOURCE
     assert 'return "XXT"' in SOURCE
