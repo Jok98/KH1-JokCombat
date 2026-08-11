@@ -234,6 +234,16 @@ Air Combo Plus e Combo Master descritto sotto.
 > Aerial Sweep. L'ordine contestuale riusa i nodi canonici senza duplicare le
 > abilità e lascia invariata la C3 terrestre `Aerial Sweep -> Hurricane Blast ->
 > Ripple Drive`. Aerial Sweep non forza più quota, gate o velocità.
+>
+> **Fix v0.10.4 — finisher aerea nel ramo Y:** la combo speciale aerea inserisce
+> il record nativo `CE` tra Hurricane Blast e Aerial Sweep. `CE` è un nodo
+> virtuale escluso dall'Action Catalog e dalla combo normale su `A`; `Y` prima
+> del tempo `20` viene scartato, mentre una nuova pressione valida instrada
+> Aerial Sweep come chiusura discendente.
+>
+> **Fix v0.10.5 — finisher prima di Hurricane Blast:** il ramo aereo apre ora
+> direttamente con `CE`; dopo la sua recovery, `Y` esegue Hurricane Blast e il
+> successivo `Y` chiude con Aerial Sweep. La combo normale su `A` resta invariata.
 
 La repository contiene tre probe read-only e il primo prototipo combat:
 
@@ -245,7 +255,7 @@ La repository contiene tre probe read-only e il primo prototipo combat:
   faccia e valida gli indirizzi Steam portati prima che il prototipo scriva;
 - `JokCombat_CommandMenuProbe.lua`: confronta in sola lettura controller,
   transizioni e strutture delle quattro righe native del Command Menu;
-- `JokCombat_CombatPrototype.lua`: prototipo v0.10.3 con combo normali delegate
+- `JokCombat_CombatPrototype.lua`: prototipo v0.10.5 con combo normali delegate
   a KH1 e un bridge post-finisher per i cicli infiniti terra/aria, quattro slot
   R2 configurabili, undici Action Ability nelle famiglie Pirate
   Strong/C2/C3/C4/C5 e sette
@@ -345,8 +355,8 @@ pacchetto Critical Mix sono conservati, ma non caricati, nelle directory
 `C:\Users\<utente>\Documents\KH_mod\reference\CriticalMix`. Backup, log e
 copie runtime restano locali e non fanno parte del repository.
 
-Per verificare la v0.10.3, premi `F1` nella console LuaBackend. Il log iniziale
-deve mostrare `v0.10.3`, `Native Abilities v0.3.0 ready`,
+Per verificare la v0.10.5, premi `F1` nella console LuaBackend. Il log iniziale
+deve mostrare `v0.10.5`, `Native Abilities v0.3.0 ready`,
 `ground action route ready`, `aerial action route ready`,
 `complete action records ready: 11/11`
 `native Command Menu overlay + Combo Guide ready` e
@@ -468,8 +478,10 @@ essere conservata. Una nuova Croce da `20` in poi deve mostrare
 `Aerial finisher cycle requested: CE -> CC`, quindi riaprire `CC` se Sora e'
 ancora in aria. L'atterraggio deve interrompere il ciclo normalmente.
 Per il test Action Ability aereo premi Croce una, due, tre o più volte prima del
-finisher: da ognuna di queste posizioni `Y` deve eseguire Hurricane Blast `D1`;
-un altro `Y` nella sua finestra deve eseguire Aerial Sweep `D6` come chiusura.
+finisher: da ognuna di queste posizioni `Y` deve eseguire la finisher aerea
+nativa `CE`. Durante `CE`, `Y` prima del tempo `20` deve essere scartato; una
+nuova pressione da `20` in poi deve eseguire Hurricane Blast `D1`; il successivo
+`Y` nella sua finestra deve eseguire Aerial Sweep `D6` come chiusura.
 Il log deve mostrare `context=air-native` e
 una route aerea completa. La State Probe deve conservare `raw70=1/2`: non devono
 più comparire `airborne action suspension armed`, `context=air-suspended` o

@@ -2,7 +2,7 @@ LUAGUI_NAME = "JokCombat Combat Prototype"
 LUAGUI_AUTH = "Jok; Critical Mix reference by Xendra / KSX"
 LUAGUI_DESC = "Native Cross combo, Pirate-style Y Action/magic families, configurable loadout and universal defense."
 
--- JokCombat v0.10.3 prototype for the current Steam Global executable.
+-- JokCombat v0.10.5 prototype for the current Steam Global executable.
 -- Critical Mix was used as an authorized technical reference. This script is
 -- intentionally limited to combat/input state and does not persist changes to
 -- story flags, rewards, inventory, AP, levels, worlds, chests, or synthesis.
@@ -98,7 +98,7 @@ local CONFIG = {
 
 local EXPECTED_GAME_ID = 0xAF71841E
 local FINGERPRINT = 0x7265737563697065 -- "epicures", little endian
-local VERSION = "v0.10.3"
+local VERSION = "v0.10.5"
 
 local ADDRESS = {
     fingerprint = 0x3B2271,
@@ -3588,6 +3588,9 @@ JokCombatBranch = {
         [0xCA] = { open = 16.0, release = 20.0 },
         [0xCC] = { open = 8.0, release = 12.0 },
         [0xCD] = { open = 10.0, release = 14.0 },
+        -- CE is a real native finisher: early Y presses are discarded rather
+        -- than buffered, matching the existing Cross restart protection.
+        [0xCE] = { open = 20.0, release = 20.0 },
         [0xCF] = { open = 14.0, release = 18.0 }, -- Slapshot
         [0xD0] = { open = 14.0, release = 18.0 }, -- Sliding Dash
         [0xD1] = { open = 26.0, release = 30.0 }, -- Hurricane Blast
@@ -3618,14 +3621,30 @@ JokCombatBranch = {
     reversePrefix = nil,
     reverseWaitingKind = nil,
     reverseWaitingFrames = 0,
-    -- The airborne family reuses the two canonical C3 nodes in reverse order:
-    -- Hurricane Blast keeps altitude first, then downward Aerial Sweep closes.
+    -- CE is a virtual, air-only branch node. It reuses KH1's complete native
+    -- finisher record but never enters ACTION_CATALOG or the canonical 24-move
+    -- map, so ordinary Cross and loadout behavior remain unchanged.
+    airFinisherPath = "AIR_CE",
+    airFinisher = {
+        kind = "air_finisher",
+        id = "aerial_finisher",
+        name = "Aerial Finisher",
+        context = "air",
+        animation = 0xCE,
+        finisher = true,
+        recordAvailable = true,
+    },
+    -- The airborne family starts from virtual CE, then reuses canonical C3
+    -- nodes: the finisher opens, Hurricane Blast follows, and Aerial Sweep
+    -- descends.
     airFamily = false,
 }
 
 function JokCombatBranch.kindReady(node)
     if node == nil then return false end
-    if node.kind == "action" then return CONFIG.branchActionAbilities end
+    if node.kind == "action" or node.kind == "air_finisher" then
+        return CONFIG.branchActionAbilities
+    end
     if node.kind == "magic" then
         return CONFIG.branchMagic and JokCombatMagic ~= nil
             and JokCombatMagic.valid
@@ -3638,13 +3657,24 @@ end
 
 function JokCombatBranch.nodeReady(node, player, path)
     if not JokCombatBranch.kindReady(node) then return false end
+    if node.kind == "air_finisher" then
+        return player ~= nil and player.airborne and airRouteAvailable
+    end
     if player == nil or node.kind ~= "action" then return true end
     local action = ACTION_BY_ID[node.id]
     return action ~= nil and actionMatchesContext(action, player)
 end
 
+function JokCombatBranch.nodeForPath(path)
+    if path == JokCombatBranch.airFinisherPath then
+        return JokCombatBranch.airFinisher
+    end
+    return path ~= nil and JokCombatBranch.nodes[path] or nil
+end
+
 function JokCombatBranch.triangleChild(path, node, airFamily)
     if airFamily then
+        if path == JokCombatBranch.airFinisherPath then return "XXTT" end
         if path == "XXTT" then return "XXT" end
         if path == "XXT" then return nil end
     end
@@ -3754,12 +3784,17 @@ function JokCombatBranch.refreshAirState(player)
 end
 
 function JokCombatBranch.dispatch(player, path)
-    local node = JokCombatBranch.nodes[path]
-    local action = node ~= nil and ACTION_BY_ID[node.id] or nil
-    if node == nil or node.kind ~= "action" or action == nil
+    local node = JokCombatBranch.nodeForPath(path)
+    local action = nil
+    if node ~= nil and node.kind == "action" then
+        action = ACTION_BY_ID[node.id]
+    elseif node ~= nil and node.kind == "air_finisher" then
+        action = node
+    end
+    if node == nil or action == nil
         or action.animation == nil or action.recordAvailable ~= true then
         log("[branch] " .. tostring(path)
-            .. " could not dispatch a complete Action Ability record.")
+            .. " could not dispatch a complete native action record.")
         JokCombatBranch.reset("dispatcher unavailable")
         return true
     end
@@ -3790,7 +3825,7 @@ function JokCombatBranch.dispatch(player, path)
 end
 
 function JokCombatBranch.fallback(player, path)
-    local node = JokCombatBranch.nodes[path]
+    local node = JokCombatBranch.nodeForPath(path)
     local label = node ~= nil and (node.kind .. ":" .. node.id) or path
     log("[branch] " .. path .. " -> " .. label
         .. " is reserved; its complete Steam adapter is not enabled yet. "
@@ -3885,14 +3920,14 @@ function JokCombatBranch.continuePhysical(player)
 end
 
 function JokCombatBranch.execute(player, path)
-    local node = JokCombatBranch.nodes[path]
+    local node = JokCombatBranch.nodeForPath(path)
     if not JokCombatBranch.nodeReady(node, player, path) then
         log("[branch] " .. tostring(path)
             .. " is unavailable in the current ground/air context.")
         JokCombatBranch.reset("context unavailable")
         return true
     end
-    if node.kind == "action" then
+    if node.kind == "action" or node.kind == "air_finisher" then
         return JokCombatBranch.dispatch(player, path)
     end
     if node.kind == "magic" then
@@ -3902,7 +3937,7 @@ function JokCombatBranch.execute(player, path)
 end
 
 function JokCombatBranch.queue(player, path)
-    local node = JokCombatBranch.nodes[path]
+    local node = JokCombatBranch.nodeForPath(path)
     if node == nil then
         JokCombatBranch.reset("unmapped sequence " .. tostring(path))
         return true
@@ -3993,10 +4028,10 @@ function JokCombatBranch.rootPath(player)
         local position = ReadByte(ADDRESS.comboPosition)
         if position < 1 or position >= maximum then return nil end
         -- Every intermediate native aerial hit aliases to the same contextual
-        -- family. It starts from canonical XXTT (Hurricane Blast), then the
-        -- air-only child resolver closes with canonical XXT (Aerial Sweep).
-        -- No Action Ability is duplicated and the ground C3 remains unchanged.
-        return "XXTT"
+        -- family. It starts from virtual native CE, continues through canonical
+        -- XXTT (Hurricane Blast) and closes with canonical XXT (Aerial Sweep).
+        -- No Action Ability is duplicated; ground C3 remains unchanged.
+        return JokCombatBranch.airFinisherPath
     end
     local neutral = player.control == 0x03
         and not isAttackContext(player) and player.animation <= 0x07
@@ -4005,6 +4040,7 @@ end
 
 function JokCombatBranch.nodeName(node)
     if node == nil then return nil end
+    if node.kind == "air_finisher" then return node.name end
     local action = ACTION_BY_ID[node.id]
     if node.kind == "action" and action ~= nil then return action.name end
     local magic = JokCombatMagic ~= nil
@@ -4030,8 +4066,7 @@ function JokCombatBranch.familyGuideEntries(node, includeCurrent, player, path,
     if not includeCurrent then
         currentPath = JokCombatBranch.triangleChild(
             currentPath, node, airFamily)
-        current = currentPath ~= nil
-            and JokCombatBranch.nodes[currentPath] or nil
+        current = JokCombatBranch.nodeForPath(currentPath)
     end
     local sequence = "[Y]"
     while current ~= nil and #entries < 4
@@ -4041,8 +4076,7 @@ function JokCombatBranch.familyGuideEntries(node, includeCurrent, player, path,
         sequence = sequence .. "[Y]"
         currentPath = JokCombatBranch.triangleChild(
             currentPath, current, airFamily)
-        current = currentPath ~= nil
-            and JokCombatBranch.nodes[currentPath] or nil
+        current = JokCombatBranch.nodeForPath(currentPath)
     end
     if #entries == 0 then return nil end
     while #entries < 4 do table.insert(entries, "-") end
@@ -4090,7 +4124,7 @@ function JokCombatBranch.branchGuideEntries(player)
         return nil
     end
     if JokCombatBranch.airFamily then
-        local node = JokCombatBranch.nodes[JokCombatBranch.path]
+        local node = JokCombatBranch.nodeForPath(JokCombatBranch.path)
         return JokCombatBranch.familyGuideEntries(
             node, false, player, JokCombatBranch.path, true)
     end
@@ -4121,7 +4155,7 @@ function JokCombatBranch.guideEntries(player, buttons)
     if JokCombatBranch.active then return nil end
 
     local path = JokCombatBranch.rootPath(player)
-    local node = path ~= nil and JokCombatBranch.nodes[path] or nil
+    local node = JokCombatBranch.nodeForPath(path)
     -- Never advertise a reserved adapter as executable. The late vanilla
     -- positions currently mapped to magic/Limit therefore keep the ordinary
     -- Command Menu until those complete Steam dispatchers are enabled.
@@ -4130,7 +4164,8 @@ function JokCombatBranch.guideEntries(player, buttons)
     -- Do not cover the normal Command Menu permanently while Sora is idle.
     -- The neutral Strong family becomes visible immediately after its first Y.
     if path == "T" then return nil end
-    local airFamily = isAirNormalContext(player) and path == "XXTT"
+    local airFamily = isAirNormalContext(player)
+        and path == JokCombatBranch.airFinisherPath
     return JokCombatBranch.familyGuideEntries(
         node, true, player, path, airFamily)
 end
@@ -4198,13 +4233,21 @@ function JokCombatBranch.update(player, buttons, crossPressed,
         end
         if not crossPressed and not trianglePressed then return false end
 
+        local node = JokCombatBranch.nodeForPath(JokCombatBranch.path)
         if crossPressed then
+            if node ~= nil and node.kind == "air_finisher"
+                and player.time < CONFIG.airFinisherRestartTime then
+                log(string.format(
+                    "Aerial Finisher physical continuation ignored before "
+                    .. "native recovery: time=%.2f opens=%.2f.",
+                    player.time, CONFIG.airFinisherRestartTime))
+                return true
+            end
             return JokCombatBranch.continuePhysical(player)
         end
-        local node = JokCombatBranch.nodes[JokCombatBranch.path]
         local child = JokCombatBranch.triangleChild(
             JokCombatBranch.path, node, JokCombatBranch.airFamily)
-        local childNode = JokCombatBranch.nodes[child]
+        local childNode = JokCombatBranch.nodeForPath(child)
         if childNode == nil
             or not JokCombatBranch.nodeReady(childNode, player, child) then
             log("[branch] " .. JokCombatBranch.path
@@ -4220,14 +4263,15 @@ function JokCombatBranch.update(player, buttons, crossPressed,
     end
 
     local root = JokCombatBranch.rootPath(player)
-    local node = root ~= nil and JokCombatBranch.nodes[root] or nil
+    local node = JokCombatBranch.nodeForPath(root)
     if node == nil then return false end
     if not JokCombatBranch.nodeReady(node, player, root) then
         log("[branch] " .. root .. " left native: no compatible "
             .. (player.airborne and "airborne" or "ground") .. " action.")
         return false
     end
-    JokCombatBranch.airFamily = player.airborne and root == "XXTT"
+    JokCombatBranch.airFamily = player.airborne
+        and root == JokCombatBranch.airFinisherPath
     if root == "T" then return JokCombatBranch.execute(player, root) end
     local consumed = JokCombatBranch.queue(player, root)
     if not JokCombatBranch.active then JokCombatBranch.airFamily = false end
@@ -4648,8 +4692,8 @@ function _OnInit()
     log("native Ripple Drive/Stun Impact/Gravity Break/Zantetsuken "
         .. "selectors ready.")
     log("Action Ability context ready: Hurricane Blast is callable on ground "
-        .. "and in air; airborne family is Hurricane Blast -> Aerial Sweep "
-        .. "terminal, with native routing and fake-ground disabled.")
+        .. "and in air; airborne family is native CE -> Hurricane Blast -> "
+        .. "Aerial Sweep terminal, with fake-ground disabled.")
     if staleSyntheticAttack then
         log("cleared stale synthetic Attack flags during reload.")
     end

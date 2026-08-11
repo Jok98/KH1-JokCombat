@@ -1,6 +1,6 @@
 # JokCombat — mappa combo Pirate A / Y
 
-Stato: **ACTION TERRA 11/11 + ACTION ARIA NATIVE 2/2 IN v0.10.3; MAGIE IN PROVA; LIMIT PARCHEGGIATI**
+Stato: **ACTION TERRA 11/11 + FINISHER CE + ACTION ARIA NATIVE 2/2 IN v0.10.5; MAGIE IN PROVA; LIMIT PARCHEGGIATI**
 
 Ambito: KH1 Final Mix, Steam Global, Sora
 Input abbreviati: `A` = Croce, `Y` = Triangolo
@@ -69,11 +69,12 @@ dover prima eseguire Aerial Sweep.
 
 In aria questa è l'unica famiglia Action e può iniziare dopo qualunque colpo
 intermedio della combo: `A Y`, `A A Y`, `A A A Y` e le posizioni aggiunte da Air
-Combo Plus eseguono tutte Hurricane Blast; il successivo `Y` esegue Aerial Sweep
-come chiusura discendente. La v0.10.3 realizza l'ordine contestuale riusando prima
-il nodo canonico `XXTT` e poi `XXT`, senza duplicare abilità e senza cambiare la
-C3 terrestre. Ripple Drive resta ground-only e non viene proposta dalla Guide
-aerea. Il finisher `CE` non viene interrotto.
+Combo Plus eseguono tutte la finisher aerea nativa `CE`. Gli input `Y` prima del
+tempo `20` vengono scartati; una nuova pressione valida esegue Hurricane Blast e
+il successivo `Y` esegue Aerial Sweep come chiusura discendente. La v0.10.5
+realizza l'ordine contestuale con il nodo virtuale `AIR_CE`, poi il canonico
+`XXTT` e infine `XXT`, senza duplicare abilità né cambiare la C3 terrestre.
+Ripple Drive resta ground-only e non viene proposta dalla Guide aerea.
 
 ### C4 e C5
 

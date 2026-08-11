@@ -145,7 +145,7 @@ def main() -> None:
     assert "branchActionAbilities = true" in SOURCE
     assert "branchMagic = true" in SOURCE
     assert "branchLimits = false" in SOURCE
-    assert 'VERSION = "v0.10.3"' in SOURCE
+    assert 'VERSION = "v0.10.5"' in SOURCE
     slot_start = SOURCE.index("local ACTION_SLOTS = {")
     slot_end = SOURCE.index("local ACTION_SLOT_BY_ID = {}", slot_start)
     slot_source = SOURCE[slot_start:slot_end]
@@ -159,7 +159,7 @@ def main() -> None:
     assert 'slot = ACTION_SLOT_BY_ID.r2_cross' in SOURCE
     assert 'return string.rep("X", position) .. "T"' in SOURCE
     assert 'if isAirNormalContext(player) then' in SOURCE
-    assert 'return "XXTT"' in SOURCE
+    assert "return JokCombatBranch.airFinisherPath" in SOURCE
     assert "Every intermediate native aerial hit aliases" in SOURCE
     assert re.search(
         r'id = "hurricane_blast", name = "Hurricane Blast", context = "both"',
@@ -202,16 +202,27 @@ def main() -> None:
     native_air_guards = (
         "function JokCombatBranch.nodeReady",
         "return action ~= nil and actionMatchesContext(action, player)",
+        'airFinisherPath = "AIR_CE"',
+        'kind = "air_finisher"',
+        'name = "Aerial Finisher"',
+        "animation = 0xCE",
+        "function JokCombatBranch.nodeForPath",
+        "player ~= nil and player.airborne and airRouteAvailable",
+        "[0xCE] = { open = 20.0, release = 20.0 }",
         "function JokCombatBranch.triangleChild",
+        'if path == JokCombatBranch.airFinisherPath then return "XXTT" end',
         'if path == "XXTT" then return "XXT" end',
         'if path == "XXT" then return nil end',
-        'JokCombatBranch.airFamily = player.airborne and root == "XXTT"',
+        "local node = JokCombatBranch.nodeForPath(path)",
+        "local node = JokCombatBranch.nodeForPath(root)",
+        "root == JokCombatBranch.airFinisherPath",
         "node, false, player, JokCombatBranch.path, true",
         "JokCombatBranch.nodeReady(node, player, root)",
         "JokCombatBranch.nodeReady(childNode, player, child)",
+        "Aerial Finisher physical continuation ignored before",
         "Hurricane Blast is callable on ground",
-        "and in air; airborne family is Hurricane Blast -> Aerial Sweep",
-        "terminal, with native routing",
+        "and in air; airborne family is native CE -> Hurricane Blast ->",
+        "Aerial Sweep terminal",
         "fake-ground disabled",
     )
     for guard in native_air_guards:
@@ -219,6 +230,7 @@ def main() -> None:
     assert "airBridge" not in catalog_source
     assert "airGroundActionBridge" not in SOURCE
     assert "leftStickInput" not in SOURCE
+    assert 'id = "aerial_finisher"' not in catalog_source
     guide_guards = (
         "comboGuide = true",
         "function JokCombatBranch.guideEntries",
