@@ -1,13 +1,14 @@
 LUAGUI_NAME = "JokCombat Combat Prototype"
 LUAGUI_AUTH = "Jok; Critical Mix reference by Xendra / KSX"
-LUAGUI_DESC = "Native Cross combo, Pirate-style Y Action/magic families, configurable loadout and universal defense."
+LUAGUI_DESC = "Native Cross combo, Pirate-style Y Action/Limit families, configurable loadout and universal defense."
 
--- JokCombat v0.10.6 prototype for the current Steam Global executable.
+-- JokCombat v0.11.0 prototype for the current Steam Global executable.
 -- Critical Mix was used as an authorized technical reference. This script is
 -- intentionally limited to combat/input state and does not persist changes to
 -- story flags, rewards, inventory, AP, levels, worlds, chests, or synthesis.
--- A combo cast borrows save-backed magic/shortcut bytes only transiently and
--- restores them conditionally before normal play resumes.
+-- Sonic Blade is exposed through KH1's native Reaction/Limit dispatcher. Its
+-- MP cost and dispatcher bytes are borrowed only while the combo selector is
+-- owned, then restored conditionally before normal play resumes.
 
 local CONFIG = {
     enabled = true,
@@ -23,10 +24,13 @@ local CONFIG = {
     -- family. The eleven validated Action Ability slots are active and every
     -- named move ends in Triangle; Cross remains a physical continuation.
     -- The failed reverse-magic adapter is retired: normal menu/R1 magic remains
-    -- entirely native. Five unique Limit leaves stay mapped but parked until
-    -- their complete Steam Reaction dispatchers are validated independently.
+    -- entirely native. Sonic Blade owns the first validated native Reaction
+    -- adapter; the other four unique Limit leaves remain parked.
     branchCombos = true,
     branchActionAbilities = true,
+    -- First validated native Limit adapter. Y A A A pre-arms the native
+    -- Sonic Blade Reaction; the final Y is consumed by KH1 itself.
+    branchSonicBlade = true,
     branchLimits = false,
     branchInputTimeoutFrames = 150,
 
@@ -96,7 +100,7 @@ local CONFIG = {
 
 local EXPECTED_GAME_ID = 0xAF71841E
 local FINGERPRINT = 0x7265737563697065 -- "epicures", little endian
-local VERSION = "v0.10.6"
+local VERSION = "v0.11.0"
 
 local ADDRESS = {
     fingerprint = 0x3B2271,
@@ -127,13 +131,28 @@ local ADDRESS = {
     triggerMenu2 = 0x232DDC4,
     defenseAbilityFlags = 0x2D5EC10,
 
-    -- Migration-only native magic fields. v0.10.6 never writes them during
+    -- Migration-only native magic fields. v0.10.6+ never writes them during
     -- gameplay; they are retained solely to restore a stale older cast.
     magicLevelBase = 0x2DE97E2,
     nativeShortcutTriangle = 0x2DE9B94,
 
     -- Migration-only reload journal written by v0.9.1-v0.10.5.
+    -- v0.11.0 reuses the same reserved block with a distinct Sonic signature;
+    -- the legacy reader ignores it and the Limit reader restores it next.
     magicRecovery = 0x2DB79B0,
+
+    -- Native Sonic Blade adapter. The Reaction-command global has a regional
+    -- Steam shift of +0x3380; its two writers and enable masks have a code
+    -- shift of +0x47D0. Their exact bytes were verified against the supported
+    -- executable before this adapter was enabled. The Limit cost belongs to
+    -- the high data tables and uses the separately validated +0x3980 shift.
+    sonicBladeCost = 0x2D22E8C,
+    reactionCommandId = 0x528917,
+    reactionEnableFlag = 0x294333,
+    reactionEnableFlag2 = 0x29433F,
+    reactionWriter = 0x294304,
+    reactionWriter2 = 0x29492E,
+    world = 0x234045C,
 
     -- Steam ports of Critical Mix's transient combo byte and Sora's active
     -- ground-combo length. These do not point to the save file.
@@ -1922,6 +1941,10 @@ local function updateActionRoutes(player)
 end
 
 local function restoreAllPatches()
+    if JokCombatSonicBlade ~= nil
+        and JokCombatSonicBlade.restore ~= nil then
+        JokCombatSonicBlade.restore("patch restore", true)
+    end
     if JokCombatBranch ~= nil and JokCombatBranch.reset ~= nil then
         JokCombatBranch.reset("patch restore", true, true)
     end
@@ -3171,13 +3194,383 @@ function LegacyMagicRecovery.recoverStale()
     return true
 end
 
+-- Sonic Blade is the first Limit exposed by a Pirate combo. Unlike the
+-- retired magic experiment, this adapter never imitates the animation: it
+-- publishes the native Reaction ID before the final Y and lets KH1 own target
+-- selection, movement, hitboxes, damage and every Sonic follow-up.
+--
+-- Keep the table global to avoid Lua 5.3's 200-local chunk limit. Every write
+-- is journaled first and restored only while the destination still contains
+-- JokCombat's exact owned value.
+JokCombatSonicBlade = {
+    reactionId = 0x004B,
+    recoverySignature = 0x003130434E534B4A, -- "JKSNC01\0"
+    recoveryMarker = 0xB7,
+    timeoutFrames = 180,
+    selectionGraceFrames = 20,
+    limitExitGraceFrames = 12,
+    limitTimeoutFrames = 3600,
+    writerOriginal = { 0xC6, 0x05, 0x0C, 0x46, 0x29, 0x00, 0x42 },
+    writer2Original = { 0xC6, 0x05, 0xE2, 0x3F, 0x29, 0x00, 0x00 },
+    writerOwned = { 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90 },
+    available = false,
+    armed = false,
+    frames = 0,
+    selectionFrames = 0,
+    activationFrames = 0,
+    activationObserved = false,
+    selectorRestored = false,
+}
+
+function JokCombatSonicBlade.bytesMatch(address, expected)
+    for index = 1, #expected do
+        if ReadByte(address + index - 1) ~= expected[index] then
+            return false
+        end
+    end
+    return true
+end
+
+function JokCombatSonicBlade.writeIfOwned(address, owned, original)
+    if not JokCombatSonicBlade.bytesMatch(address, owned) then return false end
+    WriteArray(address, original)
+    return JokCombatSonicBlade.bytesMatch(address, original)
+end
+
+function JokCombatSonicBlade.clearJournal()
+    WriteLong(ADDRESS.magicRecovery, 0)
+end
+
+function JokCombatSonicBlade.journalValid()
+    return ReadLong(ADDRESS.magicRecovery)
+            == JokCombatSonicBlade.recoverySignature
+        and ReadByte(ADDRESS.magicRecovery + 0x08)
+            == JokCombatSonicBlade.recoveryMarker
+        and ReadByte(ADDRESS.magicRecovery + 0x0E) == 0x5A
+end
+
+function JokCombatSonicBlade.publishJournal(costOriginal, reactionOriginal)
+    local journal = ADDRESS.magicRecovery
+    -- Signature last: an interrupted publication cannot authorize recovery
+    -- from partially written snapshot fields.
+    WriteLong(journal, 0)
+    WriteByte(journal + 0x08, JokCombatSonicBlade.recoveryMarker)
+    WriteByte(journal + 0x09, 0x01)
+    WriteShort(journal + 0x0A, costOriginal)
+    WriteShort(journal + 0x0C, reactionOriginal)
+    WriteByte(journal + 0x0E, 0x5A)
+    WriteLong(journal, JokCombatSonicBlade.recoverySignature)
+    return JokCombatSonicBlade.journalValid()
+        and ReadShort(journal + 0x0A) == costOriginal
+        and ReadShort(journal + 0x0C) == reactionOriginal
+end
+
+function JokCombatSonicBlade.restore(reason, quiet)
+    local journal = ADDRESS.magicRecovery
+    local ownsJournal = JokCombatSonicBlade.journalValid()
+    local restored = 0
+    if ownsJournal then
+        local costOriginal = ReadShort(journal + 0x0A)
+        local reactionOriginal = ReadShort(journal + 0x0C)
+        if JokCombatSonicBlade.writeIfOwned(
+                ADDRESS.reactionWriter,
+                JokCombatSonicBlade.writerOwned,
+                JokCombatSonicBlade.writerOriginal) then
+            restored = restored + 1
+        end
+        if JokCombatSonicBlade.writeIfOwned(
+                ADDRESS.reactionWriter2,
+                JokCombatSonicBlade.writerOwned,
+                JokCombatSonicBlade.writer2Original) then
+            restored = restored + 1
+        end
+        if ReadByte(ADDRESS.reactionEnableFlag) == 0xF2 then
+            WriteByte(ADDRESS.reactionEnableFlag, 0xFB)
+            restored = restored + 1
+        end
+        if ReadByte(ADDRESS.reactionEnableFlag2) == 0xF2 then
+            WriteByte(ADDRESS.reactionEnableFlag2, 0xFB)
+            restored = restored + 1
+        end
+        if ReadShort(ADDRESS.reactionCommandId)
+                == JokCombatSonicBlade.reactionId then
+            WriteShort(ADDRESS.reactionCommandId, reactionOriginal)
+            restored = restored + 1
+        end
+        if ReadShort(ADDRESS.sonicBladeCost) == 0 then
+            WriteShort(ADDRESS.sonicBladeCost, costOriginal)
+            restored = restored + 1
+        end
+        JokCombatSonicBlade.clearJournal()
+    end
+    local wasArmed = JokCombatSonicBlade.armed or ownsJournal
+    JokCombatSonicBlade.armed = false
+    JokCombatSonicBlade.frames = 0
+    JokCombatSonicBlade.selectionFrames = 0
+    JokCombatSonicBlade.activationFrames = 0
+    JokCombatSonicBlade.activationObserved = false
+    JokCombatSonicBlade.selectorRestored = false
+    if wasArmed and not quiet then
+        log(string.format(
+            "[limit:sonic] native selector restored (%s; %d owned fields).",
+            reason or "closed", restored))
+    end
+    return ownsJournal
+end
+
+function JokCombatSonicBlade.recoverStale()
+    if ReadLong(ADDRESS.magicRecovery)
+            ~= JokCombatSonicBlade.recoverySignature then
+        return false
+    end
+    if not JokCombatSonicBlade.journalValid() then
+        ConsolePrint("[JokCombat:limit:sonic:fault] recovery journal is "
+            .. "incomplete; Sonic Blade disabled without guessing originals.")
+        return false
+    end
+    JokCombatSonicBlade.restore("F1/reload recovery")
+    return true
+end
+
+function JokCombatSonicBlade.dispatcherCanonical()
+    return ReadByte(ADDRESS.reactionEnableFlag) == 0xFB
+        and ReadByte(ADDRESS.reactionEnableFlag2) == 0xFB
+        and JokCombatSonicBlade.bytesMatch(
+            ADDRESS.reactionWriter, JokCombatSonicBlade.writerOriginal)
+        and JokCombatSonicBlade.bytesMatch(
+            ADDRESS.reactionWriter2, JokCombatSonicBlade.writer2Original)
+end
+
+function JokCombatSonicBlade.initialize()
+    JokCombatSonicBlade.available = false
+    JokCombatSonicBlade.armed = false
+    JokCombatSonicBlade.recoverStale()
+    if ReadLong(ADDRESS.magicRecovery) ~= 0 then
+        ConsolePrint("[JokCombat:limit:sonic] recovery block is occupied; "
+            .. "native Sonic Blade adapter disabled.")
+        return false
+    end
+    if not JokCombatSonicBlade.dispatcherCanonical() then
+        ConsolePrint("[JokCombat:limit:sonic] Steam dispatcher fingerprint "
+            .. "mismatch; adapter disabled without writing code.")
+        return false
+    end
+    local cost = ReadShort(ADDRESS.sonicBladeCost)
+    if cost < 0 or cost > 1000 then
+        ConsolePrint(string.format(
+            "[JokCombat:limit:sonic] unexpected MP cost %d; adapter disabled.",
+            cost))
+        return false
+    end
+    JokCombatSonicBlade.available = CONFIG.branchSonicBlade
+    return JokCombatSonicBlade.available
+end
+
+function JokCombatSonicBlade.contextReady(player)
+    return JokCombatSonicBlade.available and player ~= nil
+        and not player.airborne and ReadByte(ADDRESS.world) ~= 0x09
+end
+
+function JokCombatSonicBlade.arm(player)
+    if JokCombatSonicBlade.armed then return true end
+    if not JokCombatSonicBlade.contextReady(player)
+        or not HUD.nativeRootSelectionAvailable()
+        or ReadShort(ADDRESS.reactionCommandId) ~= 0
+        or ReadLong(ADDRESS.magicRecovery) ~= 0
+        or not JokCombatSonicBlade.dispatcherCanonical() then
+        return false
+    end
+
+    local costOriginal = ReadShort(ADDRESS.sonicBladeCost)
+    if costOriginal < 0 or costOriginal > 1000
+        or not JokCombatSonicBlade.publishJournal(
+            costOriginal, ReadShort(ADDRESS.reactionCommandId)) then
+        ConsolePrint("[JokCombat:limit:sonic] selector journal failed; "
+            .. "no dispatcher field was changed.")
+        return false
+    end
+
+    WriteShort(ADDRESS.sonicBladeCost, 0)
+    WriteArray(ADDRESS.reactionWriter, JokCombatSonicBlade.writerOwned)
+    WriteArray(ADDRESS.reactionWriter2, JokCombatSonicBlade.writerOwned)
+    WriteByte(ADDRESS.reactionEnableFlag, 0xF2)
+    WriteByte(ADDRESS.reactionEnableFlag2, 0xF2)
+    WriteShort(ADDRESS.reactionCommandId, JokCombatSonicBlade.reactionId)
+
+    local verified = ReadShort(ADDRESS.sonicBladeCost) == 0
+        and ReadShort(ADDRESS.reactionCommandId)
+            == JokCombatSonicBlade.reactionId
+        and ReadByte(ADDRESS.reactionEnableFlag) == 0xF2
+        and ReadByte(ADDRESS.reactionEnableFlag2) == 0xF2
+        and JokCombatSonicBlade.bytesMatch(
+            ADDRESS.reactionWriter, JokCombatSonicBlade.writerOwned)
+        and JokCombatSonicBlade.bytesMatch(
+            ADDRESS.reactionWriter2, JokCombatSonicBlade.writerOwned)
+    if not verified then
+        JokCombatSonicBlade.restore("arm verification failed")
+        JokCombatSonicBlade.available = false
+        return false
+    end
+
+    JokCombatSonicBlade.armed = true
+    JokCombatSonicBlade.frames = JokCombatSonicBlade.timeoutFrames
+    JokCombatSonicBlade.selectionFrames = 0
+    JokCombatSonicBlade.activationFrames = 0
+    JokCombatSonicBlade.activationObserved = false
+    JokCombatSonicBlade.selectorRestored = false
+    log("[limit:sonic] Y A A A accepted; native Sonic Blade pre-armed "
+        .. "at 0 MP. Final Y belongs to KH1.")
+    return true
+end
+
+function JokCombatSonicBlade.activeAnimation(player)
+    if player == nil then return false end
+    local nativeLimitState = ReadByte(
+        player.pointer + PLAYER.airborneState, true) >= 0x20
+    local sonicAnimation = player.animation >= 0xC8
+        and player.animation <= 0xCA and player.secondary <= 0x02
+    return nativeLimitState or sonicAnimation
+end
+
+function JokCombatSonicBlade.restoreSelectorOwned()
+    if JokCombatSonicBlade.selectorRestored
+        or not JokCombatSonicBlade.journalValid() then return 0 end
+    local restored = 0
+    local reactionOriginal = ReadShort(ADDRESS.magicRecovery + 0x0C)
+    if JokCombatSonicBlade.writeIfOwned(
+            ADDRESS.reactionWriter,
+            JokCombatSonicBlade.writerOwned,
+            JokCombatSonicBlade.writerOriginal) then
+        restored = restored + 1
+    end
+    if JokCombatSonicBlade.writeIfOwned(
+            ADDRESS.reactionWriter2,
+            JokCombatSonicBlade.writerOwned,
+            JokCombatSonicBlade.writer2Original) then
+        restored = restored + 1
+    end
+    if ReadByte(ADDRESS.reactionEnableFlag) == 0xF2 then
+        WriteByte(ADDRESS.reactionEnableFlag, 0xFB)
+        restored = restored + 1
+    end
+    if ReadByte(ADDRESS.reactionEnableFlag2) == 0xF2 then
+        WriteByte(ADDRESS.reactionEnableFlag2, 0xFB)
+        restored = restored + 1
+    end
+    if ReadShort(ADDRESS.reactionCommandId)
+            == JokCombatSonicBlade.reactionId then
+        WriteShort(ADDRESS.reactionCommandId, reactionOriginal)
+        restored = restored + 1
+    end
+    JokCombatSonicBlade.selectorRestored = true
+    log(string.format(
+        "[limit:sonic] Reaction selector released; MP cost remains 0 "
+        .. "for the native Limit (%d fields restored).", restored))
+    return restored
+end
+
+function JokCombatSonicBlade.finish(reason)
+    JokCombatSonicBlade.restore(reason)
+    if JokCombatBranch ~= nil and JokCombatBranch.active then
+        JokCombatBranch.reset(reason, true)
+    end
+end
+
+function JokCombatSonicBlade.update(player, buttons)
+    if not JokCombatSonicBlade.armed then return false end
+    if player == nil then
+        JokCombatSonicBlade.finish("player unavailable")
+        return false
+    end
+
+    local sonicActive = JokCombatSonicBlade.activeAnimation(player)
+    local nonTriangleFace = BUTTON.CROSS | BUTTON.CIRCLE | BUTTON.SQUARE
+    local nonTriangleStarted = (buttons & nonTriangleFace) ~= 0
+        and (lastButtons & nonTriangleFace) == 0
+    local modifierStarted = (buttons & (BUTTON.L1 | BUTTON.R1
+            | BUTTON.L2 | BUTTON.R2)) ~= 0
+        and (lastButtons & (BUTTON.L1 | BUTTON.R1
+            | BUTTON.L2 | BUTTON.R2)) == 0
+    if not JokCombatSonicBlade.activationObserved
+        and ((not sonicActive and not JokCombatSonicBlade.contextReady(player))
+            or nonTriangleStarted or modifierStarted) then
+        JokCombatSonicBlade.finish("combo selector cancelled")
+        return false
+    end
+
+    local triangleStarted = (buttons & BUTTON.TRIANGLE) ~= 0
+        and (lastButtons & BUTTON.TRIANGLE) == 0
+    if triangleStarted then
+        JokCombatSonicBlade.selectionFrames =
+            JokCombatSonicBlade.selectionGraceFrames
+        log("[limit:sonic] final Y released to the native Reaction selector.")
+    end
+
+    if sonicActive then
+        if not JokCombatSonicBlade.activationObserved then
+            JokCombatSonicBlade.activationObserved = true
+            JokCombatSonicBlade.frames =
+                JokCombatSonicBlade.limitTimeoutFrames
+            JokCombatSonicBlade.restoreSelectorOwned()
+            -- The Reaction has now entered KH1's Limit state. Close only the
+            -- Pirate prefix so Cross/Triangle are no longer suppressed; the
+            -- Sonic adapter remains alive solely to keep this Limit at 0 MP.
+            if JokCombatBranch ~= nil and JokCombatBranch.active then
+                JokCombatBranch.reset("native Sonic Blade owns follow-ups", true)
+            end
+            log(string.format(
+                "[limit:sonic] native Sonic Blade entered: anim=0x%02X "
+                .. "secondary=0x%02X.", player.animation, player.secondary))
+        end
+        JokCombatSonicBlade.activationFrames =
+            JokCombatSonicBlade.limitExitGraceFrames
+        JokCombatSonicBlade.frames = JokCombatSonicBlade.frames - 1
+        if JokCombatSonicBlade.frames <= 0 then
+            JokCombatSonicBlade.finish("native Limit safety timeout")
+            return false
+        end
+        return true
+    end
+
+
+    if JokCombatSonicBlade.activationObserved then
+        JokCombatSonicBlade.frames = JokCombatSonicBlade.frames - 1
+        JokCombatSonicBlade.activationFrames =
+            JokCombatSonicBlade.activationFrames - 1
+        if JokCombatSonicBlade.frames <= 0 then
+            JokCombatSonicBlade.finish("native Limit safety timeout")
+        elseif JokCombatSonicBlade.activationFrames <= 0 then
+            JokCombatSonicBlade.finish("native Limit ended")
+        end
+        return true
+    end
+
+    local reaction = ReadShort(ADDRESS.reactionCommandId)
+    if reaction ~= JokCombatSonicBlade.reactionId then
+        if JokCombatSonicBlade.selectionFrames > 0 then
+            JokCombatSonicBlade.selectionFrames =
+                JokCombatSonicBlade.selectionFrames - 1
+        else
+            JokCombatSonicBlade.finish("native selector closed")
+            return false
+        end
+    end
+
+    JokCombatSonicBlade.frames = JokCombatSonicBlade.frames - 1
+    if JokCombatSonicBlade.frames <= 0 then
+        JokCombatSonicBlade.finish("selector timeout")
+        return false
+    end
+    return true
+end
+
 -- Pirate-style modifier-free X/T families. Keep this as one global table:
 -- Lua 5.3 limits a chunk to 200 local variables and this prototype already
 -- carries the validated loadout, HUD and route state in the same chunk.
 -- Every named move ends in T: X is always a physical/light continuation and
--- can never unexpectedly dispatch an Action Ability. Seven magic reverse
-    -- extensions are reserved only for the five native Limits. The failed magic
-    -- adapter and experimental Chain Attack leaf are no longer part of the map.
+-- can never unexpectedly dispatch an Action Ability. Reverse extensions are
+-- reserved only for the five native Limits. Sonic Blade is the
+-- first active adapter; failed magic and experimental Chain Attack are absent.
 JokCombatBranch = {
     nodes = {
         -- Strong combo: Y Y Y.
@@ -3274,7 +3667,11 @@ function JokCombatBranch.kindReady(node)
     if node.kind == "action" or node.kind == "air_finisher" then
         return CONFIG.branchActionAbilities
     end
-    if node.kind == "limit" then return CONFIG.branchLimits end
+    if node.kind == "limit" then
+        return node.id == "sonic_blade" and CONFIG.branchSonicBlade
+            and JokCombatSonicBlade ~= nil
+            and JokCombatSonicBlade.available
+    end
     return false
 end
 
@@ -3282,6 +3679,10 @@ function JokCombatBranch.nodeReady(node, player, path)
     if not JokCombatBranch.kindReady(node) then return false end
     if node.kind == "air_finisher" then
         return player ~= nil and player.airborne and airRouteAvailable
+    end
+    if node.kind == "limit" then
+        return node.id == "sonic_blade"
+            and JokCombatSonicBlade.contextReady(player)
     end
     if player == nil or node.kind ~= "action" then return true end
     local action = ACTION_BY_ID[node.id]
@@ -3479,6 +3880,12 @@ function JokCombatBranch.observePhysicalLink(player, acceptedKind)
     log(string.format(
         "[branch] reverse prefix %s accepted through physical A: anim=0x%02X.",
         prefix, player.animation))
+    if prefix == "TXXX" then
+        if not JokCombatSonicBlade.arm(player) then
+            log("[limit:sonic] native pre-arm unavailable; final Y remains "
+                .. "parked for this sequence.")
+        end
+    end
     return true
 end
 
@@ -3538,6 +3945,10 @@ function JokCombatBranch.execute(player, path)
     end
     if node.kind == "action" or node.kind == "air_finisher" then
         return JokCombatBranch.dispatch(player, path)
+    end
+    if node.kind == "limit" and node.id == "sonic_blade" then
+        if JokCombatSonicBlade.arm(player) then return true end
+        return JokCombatBranch.fallback(player, path)
     end
     return JokCombatBranch.fallback(player, path)
 end
@@ -3784,6 +4195,15 @@ function JokCombatBranch.update(player, buttons, crossPressed,
         end
         return false
     end
+    -- TXXX pre-arms the real Sonic Blade Reaction one input early. Do not
+    -- consume or remap its final Y: KH1 must receive that physical edge to
+    -- enter the complete Limit dispatcher and native follow-up sequence.
+    if JokCombatSonicBlade.armed then
+        if trianglePressed then
+            log("[branch] TXXXT final Y delegated to native Sonic Blade.")
+        end
+        return false
+    end
     if not HUD.nativeRootSelectionAvailable() then
         if JokCombatBranch.active then
             JokCombatBranch.reset("native command took priority")
@@ -4011,6 +4431,7 @@ local function updateModifierFaceRouting(buttons)
     local r2Held = (buttons & BUTTON.R2) ~= 0
     local actionModifierHeld = r2Held and not l2Held
     local reactionActive = not HUD.nativeRootSelectionAvailable()
+        or (JokCombatSonicBlade ~= nil and JokCombatSonicBlade.armed)
     local branchOwnsTriangle = CONFIG.branchCombos
         and JokCombatBranch ~= nil and JokCombatBranch.active
     return setByte("triangleControlMap", ADDRESS.triangleControlMap,
@@ -4185,6 +4606,7 @@ function _OnInit()
     -- Recover before any later validation can return early. Every field is
     -- restored only if it still contains JokCombat's owned patched value.
     LegacyMagicRecovery.recoverStale()
+    local sonicBladeReady = JokCombatSonicBlade.initialize()
 
     local staleSyntheticAttack = ReadInt(ADDRESS.triggerMenu1) ~= 0
         or ReadInt(ADDRESS.triggerMenu2) ~= 0
@@ -4266,10 +4688,13 @@ function _OnInit()
         validActionRecordCount, #ACTION_CATALOG - 1))
     log(string.format("Pirate Y map %s: %d unique moves, "
         .. "%d Action Ability slots enabled; combo magic retired, "
-        .. "five Limits parked.",
+        .. "Sonic Blade native, four Limits parked.",
         branchValid and "ready" or "disabled",
         branchNodeCount, branchActionCount))
     log("legacy combo-magic recovery ready; no combo path can cast magic.")
+    log("native Sonic Blade combo " .. (sonicBladeReady and
+        "ready: Y A A A Y, zero MP only while the selector is owned."
+        or "unavailable: Steam dispatcher validation failed."))
     log("direct Action Loadout ready: hold exact R2; "
         .. "D-pad Up/Down selects, Left/Right changes, release saves.")
     log("native editor cursor delegation ready: Up/Down uses KH1's complete "
@@ -4341,6 +4766,7 @@ function _OnFrame()
 
     local buttons = ReadByte(ADDRESS.rawButtons)
     local dpad = ReadByte(ADDRESS.dpadButtons)
+    JokCombatSonicBlade.update(player, buttons)
     local controlDpadOwned, controlConsumed =
         HUD.updateOverlayControls(buttons, dpad)
     local directDpadOwned = HUD.updateDirectEditor(

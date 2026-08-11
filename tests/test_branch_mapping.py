@@ -136,8 +136,9 @@ def main() -> None:
 
     assert "branchActionAbilities = true" in SOURCE
     assert "branchMagic" not in SOURCE
+    assert "branchSonicBlade = true" in SOURCE
     assert "branchLimits = false" in SOURCE
-    assert 'VERSION = "v0.10.6"' in SOURCE
+    assert 'VERSION = "v0.11.0"' in SOURCE
     slot_start = SOURCE.index("local ACTION_SLOTS = {")
     slot_end = SOURCE.index("local ACTION_SLOT_BY_ID = {}", slot_start)
     slot_source = SOURCE[slot_start:slot_end]
@@ -274,9 +275,51 @@ def main() -> None:
     assert "HUD.boxesClaimable(HUD.boxCount)" in SOURCE
     assert "notification buffers unavailable" not in SOURCE
     assert '"[A] Continua vanilla"' not in SOURCE
+
+    sonic_guards = (
+        "JokCombatSonicBlade = {",
+        "reactionId = 0x004B",
+        "recoverySignature = 0x003130434E534B4A",
+        "sonicBladeCost = 0x2D22E8C",
+        "reactionCommandId = 0x528917",
+        "reactionEnableFlag = 0x294333",
+        "reactionEnableFlag2 = 0x29433F",
+        "reactionWriter = 0x294304",
+        "reactionWriter2 = 0x29492E",
+        "writerOriginal = { 0xC6, 0x05, 0x0C, 0x46, 0x29, 0x00, 0x42 }",
+        "writer2Original = { 0xC6, 0x05, 0xE2, 0x3F, 0x29, 0x00, 0x00 }",
+        "function JokCombatSonicBlade.publishJournal",
+        "function JokCombatSonicBlade.recoverStale",
+        "function JokCombatSonicBlade.dispatcherCanonical",
+        "function JokCombatSonicBlade.arm",
+        "function JokCombatSonicBlade.restoreSelectorOwned",
+        "function JokCombatSonicBlade.update",
+        "limitExitGraceFrames = 12",
+        "limitTimeoutFrames = 3600",
+        "MP cost remains 0",
+        "native Sonic Blade owns follow-ups",
+        "native Limit ended",
+        "WriteShort(ADDRESS.sonicBladeCost, 0)",
+        "WriteShort(ADDRESS.reactionCommandId, JokCombatSonicBlade.reactionId)",
+        'if prefix == "TXXX" then',
+        'node.id == "sonic_blade" and CONFIG.branchSonicBlade',
+        'node.id == "sonic_blade"',
+        "TXXXT final Y delegated to native Sonic Blade",
+        "Final Y belongs to KH1",
+        "JokCombatSonicBlade.update(player, buttons)",
+        "JokCombatSonicBlade.restore(\"patch restore\", true)",
+        "Sonic Blade native, four Limits parked",
+    )
+    for guard in sonic_guards:
+        assert guard in SOURCE, f"missing native Sonic Blade guard: {guard}"
+    assert SOURCE.count('node.id == "sonic_blade"') >= 3
+    assert 'node.id == "ars_arcanum" and CONFIG.branchSonicBlade' not in SOURCE
+    assert 'node.id == "strike_raid" and CONFIG.branchSonicBlade' not in SOURCE
+    assert 'node.id == "ragnarok" and CONFIG.branchSonicBlade' not in SOURCE
+    assert 'node.id == "trinity_limit" and CONFIG.branchSonicBlade' not in SOURCE
     print(
         "PASS: 16 unique Y-ended moves; 11/11 Action routes enabled; "
-        "combo magic retired; 5/5 Limits parked"
+        "combo magic retired; Sonic Blade native/free; 4/5 Limits parked"
     )
 
 

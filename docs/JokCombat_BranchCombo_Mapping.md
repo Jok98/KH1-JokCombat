@@ -1,6 +1,6 @@
 # JokCombat — mappa combo Pirate A / Y
 
-Stato: **ACTION TERRA 11/11 + FINISHER CE + ACTION ARIA NATIVE 2/2 IN v0.10.6; MAGIE COMBO RITIRATE; LIMIT 5/5 PARCHEGGIATI**
+Stato: **ACTION TERRA 11/11 + FINISHER CE + ACTION ARIA NATIVE 2/2 IN v0.11.0; MAGIE COMBO RITIRATE; SONIC BLADE NATIVO/GRATUITO; ALTRI LIMIT 4/5 PARCHEGGIATI**
 
 Ambito: KH1 Final Mix, Steam Global, Sora
 Input abbreviati: `A` = Croce, `Y` = Triangolo
@@ -97,7 +97,7 @@ Ripple Drive resta ground-only e non viene proposta dalla Guide aerea.
 Nessuna Action Ability è duplicata e nessuna viene eseguita da `A`. La copertura
 terrestre resta 11/11; la copertura aerea intenzionale è 2/2 record nativi.
 
-## 3. Reverse Limit (ancora riservate)
+## 3. Reverse Limit
 
 La v0.10.6 ritira le sette reverse magiche: il remap dell'ultimo `Y` non
 generava un ingresso reale nel dispatcher Shortcut. Menu e shortcut magiche
@@ -105,21 +105,29 @@ restano vanilla e conservano i propri costi MP. Il codice runtime mantiene
 soltanto il recupero condizionale di un journal eventualmente lasciato dalle
 versioni precedenti; nessuna combo può più scrivere slot, livello o costi magia.
 
-Le cinque sequenze reverse rimaste sono riservate ai Limit. Ogni `A` intermedio
-sarà un vero attacco fisico KH1 e soltanto il `Y` finale potrà consegnare il
-controllo alla Reaction nativa.
+Le cinque sequenze reverse rimaste appartengono ai Limit. Ogni `A` intermedio
+è un vero attacco fisico KH1 e soltanto il `Y` finale può consegnare il
+controllo alla Reaction nativa. La v0.11.0 abilita esclusivamente Sonic Blade:
+dopo `Y A A A`, JokCombat pre-arma la Reaction nativa `0x004B`; l'ultimo `Y`
+resta fisico e viene elaborato da KH1, che conserva bersaglio, movimento,
+hitbox, danno e follow-up del Limit.
 
-| Sequenza riservata | Mossa |
-|---|---|
-| `Y A A A Y` | Sonic Blade |
-| `Y Y A A A Y` | Ars Arcanum |
-| `Y Y Y A A Y` | Strike Raid |
-| `A Y Y Y A A Y` | Ragnarok |
-| `A A Y Y Y A A Y` | Trinity Limit |
+| Sequenza | Mossa | Stato v0.11.0 |
+|---|---|---|
+| `Y A A A Y` | Sonic Blade | **attiva, Reaction nativa, 0 MP nella sola chiamata combo** |
+| `Y Y A A A Y` | Ars Arcanum | parcheggiata |
+| `Y Y Y A A Y` | Strike Raid | parcheggiata |
+| `A Y Y Y A A Y` | Ragnarok | parcheggiata |
+| `A A Y Y Y A A Y` | Trinity Limit | parcheggiata |
 
-Queste cinque assegnazioni restano riserve univoche, non funzionalità dichiarate
-come già giocabili. Saranno abilitate soltanto dopo un collaudo separato del
-dispatcher nativo completo e del costo MP transitorio dei Limit.
+Il costo di Sonic Blade viene portato a zero soltanto tra il pre-arm e la fine
+confermata del Limit. Dopo l'ingresso, i byte del selettore Reaction vengono
+ripristinati subito, mentre il costo resta zero fino all'uscita dallo stato
+Limit. Un journal con firma distinta salva il costo e i byte del dispatcher
+prima di ogni scrittura e consente un ripristino
+condizionale anche con `F1`/reload. Sonic Blade lanciato dal menu conserva quindi
+il costo vanilla. Le altre quattro assegnazioni restano riserve univoche e non
+sono ancora dichiarate giocabili.
 
 ## 4. Combo Guide
 
@@ -149,12 +157,12 @@ Dopo avere eseguito Slapshot, la prima voce già consumata scompare:
 [Y][Y] Blitz
 ```
 
-Dopo Vortex, la v0.10.6 mostra soltanto il seguito Strong attivo:
+Dopo Vortex, la v0.11.0 mostra il seguito Strong e la reverse Sonic Blade:
 
 ```text
 [Y] Stun Impact
 [Y][Y] Gravity Break
--
+[A][A][A][Y] Sonic Blade
 -
 ```
 
@@ -177,8 +185,11 @@ a Guard e la combinazione L2+R2 non seleziona più un gruppo Action Ability.
 - Un `A` durante una famiglia usa il percorso fisico target-free già validato:
   prima rilascia l'azione corrente, poi genera un singolo nuovo edge Attack e
   conserverà il prefisso soltanto quando conduce a un Limit validato.
-- Nessuna combo modifica slot Shortcut, livelli o costi magia. Il journal
-  storico viene letto soltanto a reload e poi cancellato condizionalmente.
+- Nessuna combo modifica slot Shortcut, livelli o costi magia. Sonic Blade
+  prende in prestito soltanto il proprio costo Limit e i byte Reaction, con un
+  journal dedicato e ripristino condizionale dopo attivazione, cancel, timeout,
+  fault, uscita o reload.
 - Se un adapter completo non è disponibile, la mossa riservata non compare
   nella Guide e non viene sostituita da un'altra abilità.
-- I follow-up nativi dei Limit apparterranno al Limit dopo la sua attivazione.
+- I follow-up di Sonic Blade appartengono interamente al Limit nativo dopo la
+  sua attivazione; JokCombat non intercetta gli input interni alla sequenza.

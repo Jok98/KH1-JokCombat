@@ -250,6 +250,14 @@ Air Combo Plus e Combo Master descritto sotto.
 > confermato che il remap di `Y` non entrava nel dispatcher Shortcut nativo. Le
 > magie da menu e `R1` restano vanilla; sopravvive soltanto il recupero
 > condizionale di un eventuale journal lasciato dalle versioni precedenti.
+>
+> **v0.11.0 — Sonic Blade nativo e gratuito in combo:** la reverse
+> `Y A A A Y` è la prima foglia Limit attiva. Dopo il terzo `A`, JokCombat
+> pubblica la Reaction nativa `0x004B`; l'ultimo `Y` rimane fisico e KH1 gestisce
+> bersaglio, movimento, hitbox, danno e follow-up. Il costo Sonic viene portato
+> a zero soltanto durante questa selezione e il Limit nativo, poi ripristinato
+> condizionalmente a fine Limit, cancel, timeout, fault, uscita o `F1`/reload.
+> Ars Arcanum, Strike Raid, Ragnarok e Trinity Limit restano parcheggiati.
 
 La repository contiene tre probe read-only e il primo prototipo combat:
 
@@ -261,18 +269,19 @@ La repository contiene tre probe read-only e il primo prototipo combat:
   faccia e valida gli indirizzi Steam portati prima che il prototipo scriva;
 - `JokCombat_CommandMenuProbe.lua`: confronta in sola lettura controller,
   transizioni e strutture delle quattro righe native del Command Menu;
-- `JokCombat_CombatPrototype.lua`: prototipo v0.10.6 con combo normali delegate
+- `JokCombat_CombatPrototype.lua`: prototipo v0.11.0 con combo normali delegate
   a KH1 e un bridge post-finisher per i cicli infiniti terra/aria, quattro slot
   R2 configurabili, undici Action Ability nelle famiglie Pirate
-  Strong/C2/C3/C4/C5, cinque foglie Limit ancora parcheggiate,
+  Strong/C2/C3/C4/C5, Sonic Blade nativo su `Y A A A Y` e quattro foglie Limit
+  ancora parcheggiate,
   jump-cancel terra -> aria, Guard universale su L2 + Cerchio e Dodge Roll
   fisso su Quadrato;
 - `JokCombat_NativeAbilities.lua`: imposta 99 AP massimi e assegna tramite la
   lista abilita' nativa le quantita' massime vanilla richieste: quattro Combo
   Plus, due Air Combo Plus e un Combo Master, tutte equipaggiate;
 - `docs/JokCombat_BranchCombo_Mapping.md`: mappa Pirate di 16 mosse uniche,
-  con undici Action Ability attive e cinque Limit riservati, senza magie in
-  combo, Chain Attack o Summon;
+  con undici Action Ability e Sonic Blade attivi, quattro Limit riservati e
+  nessuna magia combo, Chain Attack o Summon;
 - `docs/JokCombat_BranchCombo_Mapping_Draft.md`: archivio delle proposte
   precedenti, incluse le matrici scartate perché duplicavano le abilità;
 - `docs/CMix_AnimCancel_AbilityHandler_analysis.md`: analisi tecnica dei primi
@@ -284,7 +293,8 @@ implementati.
 
 Il loadout Action Ability resta runtime-only e non inserisce le undici mosse
 nel salvataggio. Guard e Dodge Roll restano comandi fissi; magie e Limit non
-compaiono ancora nell'editor. Le tre passive combo costituiscono invece una
+compaiono nell'editor. Sonic Blade è accessibile soltanto dalla sua combo
+Pirate e non viene aggiunto alla lista abilità. Le tre passive costituiscono una
 scelta strutturale del moveset e vengono apprese/equipaggiate nativamente.
 
 ## Passive combo native
@@ -360,22 +370,25 @@ pacchetto Critical Mix sono conservati, ma non caricati, nelle directory
 `C:\Users\<utente>\Documents\KH_mod\reference\CriticalMix`. Backup, log e
 copie runtime restano locali e non fanno parte del repository.
 
-Per verificare la v0.10.6, premi `F1` nella console LuaBackend. Il log iniziale
-deve mostrare `v0.10.6`, `Native Abilities v0.3.0 ready`,
+Per verificare la v0.11.0, premi `F1` nella console LuaBackend. Il log iniziale
+deve mostrare `v0.11.0`, `Native Abilities v0.3.0 ready`,
 `ground action route ready`, `aerial action route ready`,
 `complete action records ready: 11/11`
 `native Command Menu overlay + Combo Guide ready` e
 `native Ripple Drive/Stun Impact/Gravity Break/Zantetsuken selectors ready`.
 Deve inoltre comparire
 `Pirate Y map ready: 16 unique moves, 11 Action Ability slots enabled; combo
-magic retired, five Limits parked` e `legacy combo-magic recovery ready` e
+magic retired, Sonic Blade native, four Limits parked`, `native Sonic Blade
+combo ready` e `legacy combo-magic recovery ready` e
 `Combo Guide ready`. Dopo una `A`, il Command Menu deve mostrare
 `[Y] Slapshot`, `[Y][Y] Sliding Dash` e `[Y][Y][Y] Blitz`; dopo due `A` deve
 mostrare Aerial Sweep, Hurricane Blast e Ripple Drive con le stesse profondità
 di `Y`. Dopo Slapshot, la Guide deve aggiornarsi a `[Y] Sliding Dash` e
 `[Y][Y] Blitz`, senza mai proporre una Action Ability su `[A]`.
-Nessuna sequenza deve più registrare `[magic]`, modificare lo slot Shortcut o
-azzerare costi MP. La Guide deve aprirsi anche se i puntatori colore delle
+Nessuna sequenza deve più registrare `[magic]` o modificare lo slot Shortcut.
+Solo il costo del Limit Sonic può essere zero durante la sua finestra posseduta
+e per la durata della sequenza nativa;
+ogni costo magia resta invariato. La Guide deve aprirsi anche se i puntatori colore delle
 notification box non coincidono con il baseline Steam, purché le box non siano
 effettivamente in uso.
 Deve inoltre comparire `native normal combo ownership ready`; durante i colpi
@@ -393,21 +406,17 @@ quest'ordine, prima senza bersaglio e poi contro un nemico:
 - `AAYYY`: due attacchi nativi -> Aerial Sweep -> Hurricane Blast -> Ripple Drive;
 - `AAAY`: Counterattack;
 - `AAAAY`: Zantetsuken;
-- `YAY`: Vortex -> attacco fisico -> Fire;
-- `YAAY`: Vortex -> due attacchi fisici -> Blizzard;
-- `YYAY`: Stun Impact -> attacco fisico -> Thunder;
-- `YYAAY`: Stun Impact -> due attacchi fisici -> Aero;
-- `YYYAY`: Gravity Break -> attacco fisico -> Cure;
-- `AYYYAY`: Blitz -> attacco fisico -> Gravity;
-- `AAYYYAY`: Ripple Drive -> attacco fisico -> Stop.
+- `YAAAY`: Vortex -> tre attacchi fisici -> Sonic Blade nativo.
 
-Ogni passaggio valido registra `[branch] <sequenza> requested` e poi
+Ogni passaggio Action valido registra `[branch] <sequenza> requested` e poi
 `[branch] <sequenza> accepted`. Un input premuto troppo presto deve produrre
 `ignored before prebuffer`; un secondo input durante lo stesso buffer deve
-essere ignorato, non accodato. Le sette reverse magia vanno provate anche con
-MP a zero: devono produrre il cast completo senza diminuire gli MP. Subito
-dopo, una magia lanciata dalla shortcut o dal menu deve tornare a consumare il
-costo vanilla. I nodi Limit non fanno ancora parte del collaudo.
+essere ignorato, non accodato. Per `YAAAY`, il terzo attacco fisico deve
+registrare `native Sonic Blade pre-armed`; l'ultimo `Y` deve registrare
+`delegated to native Sonic Blade` e poi `native Sonic Blade entered`. Verifica
+con MP a zero che il Limit completo parta comunque; terminata la selezione, un
+Sonic Blade vanilla deve conservare il proprio costo. Le altre quattro reverse
+Limit non devono comparire nella Guide né eseguire una mossa sostitutiva.
 
 Tieni `R2` da solo per visualizzare e configurare l'unico gruppo Action. Il
 riepilogo mostra sempre un massimo di quattro righe nel Command Menu originale
