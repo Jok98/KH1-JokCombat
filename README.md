@@ -171,6 +171,53 @@ Air Combo Plus e Combo Master descritto sotto.
 > continuazione con `A` resta implicita. Le reverse con magie e Limit sono già
 > riservate nella mappa, sempre con `Y` finale, ma restano disabilitate finché
 > non avranno dispatcher Steam completi per VFX, costo, bersaglio e follow-up.
+>
+> **Candidato v0.9.1 — reverse magiche native:** i sette percorsi Fire,
+> Blizzard, Thunder, Aero, Cure, Gravity e Stop sono attivi. Ogni `A`
+> intermedio resta un vero attacco fisico e conserva il prefisso soltanto se
+> conduce ancora a una magia; il `Y` finale prende in prestito per un frame lo
+> slot Shortcut nativo e lascia a KH1 animazione terra/aria, grado, bersaglio,
+> VFX, hitbox ed effetto. I tre costi della sola famiglia lanciata vengono
+> azzerati durante il cast combo e ripristinati condizionalmente alla fine:
+> menu e shortcut normali continuano a consumare MP. Un journal separato copre
+> anche F1/reload durante la finestra transitoria. I Limit restano disabilitati.
+>
+> **Collaudo v0.9.2 — Combo Guide corretta, input magico respinto:** la Guide
+> nativa non dipende più dal layout colore delle notification box e il test live
+> conferma `native Command Menu labels active`. Lo stesso test dimostra però che
+> `0x22C9342 = 0x20` non genera un input: quel byte è la mappa del controllo
+> Shortcut e `0x20` la assegna a L2. Senza L2 fisicamente premuto, KH1 termina
+> quindi ancora in `native entry timeout`.
+>
+> **Collaudo v0.9.3 — prearm diretto respinto:** il log conferma che
+> `Shortcut<-physical Y` viene scritto prima dell'ultimo input, ma KH1 non
+> considera `0x04` un selettore valido per il modificatore Shortcut e termina
+> ancora in timeout.
+>
+> **Fix v0.9.4 — due livelli di controllo coordinati:** Critical Mix mostra che
+> `0x20` seleziona il controllo logico L2 come modificatore Shortcut, mentre
+> `0x22C9340` decide quale controllo fisico produce L2. JokCombat prearma quindi
+> `L2<-Y` (`0x04`) insieme a `Shortcut<-L2` (`0x20`) e lascia Y disponibile come
+> selezione della prima casella. Entrambi i byte vengono trasferiti al journal
+> del cast e ripristinati condizionalmente al frame successivo, al cancel, al
+> timeout, al fault o a F1/reload.
+>
+> **Collaudo v0.9.5 — fake-ground ritirato:** il lock intercetta correttamente
+> ogni direzione dello stick, ma il log mostra comunque `D3 -> 0x02/0x06` dopo
+> un solo frame. La causa non è quindi l'input: è la conversione temporanea di
+> Sora in stato terrestre a essere incompatibile con la catena aerea.
+>
+> **Fix v0.9.6 — dispatcher aerei nativi soltanto:** nessuna Action Ability
+> ground-native modifica più `raw70`, quota o stick. La mappa terrestre conserva
+> tutte le undici mosse; in aria il ramo speciale senza duplicati è
+> `A A Y = Aerial Sweep`, seguito da `Y = Hurricane Blast`. Ogni altra posizione
+> `Y` resta nativa e la Combo Guide non pubblicizza mosse incompatibili.
+>
+> **Fix v0.9.7 — ingresso aereo da ogni colpo intermedio:** dopo qualunque `A`
+> della stringa aerea `CC/CD`, `Y` apre la stessa famiglia nativa con Aerial
+> Sweep; il successivo `Y` richiama Hurricane Blast. Il numero di Combo Plus non
+> cambia la combinazione e nessun colpo base deve essere consumato per raggiungere
+> una posizione prefissata. `CE` resta protetto fino alla propria conclusione.
 
 La repository contiene tre probe read-only e il primo prototipo combat:
 
@@ -182,17 +229,18 @@ La repository contiene tre probe read-only e il primo prototipo combat:
   faccia e valida gli indirizzi Steam portati prima che il prototipo scriva;
 - `JokCombat_CommandMenuProbe.lua`: confronta in sola lettura controller,
   transizioni e strutture delle quattro righe native del Command Menu;
-- `JokCombat_CombatPrototype.lua`: prototipo v0.9.0 con combo normali delegate
+- `JokCombat_CombatPrototype.lua`: prototipo v0.9.7 con combo normali delegate
   a KH1 e un bridge post-finisher per i cicli infiniti terra/aria, undici slot
-  Action Ability configurabili e famiglie Pirate Strong/C2/C3/C4/C5,
+  Action Ability configurabili, famiglie Pirate Strong/C2/C3/C4/C5 e sette
+  reverse magiche native a costo MP zero soltanto dentro la combo,
   jump-cancel terra -> aria, Guard universale su L2 + Cerchio e Dodge Roll
   fisso su Quadrato;
 - `JokCombat_NativeAbilities.lua`: imposta 99 AP massimi e assegna tramite la
   lista abilita' nativa le quantita' massime vanilla richieste: quattro Combo
   Plus, due Air Combo Plus e un Combo Master, tutte equipaggiate;
 - `docs/JokCombat_BranchCombo_Mapping.md`: mappa Pirate di 24 mosse uniche,
-  con undici Action Ability attive soltanto su `Y` e reverse riservate per
-  sette famiglie magiche, cinque Limit e Chain Attack, senza Summon;
+  con undici Action Ability e sette famiglie magiche attive soltanto su `Y`;
+  cinque Limit e Chain Attack restano riservati, senza Summon;
 - `docs/JokCombat_BranchCombo_Mapping_Draft.md`: archivio delle proposte
   precedenti, incluse le matrici scartate perché duplicavano le abilità;
 - `docs/CMix_AnimCancel_AbilityHandler_analysis.md`: analisi tecnica dei primi
@@ -280,19 +328,27 @@ pacchetto Critical Mix sono conservati, ma non caricati, nelle directory
 `C:\Users\<utente>\Documents\KH_mod\reference\CriticalMix`. Backup, log e
 copie runtime restano locali e non fanno parte del repository.
 
-Per verificare la v0.9.0, premi `F1` nella console LuaBackend. Il log iniziale
-deve mostrare `v0.9.0`, `Native Abilities v0.3.0 ready`,
+Per verificare la v0.9.7, premi `F1` nella console LuaBackend. Il log iniziale
+deve mostrare `v0.9.7`, `Native Abilities v0.3.0 ready`,
 `ground action route ready`, `aerial action route ready`,
 `complete action records ready: 11/11`
 `native Command Menu overlay + Combo Guide ready` e
 `native Ripple Drive/Stun Impact/Gravity Break/Zantetsuken selectors ready`.
 Deve inoltre comparire
 `Pirate Y map ready: 24 unique moves, 11 Action Ability slots enabled` e
+`native combo magic adapter ready: 7/7 families` e
 `Combo Guide ready`. Dopo una `A`, il Command Menu deve mostrare
 `[Y] Slapshot`, `[Y][Y] Sliding Dash` e `[Y][Y][Y] Blitz`; dopo due `A` deve
 mostrare Aerial Sweep, Hurricane Blast e Ripple Drive con le stesse profondità
 di `Y`. Dopo Slapshot, la Guide deve aggiornarsi a `[Y] Sliding Dash` e
 `[Y][Y] Blitz`, senza mai proporre una Action Ability su `[A]`.
+Una reverse magica deve registrare
+`prearmed at ...: L2<-physical Y + Shortcut<-L2` prima dell'ultimo input e poi
+`through prearmed L2<-Y + Shortcut<-L2`, entrare subito in una delle
+animazioni native attese e produrre VFX/effetto; non deve più terminare con
+`native entry timeout`. La Guide deve aprirsi anche se i puntatori colore delle
+notification box non coincidono con il baseline Steam, purché le box non siano
+effettivamente in uso.
 Deve inoltre comparire `native normal combo ownership ready`; durante i colpi
 intermedi non devono piu' apparire `normal route armed` o
 `target-free normal pulse`. Dopo una Croce valida su `CB`/`CE`, il solo bridge
@@ -308,14 +364,21 @@ quest'ordine, prima senza bersaglio e poi contro un nemico:
 - `AAYYY`: due attacchi nativi -> Aerial Sweep -> Hurricane Blast -> Ripple Drive;
 - `AAAY`: Counterattack;
 - `AAAAY`: Zantetsuken;
-- `YA`: Vortex seguito da un solo attacco fisico, mai da un'Action Ability.
+- `YAY`: Vortex -> attacco fisico -> Fire;
+- `YAAY`: Vortex -> due attacchi fisici -> Blizzard;
+- `YYAY`: Stun Impact -> attacco fisico -> Thunder;
+- `YYAAY`: Stun Impact -> due attacchi fisici -> Aero;
+- `YYYAY`: Gravity Break -> attacco fisico -> Cure;
+- `AYYYAY`: Blitz -> attacco fisico -> Gravity;
+- `AAYYYAY`: Ripple Drive -> attacco fisico -> Stop.
 
 Ogni passaggio valido registra `[branch] <sequenza> requested` e poi
 `[branch] <sequenza> accepted`. Un input premuto troppo presto deve produrre
 `ignored before prebuffer`; un secondo input durante lo stesso buffer deve
-essere ignorato, non accodato. I nodi magia/Limit non sono ancora il collaudo
-di questa build: le sequenze reverse restano riservate nella mappa e non sono
-ancora raggiungibili come mosse nominate.
+essere ignorato, non accodato. Le sette reverse magia vanno provate anche con
+MP a zero: devono produrre il cast completo senza diminuire gli MP. Subito
+dopo, una magia lanciata dalla shortcut o dal menu deve tornare a consumare il
+costo vanilla. I nodi Limit non fanno ancora parte del collaudo.
 
 Tieni un modificatore per visualizzare e configurare il relativo gruppo: `L2`,
 `R2` oppure entrambi per `L2+R2`. Il riepilogo mostra sempre un massimo di
@@ -393,23 +456,16 @@ tempo `20` deve produrre `Cross ignored: combo finisher must end first` senza
 essere conservata. Una nuova Croce da `20` in poi deve mostrare
 `Aerial finisher cycle requested: CE -> CC`, quindi riaprire `CC` se Sora e'
 ancora in aria. L'atterraggio deve interrompere il ciclo normalmente.
-Per il test Action Ability aereo, tieni il modificatore almeno un frame. Tutte
-le undici azioni del catalogo sono ora instradabili in volo: Hurricane Blast
-`D1` e Aerial Sweep `D6` usano il percorso aereo nativo. Ogni azione
-ground-native entra invece nella sospensione fake-ground v0.6.9: Sora viene
-sollevato e mantenuto alla stessa quota, `raw70` passa temporaneamente a zero e
-KH1 riceve il record terrestre completo. Il log deve mostrare
-`airborne action suspension armed`, `context=air-suspended` e
-`all ground entries -> complete 0x.. record`. Per uno slot su Croce deve inoltre
-comparire un solo comando sintetico: l'input X fisico viene disabilitato durante
-la preparazione per evitare un attacco aereo parallelo.
-Verifica ogni azione prima senza bersaglio, poi su un nemico controllando
-animazione, VFX, hitbox, danno e stato applicato. Durante D7/D8 la State Probe
-deve mostrare `raw70=0` ma Sora deve restare visibilmente sospeso. Al termine
-deve apparire `airborne action suspension released: raw70=0x00000002`; da quel
-momento la gravita' deve riprendere normalmente. Ripple Drive, Stun Impact,
-Gravity Break e Zantetsuken devono inoltre mostrare il rispettivo
-`native selector armed`, cosi' il gioco usa il dispatcher finisher terrestre.
+Per il test Action Ability aereo premi Croce una, due, tre o più volte prima del
+finisher: da ognuna di queste posizioni `Y` deve eseguire Aerial Sweep `D6`; un
+altro `Y` nella sua finestra deve eseguire Hurricane Blast `D1`. Il log deve
+mostrare `context=air-native` e
+una route aerea completa. La State Probe deve conservare `raw70=1/2`: non devono
+più comparire `airborne action suspension armed`, `context=air-suspended` o
+scritture di quota. Vortex, Slapshot, Ripple Drive, Stun Impact, Gravity Break,
+Zantetsuken e le altre Action Ability terrestri non devono partire in aria e
+non devono comparire nella Combo Guide aerea. Gli stessi slot restano invariati
+a terra.
 Durante `DC`, Quadrato senza modificatori deve produrre
 `Dodge input ignored`; `L2 + Cerchio` deve dare Guard; Cerchio senza
 modificatori deve saltare e Triangolo senza modificatori deve restare vanilla.

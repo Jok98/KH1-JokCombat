@@ -89,6 +89,15 @@ def main() -> None:
     catalog_ids = set(re.findall(r'\{ id = "([^"]+)"', catalog_source))
     assert action_nodes <= catalog_ids, "branch references an unknown Action Ability"
 
+    action_contexts: dict[str, str] = {}
+    for entry in re.finditer(
+        r'(?ms)^    \{ id = "([^"]+)"(.*?)(?=^    \{ id = |^})',
+        catalog_source,
+    ):
+        context = re.search(r'context = "([^"]+)"', entry.group(2))
+        if context:
+            action_contexts[entry.group(1)] = context.group(1)
+
     animations: dict[str, int] = {}
     for entry in re.finditer(
         r'(?ms)^    \{ id = "([^"]+)"(.*?)(?=^    \{ id = |^})',
@@ -134,10 +143,13 @@ def main() -> None:
     assert sum(len(family) for family in action_families.values()) == 11
 
     assert "branchActionAbilities = true" in SOURCE
-    assert "branchMagic = false" in SOURCE
+    assert "branchMagic = true" in SOURCE
     assert "branchLimits = false" in SOURCE
-    assert 'VERSION = "v0.9.0"' in SOURCE
+    assert 'VERSION = "v0.9.7"' in SOURCE
     assert 'return string.rep("X", position) .. "T"' in SOURCE
+    assert 'if isAirNormalContext(player) then' in SOURCE
+    assert 'return "XXT"' in SOURCE
+    assert "Every intermediate native aerial hit aliases" in SOURCE
     assert re.search(
         r'id = "hurricane_blast", name = "Hurricane Blast", context = "air"',
         catalog_source,
@@ -162,26 +174,114 @@ def main() -> None:
         "and JokCombatBranch.active",
         "new input discarded until recovery",
         "function JokCombatBranch.continuePhysical",
-        "+ A -> native physical continuation; no named ability dispatched",
+        "function JokCombatBranch.observePhysicalLink",
+        "function JokCombatBranch.hasReadyDescendant",
+        'JokCombatBranch.reverseWaitingKind = "pirate-light:" .. nextPrefix',
+        "JokCombatBranch.observePhysicalLink(player, acceptedKind)",
+        "+ A -> native physical continuation",
+        "; no named ability dispatched.",
         'if root == "T" then return JokCombatBranch.execute(player, root) end',
     )
     for guard in integration_guards:
         assert guard in SOURCE, f"missing branch integration guard: {guard}"
+    assert action_contexts == {
+        "none": "none",
+        "slapshot": "ground",
+        "sliding_dash": "ground",
+        "vortex": "ground",
+        "aerial_sweep": "both",
+        "counterattack": "ground",
+        "blitz": "ground",
+        "hurricane_blast": "air",
+        "ripple_drive": "ground",
+        "stun_impact": "ground",
+        "gravity_break": "ground",
+        "zantetsuken": "ground",
+    }
+    native_air_guards = (
+        "function JokCombatBranch.nodeReady",
+        'return not player.airborne and path == "XXTT"',
+        "JokCombatBranch.nodeReady(node, player, root)",
+        "JokCombatBranch.nodeReady(childNode, player, child)",
+        "airborne Action Ability policy ready: native air records only",
+        "fake-ground disabled",
+    )
+    for guard in native_air_guards:
+        assert guard in SOURCE, f"missing native-air policy guard: {guard}"
+    assert "airBridge" not in catalog_source
+    assert "airGroundActionBridge" not in SOURCE
+    assert "leftStickInput" not in SOURCE
     guide_guards = (
         "comboGuide = true",
         "function JokCombatBranch.guideEntries",
         "function JokCombatBranch.branchGuideEntries",
         "function JokCombatBranch.familyGuideEntries",
+        "function JokCombatBranch.guideEntriesFromPrefix",
         'local sequence = "[Y]"',
         'sequence = sequence .. "[Y]"',
+        'string.rep("[A]", count) .. "[Y]"',
         'if path == "T" then return nil end',
         'return HUD.showOverlay("guide", guideEntries, "Combo Guide")',
-        "not JokCombatBranch.kindReady(node)",
+        "not JokCombatBranch.nodeReady(node, player, path)",
     )
     for guard in guide_guards:
         assert guard in SOURCE, f"missing Combo Guide guard: {guard}"
+
+    magic_ids = {
+        node["id"] for node in nodes.values() if node["kind"] == "magic"
+    }
+    assert magic_ids == {
+        "fire", "blizzard", "thunder", "aero", "cure", "gravity", "stop"
+    }
+    magic_start = SOURCE.index("JokCombatMagic = {")
+    magic_end = SOURCE.index(
+        "-- Pirate-style modifier-free X/T families", magic_start
+    )
+    magic_source = SOURCE[magic_start:magic_end]
+    for magic_id in magic_ids:
+        assert re.search(rf'^        {magic_id} = \{{', magic_source, re.M), (
+            f"missing native magic metadata for {magic_id}"
+        )
+    magic_guards = (
+        "magicLevelBase = 0x2DE97E2",
+        "nativeShortcutTriangle = 0x2DE9B94",
+        "l2ControlMap = 0x22C9340",
+        "shortcutControlSelector = 0x22C9342",
+        "magicRecovery = 0x2DB79B0",
+        "rawRecoverySignature = 0x313047414D4B4F4A",
+        "carrierRecoverySignature = 0x323047414D4B4F4A",
+        "directMapRecoverySignature = 0x333047414D4B4F4A",
+        "recoverySignature = 0x343047414D4B4F4A",
+        "function JokCombatMagic.recoverStale",
+        "function JokCombatMagic.publishRecovery",
+        "function JokCombatMagic.prearm",
+        "function JokCombatMagic.restorePrearm",
+        "function JokCombatMagic.restoreSyntheticInput",
+        "function JokCombatMagic.request",
+        "function JokCombatMagic.update",
+        "JokCombatMagic.writeCost(family, address, 0)",
+        "WriteByte(ADDRESS.l2ControlMap, CONTROL_INDEX.TRIANGLE)",
+        "WriteByte(ADDRESS.shortcutControlSelector, 0x20)",
+        "WriteByte(journal + 0x16, JokCombatMagic.l2ControlOriginal)",
+        "JokCombatMagic.prearm(prefix)",
+        "or JokCombatMagic.prearmed",
+        "JokCombatMagic.recoverStale()",
+        "local magicValid, magicCount = JokCombatMagic.initialize()",
+        "native combo magic adapter %s: %d/7 families",
+        "JokCombatMagic.inputRestorePending",
+    )
+    for guard in magic_guards:
+        assert guard in SOURCE, f"missing native magic guard: {guard}"
+    assert "shortcutControlCarrier" not in SOURCE
+    assert "shortcutControlMap" not in SOURCE
+    assert "WriteByte(ADDRESS.rawButtons, JokCombatMagic.rawInjected)" not in SOURCE
+    assert "HUD.boxesClaimable(HUD.boxCount)" in SOURCE
+    assert "notification buffers unavailable" not in SOURCE
     assert '"[A] Continua vanilla"' not in SOURCE
-    print("PASS: 24 unique Y-ended moves; 11/11 Pirate Action slots enabled")
+    print(
+        "PASS: 24 unique Y-ended moves; 11/11 Action and 7/7 native magic "
+        "routes enabled; Limits parked"
+    )
 
 
 if __name__ == "__main__":
