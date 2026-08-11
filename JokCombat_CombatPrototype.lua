@@ -1,11 +1,13 @@
 LUAGUI_NAME = "JokCombat Combat Prototype"
 LUAGUI_AUTH = "Jok; Critical Mix reference by Xendra / KSX"
-LUAGUI_DESC = "Native Cross combo, Pirate-style Y Action families, configurable loadout and universal defense."
+LUAGUI_DESC = "Native Cross combo, Pirate-style Y Action/magic families, configurable loadout and universal defense."
 
--- JokCombat v0.9.0 prototype for the current Steam Global executable.
+-- JokCombat v0.9.7 prototype for the current Steam Global executable.
 -- Critical Mix was used as an authorized technical reference. This script is
--- intentionally limited to combat/input state and does not touch save data,
+-- intentionally limited to combat/input state and does not persist changes to
 -- story flags, rewards, inventory, AP, levels, worlds, chests, or synthesis.
+-- A combo cast borrows save-backed magic/shortcut bytes only transiently and
+-- restores them conditionally before normal play resumes.
 
 local CONFIG = {
     enabled = true,
@@ -20,11 +22,13 @@ local CONFIG = {
     -- Modifier-free Triangle selects the Pirate-style Strong/C2/C3/C4/C5
     -- family. The eleven validated Action Ability slots are active and every
     -- named move ends in Triangle; Cross remains a physical continuation.
-    -- Magic and Limit reverse extensions stay parked until their complete
-    -- Steam dispatchers (effect, cost, target and follow-ups) are validated.
+    -- Seven reverse magic extensions use KH1's complete native shortcut
+    -- dispatcher. Their MP costs are zero only while JokCombat owns the cast;
+    -- ordinary menu/shortcut magic keeps its vanilla cost. Limits stay parked
+    -- until their complete Steam dispatchers are validated independently.
     branchCombos = true,
     branchActionAbilities = true,
-    branchMagic = false,
+    branchMagic = true,
     branchLimits = false,
     branchInputTimeoutFrames = 150,
 
@@ -76,10 +80,8 @@ local CONFIG = {
     -- CE remains protected through its hit/recovery. Unlike CC/CD, presses
     -- before this time are discarded rather than buffered; a fresh press at
     -- or after the threshold may explicitly restart the aerial string at CC.
-    -- Ground-native actions otherwise touch the floor before their active
-    -- frame. Once (and only once) the requested animation is actually active,
-    -- move Sora upward on KH1's inverted vertical axis and clamp descent there.
-    airGroundActionLift = 50.0,
+    -- Airborne branches use only records that KH1 owns natively in the air.
+    -- Ground-native Action Abilities are never converted through fake-ground.
     groundChainMemoryFrames = 90,
     releasedCommandMinimumFrames = 1,
     releasedCommandTimeoutFrames = 60,
@@ -96,13 +98,18 @@ local CONFIG = {
 
 local EXPECTED_GAME_ID = 0xAF71841E
 local FINGERPRINT = 0x7265737563697065 -- "epicures", little endian
-local VERSION = "v0.9.0"
+local VERSION = "v0.9.7"
 
 local ADDRESS = {
     fingerprint = 0x3B2271,
     playerPointer = 0x2537E48,
     dpadButtons = 0x22C9300,
     rawButtons = 0x22C9301,
+    -- Steam ports of the two coordinated Critical Mix control layers used by
+    -- native magic. l2ControlMap maps logical L2 to a physical control; the
+    -- Shortcut selector chooses logical L2 (0x20) as its modifier.
+    l2ControlMap = 0x22C9340,
+    shortcutControlSelector = 0x22C9342,
     commandMenuState = 0x2852790,
     -- Native D-pad captures update this selector together with
     -- commandMenuSlot. It is used only for validation/recovery: writing the
@@ -122,6 +129,18 @@ local ADDRESS = {
     triggerMenu1 = 0x23D3F80,
     triggerMenu2 = 0x232DDC4,
     defenseAbilityFlags = 0x2D5EC10,
+
+    -- Steam ports of KH1's seven learned magic levels and native shortcut
+    -- assignments. The first shortcut is the Triangle/Y slot. JokCombat only
+    -- borrows it for one physical Y edge routed through coordinated L2 and
+    -- Shortcut control layers, then restores both conditionally.
+    magicLevelBase = 0x2DE97E2,
+    nativeShortcutTriangle = 0x2DE9B94,
+
+    -- Reload-safe journal for the transient shortcut, learned-level and cost
+    -- edits owned by one combo magic cast. This area is separate from the HUD
+    -- native-row journal and prompt text buffers used above it.
+    magicRecovery = 0x2DB79B0,
 
     -- Steam ports of Critical Mix's transient combo byte and Sora's active
     -- ground-combo length. These do not point to the save file.
@@ -173,10 +192,9 @@ local ADDRESS = {
     forceCircleBranch = 0x2A7B74,       -- 74 normal, 72 forced
     forceSquareBranch = 0x2A7BD6,       -- 84 normal, 82 forced
     airDefenseBranch = 0x2A7BE0,        -- 85 ground-only, 82 allow in air
-    -- Steam port of Critical Mix's transient ground-animation-in-air check.
-    -- TEST EAX,EAX immediately precedes it, so 73 is an always-taken bridge.
-    -- It is used only while pre-arming a physical ground-native action. The
-    -- real v0.6.9 shortcut uses vanilla 74 with raw70=0 in suspended fake-ground.
+    -- Migration-only recovery for the retired ground-animation-in-air bridge.
+    -- v0.9.6 never arms 0x73; initialization still restores a stale older build
+    -- to vanilla 0x74 before enabling the native-air-only policy.
     airGroundActionBranch = 0x2A376D,   -- 74 normal, 73 bridged
     guardAvailabilityBranch = 0x2A7BFD, -- 74 normal, 72 enabled, EB choose roll
     guardSelectionBranch = 0x2A7C01,    -- 74 normal, EB choose guard
@@ -264,22 +282,19 @@ local NATIVE_FINISHER_ABILITY_CLEAR_MASK = 0xC3FFFFFF
 -- requirements still need live validation one ability at a time.
 local ACTION_CATALOG = {
     { id = "none", name = "None", context = "none" },
-    { id = "slapshot", name = "Slapshot", context = "both",
-        airBridge = true,
+    { id = "slapshot", name = "Slapshot", context = "ground",
         animation = 0xCF, finisher = false,
         recordAddress = ADDRESS.groundComboSlapshot,
         record = { 0xCF, 0x00, 0x05, 0xFF, 0x28, 0x51, 0x00, 0x00,
             0x00, 0x00, 0x00, 0x00, 0x00, 0x05, 0x06, 0x04,
             0x00, 0x00, 0x00, 0x00 } },
-    { id = "sliding_dash", name = "Sliding Dash", context = "both",
-        airBridge = true,
+    { id = "sliding_dash", name = "Sliding Dash", context = "ground",
         animation = 0xD0, finisher = false,
         recordAddress = ADDRESS.groundComboSlide,
         record = { 0xD0, 0x00, 0x05, 0xFF, 0xB8, 0x50, 0x00, 0x00,
             0x00, 0x00, 0x00, 0x00, 0x02, 0x05, 0x06, 0x04,
             0x00, 0x00, 0x00, 0x00 } },
-    { id = "vortex", name = "Vortex", context = "both",
-        airBridge = true,
+    { id = "vortex", name = "Vortex", context = "ground",
         animation = 0xD3, finisher = false,
         recordAddress = ADDRESS.groundComboImpulse,
         record = { 0xD3, 0x00, 0x05, 0xFF, 0xC8, 0x4C, 0x00, 0x00,
@@ -291,15 +306,14 @@ local ACTION_CATALOG = {
         record = { 0xD6, 0x00, 0x05, 0xFF, 0xC8, 0x4C, 0x00, 0x00,
             0x00, 0x00, 0x00, 0x00, 0x03, 0x05, 0x06, 0x04,
             0x00, 0x00, 0x00, 0x00 } },
-    { id = "counterattack", name = "Counterattack", context = "both",
+    { id = "counterattack", name = "Counterattack", context = "ground",
         animation = 0xD5, finisher = false, contextual = true,
-        airBridge = true,
         recordAddress = ADDRESS.actionRecordCounterattack,
         record = { 0xD5, 0x00, 0x05, 0xFF, 0x18, 0x4E, 0x00, 0x00,
             0x00, 0x00, 0x00, 0x00, 0x03, 0x05, 0x06, 0x05,
             0x00, 0x00, 0x00, 0x00 } },
-    { id = "blitz", name = "Blitz", context = "both",
-        animation = 0xD2, finisher = true, airBridge = true,
+    { id = "blitz", name = "Blitz", context = "ground",
+        animation = 0xD2, finisher = true,
         recordAddress = ADDRESS.actionRecordBlitz,
         record = { 0xD2, 0x00, 0x05, 0xFF, 0x38, 0x4D, 0x00, 0x00,
             0x00, 0x00, 0x00, 0x00, 0x1B, 0x05, 0x06, 0x06,
@@ -310,26 +324,26 @@ local ACTION_CATALOG = {
         record = { 0xD1, 0x00, 0x05, 0xFF, 0x48, 0x50, 0x00, 0x00,
             0x00, 0x00, 0x20, 0x42, 0x1B, 0x05, 0x06, 0x05,
             0x00, 0x00, 0x00, 0x00 } },
-    { id = "ripple_drive", name = "Ripple Drive", context = "both",
-        animation = 0xD7, finisher = true, airBridge = true,
+    { id = "ripple_drive", name = "Ripple Drive", context = "ground",
+        animation = 0xD7, finisher = true,
         recordAddress = ADDRESS.actionRecordRippleDrive,
         record = { 0xD7, 0x00, 0x05, 0xFF, 0x88, 0x4E, 0x00, 0x00,
             0x00, 0x00, 0x00, 0x00, 0x17, 0x05, 0x17, 0x05,
             0x00, 0x00, 0x00, 0x00 } },
-    { id = "stun_impact", name = "Stun Impact", context = "both",
-        animation = 0xD8, finisher = true, airBridge = true,
+    { id = "stun_impact", name = "Stun Impact", context = "ground",
+        animation = 0xD8, finisher = true,
         recordAddress = ADDRESS.actionRecordStunImpact,
         record = { 0xD8, 0x00, 0x05, 0xFF, 0xF8, 0x4E, 0x00, 0x00,
             0x00, 0x00, 0x00, 0x00, 0x1B, 0x05, 0x1B, 0x06,
             0x00, 0x00, 0x00, 0x00 } },
-    { id = "gravity_break", name = "Gravity Break", context = "both",
-        animation = 0xD9, finisher = true, airBridge = true,
+    { id = "gravity_break", name = "Gravity Break", context = "ground",
+        animation = 0xD9, finisher = true,
         recordAddress = ADDRESS.actionRecordGravityBreak,
         record = { 0xD9, 0x00, 0x05, 0xFF, 0x68, 0x4F, 0x00, 0x00,
             0x00, 0x00, 0x00, 0x00, 0x17, 0x05, 0x17, 0x06,
             0x00, 0x00, 0x00, 0x00 } },
-    { id = "zantetsuken", name = "Zantetsuken", context = "both",
-        animation = 0xDA, finisher = true, airBridge = true,
+    { id = "zantetsuken", name = "Zantetsuken", context = "ground",
+        animation = 0xDA, finisher = true,
         recordAddress = ADDRESS.actionRecordZantetsuken,
         record = { 0xDA, 0x00, 0x05, 0xFF, 0xD8, 0x4F, 0x00, 0x00,
             0x00, 0x00, 0x00, 0x00, 0x18, 0x05, 0x18, 0x06,
@@ -573,6 +587,8 @@ local NORMAL = {
     dpadRightControlMap = 0xFF,
     dpadDownControlMap = 0xFF,
     dpadLeftControlMap = 0xFF,
+    l2ControlMap = 0xFF,
+    shortcutControlSelector = 0xFF,
     triangleControlMap = 0xFF,
     circleControlMap = 0xFF,
     attackControlMap = 0xFF,
@@ -626,14 +642,6 @@ local airRouteAnimation = nil
 local airRouteKind = nil
 local airRouteSourceAnimation = nil
 local airRouteSourceTime = 0.0
-local airGroundActionBridgeAnimation = nil
-local airGroundActionBridgePositionPointer = nil
-local airGroundActionBridgeHeight = nil
-local airGroundActionBridgeLifted = false
-local airGroundActionBridgeUsesBranch = false
-local airGroundActionBridgePlayerPointer = nil
-local airGroundActionBridgeOriginalState = nil
-local airGroundActionBridgeFakeGround = false
 local syntheticAttackCommandOwned = false
 local syntheticAttackCommandHigh = false
 local actionPrimeComboOwned = false
@@ -744,7 +752,7 @@ local function saveActionLoadout()
         return false
     end
 
-    file:write("# JokCombat v0.9.0 Action Ability loadout\n")
+    file:write("# JokCombat v0.9.4 Action Ability loadout\n")
     file:write("# Guard remains fixed on L2+Circle; Dodge Roll on Square.\n")
     file:write("# action_overlay controls both loadout labels and Combo Guide.\n")
     file:write("action_overlay=", HUD.enabled and "true" or "false", "\n")
@@ -1292,9 +1300,12 @@ end
 
 function HUD.showOverlay(groupId, suppliedEntries, suppliedLabel)
     if not CONFIG.actionLoadoutOverlay then return false end
-    if not HUD.initialize(true, HUD.boxCount) then
-        return HUD.nativeOverlayFailure("notification buffers unavailable")
-    end
+    if not CONFIG.actionLoadoutPrompt then return false end
+    -- The native-row overlay only borrows the four text buffers; it does not
+    -- display either notification box. Requiring their color-pointer layout
+    -- made the Combo Guide disappear when KH1 had initialized those dormant
+    -- boxes differently. The ownership check below is the relevant safety
+    -- condition: no text is written while either box is actually in use.
     local group = LOADOUT_MENU_GROUPS[groupId]
     local entries = suppliedEntries or HUD.overlayEntries(groupId)
     local groupLabel = suppliedLabel
@@ -1463,111 +1474,6 @@ local function restoreIfKnown(address, normal, known)
     end
 end
 
-local function restoreAirGroundActionBridge()
-    if airGroundActionBridgeFakeGround
-        and airGroundActionBridgePlayerPointer ~= nil
-        and airGroundActionBridgeOriginalState ~= nil then
-        local livePlayerPointer = ReadLong(ADDRESS.playerPointer)
-        if livePlayerPointer == airGroundActionBridgePlayerPointer
-            and ReadInt(livePlayerPointer + PLAYER.airborneState, true) == 0 then
-            WriteInt(livePlayerPointer + PLAYER.airborneState,
-                airGroundActionBridgeOriginalState, true)
-            log(string.format(
-                "airborne action suspension released: raw70=0x%08X.",
-                airGroundActionBridgeOriginalState))
-        end
-    end
-    restoreIfKnown(ADDRESS.airGroundActionBranch,
-        NORMAL.airGroundAction, { 0x74, 0x73 })
-    airGroundActionBridgeAnimation = nil
-    airGroundActionBridgePositionPointer = nil
-    airGroundActionBridgeHeight = nil
-    airGroundActionBridgeLifted = false
-    airGroundActionBridgeUsesBranch = false
-    airGroundActionBridgePlayerPointer = nil
-    airGroundActionBridgeOriginalState = nil
-    airGroundActionBridgeFakeGround = false
-end
-
-local function updateAirGroundActionBridge(player)
-    local animation = airGroundActionBridgeAnimation
-    if animation == nil then return end
-
-    local pending = airRouteAnimation == animation
-        or groundRouteAnimation == animation
-        or transitionExpectedAnimation == animation
-        or deferredLinkExpectedAnimation == animation
-    local animationMatches = player.animation == animation
-    local fakeGround = airGroundActionBridgeFakeGround
-    local active = animationMatches and (player.airborne or fakeGround)
-    if (not player.airborne and not fakeGround)
-        or (not pending and not active) then
-        restoreAirGroundActionBridge()
-        return
-    end
-
-    if fakeGround then
-        if player.pointer ~= airGroundActionBridgePlayerPointer then
-            log("airborne action suspension released: player pointer changed.")
-            restoreAirGroundActionBridge()
-            return
-        end
-        if player.airborneState ~= 0 then
-            WriteInt(player.pointer + PLAYER.airborneState, 0, true)
-            player.airborneState = 0
-        end
-        player.airborne = false
-    end
-
-    local positionPointer = player.pointer
-    if positionPointer ~= airGroundActionBridgePositionPointer
-        or airGroundActionBridgeHeight == nil then
-        log("airborne ground-action stall released: "
-            .. "Sora position pointer changed or became unavailable.")
-        restoreAirGroundActionBridge()
-        return
-    end
-
-    local currentHeight = ReadFloat(positionPointer + 0x14, true)
-    if currentHeight ~= currentHeight or math.abs(currentHeight) > 10000000 then
-        log("airborne ground-action stall released: invalid vertical position.")
-        restoreAirGroundActionBridge()
-        return
-    end
-
-    -- Fake-ground suspension deliberately keeps vanilla 0x74: raw70=0 now
-    -- reaches KH1's complete ground dispatcher while the transform remains at
-    -- the captured aerial height. Legacy animation-only primes can still own
-    -- the transient 0x73 bridge until the real shortcut input arrives.
-    setByte("airGroundAction", ADDRESS.airGroundActionBranch,
-        airGroundActionBridgeUsesBranch and 0x73 or NORMAL.airGroundAction,
-        { 0x74, 0x73 })
-    -- KH1 otherwise lets the ground-native pose fall into Landing before its
-    -- active frame. Do not lift Sora while the shortcut is merely primed: wait
-    -- until the requested animation is really active. The game's vertical axis
-    -- grows toward the floor, so subtraction lifts and later writes clamp only
-    -- the descent while preserving any further native upward movement.
-    if fakeGround and airGroundActionBridgeLifted then
-        if currentHeight ~= airGroundActionBridgeHeight then
-            WriteFloat(positionPointer + 0x14,
-                airGroundActionBridgeHeight, true)
-        end
-    elseif active and not airGroundActionBridgeLifted then
-        airGroundActionBridgeHeight = currentHeight
-            - CONFIG.airGroundActionLift
-        WriteFloat(positionPointer + 0x14,
-            airGroundActionBridgeHeight, true)
-        airGroundActionBridgeLifted = true
-        log(string.format(
-            "airborne ground-action height stall engaged: "
-            .. "anim=0x%02X %.3f -> %.3f.", animation,
-            currentHeight, airGroundActionBridgeHeight))
-    elseif active and currentHeight > airGroundActionBridgeHeight then
-        WriteFloat(positionPointer + 0x14,
-            airGroundActionBridgeHeight, true)
-    end
-end
-
 local NATIVE_FINISHER_SELECTOR = {
     ripple_drive = {
         abilityBit = RIPPLE_DRIVE_ABILITY_BIT,
@@ -1671,25 +1577,8 @@ local function restoreNativeFinisherSelection()
 end
 
 local function updateNativeFinisherSelection(buttons, player)
-    local bridgeActive = airGroundActionBridgeAnimation ~= nil
-        and player.animation == airGroundActionBridgeAnimation
-    local action = nil
-    if bridgeActive then
-        -- Once a bridged animation owns the air route, a held shoulder must not
-        -- swap its native selector to the passive X shortcut. Preserve only the
-        -- selector belonging to the active finisher itself; non-finishers clear
-        -- any selector that was armed while their modifier was held.
-        for _, actionId in ipairs(NATIVE_FINISHER_ACTION_IDS) do
-            local candidate = ACTION_BY_ID[actionId]
-            if candidate.animation == player.animation then
-                action = candidate
-                break
-            end
-        end
-    else
-        action = pendingNativeFinisherAction()
-            or chordNativeFinisherAction(buttons)
-    end
+    local action = pendingNativeFinisherAction()
+        or chordNativeFinisherAction(buttons)
     local selector = action ~= nil and NATIVE_FINISHER_SELECTOR[action.id]
         or nil
     local enable = CONFIG.actionLoadout and selector ~= nil
@@ -2080,80 +1969,10 @@ end
 local function beginActionRoute(kind, action, player)
     if action == nil or action.animation == nil then return false end
     if action.recordAvailable ~= true then return false end
-    local bridged = player.airborne and action.airBridge == true
-    local priming = type(kind) == "string"
-        and kind:sub(1, #ACTION_PRIME_PREFIX) == ACTION_PRIME_PREFIX
-    -- Limit fake-ground to the normal Jump/Fall states validated by the probe.
-    -- Swimming, flying and scripted airborne states keep the older aerial route.
-    local fakeGround = bridged and not priming
-        and (player.airborneState == 1 or player.airborneState == 2)
-    local nativeFinisherBridge = bridged
-        and NATIVE_FINISHER_SELECTOR[action.id] ~= nil
-    if bridged then
-        restoreAirGroundActionBridge()
-        -- The validated player object owns its live position vector directly at
-        -- +0x10; +0x14 is the vertical component. The former global pointer can
-        -- legitimately be zero in gameplay and must never gate an action route.
-        local positionPointer = player.pointer
-        local height = ReadFloat(positionPointer + 0x14, true)
-        if height == nil or height ~= height or math.abs(height) > 10000000 then
-            log(string.format(
-                "%s suspension unavailable; using executable aerial fallback.",
-                kind))
-            fakeGround = false
-        else
-            local usesGroundBranch = not fakeGround and not nativeFinisherBridge
-            if not setByte("airGroundAction", ADDRESS.airGroundActionBranch,
-                    usesGroundBranch and 0x73 or NORMAL.airGroundAction,
-                    { 0x74, 0x73 }) then
-                return false
-            end
-            airGroundActionBridgeAnimation = action.animation
-            airGroundActionBridgePositionPointer = positionPointer
-            airGroundActionBridgeUsesBranch = usesGroundBranch
-            airGroundActionBridgePlayerPointer = player.pointer
-            airGroundActionBridgeOriginalState = player.airborneState
-            airGroundActionBridgeFakeGround = fakeGround
-            if fakeGround then
-                airGroundActionBridgeHeight = height - CONFIG.airGroundActionLift
-                airGroundActionBridgeLifted = true
-                WriteFloat(positionPointer + 0x14,
-                    airGroundActionBridgeHeight, true)
-                WriteInt(player.pointer + PLAYER.airborneState, 0, true)
-                player.airborneState = 0
-                player.airborne = false
-                log(string.format(
-                    "%s airborne action suspension armed for 0x%02X: "
-                    .. "fake-ground raw70=0x%08X->0 height=%.3f->%.3f.",
-                    kind, action.animation, airGroundActionBridgeOriginalState,
-                    height, airGroundActionBridgeHeight))
-            else
-                airGroundActionBridgeHeight = height
-                airGroundActionBridgeLifted = false
-                log(string.format(
-                    "%s airborne ground-action prime armed for 0x%02X at %.3f "
-                    .. "(%s).", kind, action.animation, height,
-                    nativeFinisherBridge
-                        and "native aerial dispatcher + resource"
-                        or "transient ground bridge + air state"))
-            end
-        end
-    else
-        restoreAirGroundActionBridge()
+    if player.airborne then
+        return beginAirActionRoute(kind, action.animation, player)
     end
-
-    local armed = false
-    if fakeGround then
-        armed = beginGroundActionRoute(kind, action.animation, player)
-    elseif player.airborne then
-        armed = beginAirActionRoute(
-            kind, action.animation, player,
-            bridged and (nativeFinisherBridge and "resource" or "animation"))
-    else
-        armed = beginGroundActionRoute(kind, action.animation, player)
-    end
-    if not armed and bridged then restoreAirGroundActionBridge() end
-    return armed
+    return beginGroundActionRoute(kind, action.animation, player)
 end
 
 local function updateActionRoutes(player)
@@ -2168,7 +1987,6 @@ local function restoreAllPatches()
     end
     clearSyntheticAttackCommand(false)
     restoreActionRoutes()
-    restoreAirGroundActionBridge()
     restoreNativeFinisherSelection()
     HUD.hideOverlay()
     restoreIfKnown(ADDRESS.forceCircleBranch, NORMAL.forceCircle,
@@ -2193,6 +2011,11 @@ local function restoreAllPatches()
         { 0xFF, 0xFE })
     restoreIfKnown(ADDRESS.dpadLeftControlMap, NORMAL.dpadLeftControlMap,
         { 0xFF, 0xFE })
+    restoreIfKnown(ADDRESS.shortcutControlSelector,
+        NORMAL.shortcutControlSelector,
+        { 0xFF, CONTROL_INDEX.TRIANGLE, 0x20 })
+    restoreIfKnown(ADDRESS.l2ControlMap, NORMAL.l2ControlMap,
+        { 0xFF, CONTROL_INDEX.TRIANGLE })
     restoreIfKnown(ADDRESS.triangleControlMap, NORMAL.triangleControlMap,
         { 0xFF, 0xFE })
     restoreIfKnown(ADDRESS.circleControlMap, NORMAL.circleControlMap,
@@ -3055,9 +2878,6 @@ local function updateFinisherBuffer(player)
 end
 
 local function cancelPlayer(player, label)
-    if airGroundActionBridgeAnimation ~= nil then
-        restoreAirGroundActionBridge()
-    end
     WriteByte(player.pointer + PLAYER.actionControl, 0x03, true)
     log(string.format(
         "%s cancel: anim=0x%02X secondary=0x%02X time=%.2f",
@@ -3124,7 +2944,7 @@ end
 
 local function primeActionComboState(action, primeKind, player)
     local needsGroundFinisherContext = action.finisher
-        and (not player.airborne or action.airBridge == true)
+        and not player.airborne
     if not needsGroundFinisherContext then
         clearActionPrimeCombo(true)
         return true
@@ -3219,7 +3039,7 @@ local function requestActionAbility(player, slot, action, usesPhysicalInput,
 
     local comboPosition = nil
     local maximum = nil
-    if not player.airborne or action.airBridge == true then
+    if not player.airborne then
         local position
         position, maximum = readGroundComboState()
         if position == nil then
@@ -3270,7 +3090,7 @@ local function requestActionAbility(player, slot, action, usesPhysicalInput,
     log(string.format(
         "%s requested by %s: anim=0x%02X context=%s route=%s%s",
         action.name, slot.label, action.animation,
-        requestedFromAir and "air-suspended" or "ground",
+        requestedFromAir and "air-native" or "ground",
         routeWasPrimed and "prearmed" or "synthetic",
         comboPosition ~= nil
             and string.format(" combo=%d max=%d", comboPosition, maximum)
@@ -3278,13 +3098,502 @@ local function requestActionAbility(player, slot, action, usesPhysicalInput,
     return true
 end
 
+-- Native combo-magic adapter. It borrows KH1's first shortcut slot and, while a
+-- reverse prefix is ready, maps logical L2 to physical Triangle and selects L2
+-- as KH1's Shortcut modifier. Both layers are armed before the final Triangle
+-- edge, so that one real input is evaluated as L2 plus its Triangle face
+-- selection.
+-- This preserves native animation, targeting, VFX, hitbox and spell grade;
+-- writing rawButtons alone only changes the observable snapshot and is not
+-- consumed as a new input event. Only the selected family's three MP records
+-- are zero while that owned cast is alive; menu/shortcut magic is untouched
+-- before and after the cast. Keep this global to avoid Lua 5.3's 200-local
+-- limit in the main chunk.
+JokCombatMagic = {
+    catalog = {
+        fire = {
+            id = "fire", name = "Fire", index = 0, costWidth = 1,
+            costs = { 0x2D28C98, 0x2D28D08, 0x2D28D78 },
+            animations = { [0x36] = true, [0x3D] = true, [0x8A] = true },
+        },
+        blizzard = {
+            id = "blizzard", name = "Blizzard", index = 1, costWidth = 1,
+            costs = { 0x2D28DE8, 0x2D28E58, 0x2D28EC8 },
+            animations = { [0x37] = true, [0x84] = true },
+        },
+        thunder = {
+            id = "thunder", name = "Thunder", index = 2, costWidth = 2,
+            costs = { 0x2D28F38, 0x2D28FA8, 0x2D29018 },
+            animations = { [0x38] = true, [0x85] = true },
+        },
+        cure = {
+            id = "cure", name = "Cure", index = 3, costWidth = 2,
+            costs = { 0x2D29088, 0x2D290F8, 0x2D29168 },
+            animations = { [0x39] = true, [0x86] = true },
+        },
+        gravity = {
+            id = "gravity", name = "Gravity", index = 4, costWidth = 1,
+            costs = { 0x2D291D8, 0x2D29248, 0x2D292B8 },
+            animations = { [0x3A] = true, [0x87] = true },
+        },
+        stop = {
+            id = "stop", name = "Stop", index = 5, costWidth = 2,
+            costs = { 0x2D29328, 0x2D29398, 0x2D29408 },
+            animations = { [0x3B] = true, [0x88] = true },
+        },
+        aero = {
+            id = "aero", name = "Aero", index = 6, costWidth = 2,
+            costs = { 0x2D29478, 0x2D294E8, 0x2D29558 },
+            animations = { [0x3C] = true, [0x89] = true },
+        },
+    },
+    rawRecoverySignature = 0x313047414D4B4F4A, -- "JOKMAG01"
+    carrierRecoverySignature = 0x323047414D4B4F4A, -- "JOKMAG02"
+    directMapRecoverySignature = 0x333047414D4B4F4A, -- "JOKMAG03"
+    recoverySignature = 0x343047414D4B4F4A, -- "JOKMAG04"
+    recoveryMarker = 0xA5,
+    valid = false,
+    active = false,
+    family = nil,
+    path = nil,
+    phase = nil,
+    frames = 0,
+    exitFrames = 0,
+    shortcutOriginal = nil,
+    levelOriginal = nil,
+    levelForced = nil,
+    costOriginal = nil,
+    rawOriginal = nil,
+    rawInjected = nil,
+    l2ControlOriginal = nil,
+    shortcutControlOriginal = nil,
+    inputRestorePending = false,
+    prearmed = false,
+    prearmPrefix = nil,
+    prearmL2Original = nil,
+    prearmShortcutOriginal = nil,
+}
+
+function JokCombatMagic.familyByIndex(index)
+    for _, family in pairs(JokCombatMagic.catalog) do
+        if family.index == index then return family end
+    end
+    return nil
+end
+
+function JokCombatMagic.readCost(family, address)
+    if family.costWidth == 1 then return ReadByte(address) end
+    return ReadShort(address)
+end
+
+function JokCombatMagic.writeCost(family, address, value)
+    if family.costWidth == 1 then
+        WriteByte(address, value)
+    else
+        WriteShort(address, value)
+    end
+end
+
+function JokCombatMagic.clearRecovery()
+    WriteLong(ADDRESS.magicRecovery, 0)
+end
+
+function JokCombatMagic.publishRecovery(family)
+    local journal = ADDRESS.magicRecovery
+    -- Publish the signature last: an interrupted partial journal is ignored.
+    WriteLong(journal, 0)
+    WriteByte(journal + 0x08, family.index)
+    WriteByte(journal + 0x09, JokCombatMagic.recoveryMarker)
+    WriteByte(journal + 0x0A, JokCombatMagic.shortcutOriginal)
+    WriteByte(journal + 0x0B, JokCombatMagic.levelOriginal)
+    WriteByte(journal + 0x0C, JokCombatMagic.levelForced)
+    WriteByte(journal + 0x0D, JokCombatMagic.rawOriginal)
+    WriteByte(journal + 0x0E, JokCombatMagic.rawInjected)
+    WriteByte(journal + 0x0F, JokCombatMagic.shortcutControlOriginal)
+    for index = 1, 3 do
+        WriteShort(journal + 0x0E + index * 2,
+            JokCombatMagic.costOriginal[index])
+    end
+    WriteByte(journal + 0x16, JokCombatMagic.l2ControlOriginal)
+    WriteLong(journal, JokCombatMagic.recoverySignature)
+end
+
+function JokCombatMagic.recoverStale()
+    local journal = ADDRESS.magicRecovery
+    local signature = ReadLong(journal)
+    if signature ~= JokCombatMagic.recoverySignature
+        and signature ~= JokCombatMagic.directMapRecoverySignature
+        and signature ~= JokCombatMagic.carrierRecoverySignature
+        and signature ~= JokCombatMagic.rawRecoverySignature then
+        return false
+    end
+    local family = JokCombatMagic.familyByIndex(ReadByte(journal + 0x08))
+    if family == nil
+        or ReadByte(journal + 0x09) ~= JokCombatMagic.recoveryMarker then
+        JokCombatMagic.clearRecovery()
+        ConsolePrint("[JokCombat:magic:recovery] invalid journal cleared; "
+            .. "no unowned memory was overwritten.")
+        return false
+    end
+
+    local restored = 0
+    local shortcutOriginal = ReadByte(journal + 0x0A)
+    if ReadByte(ADDRESS.nativeShortcutTriangle) == family.index then
+        WriteByte(ADDRESS.nativeShortcutTriangle, shortcutOriginal)
+        restored = restored + 1
+    end
+    local levelAddress = ADDRESS.magicLevelBase + family.index
+    local levelOriginal = ReadByte(journal + 0x0B)
+    local levelForced = ReadByte(journal + 0x0C)
+    if ReadByte(levelAddress) == levelForced then
+        WriteByte(levelAddress, levelOriginal)
+        restored = restored + 1
+    end
+    for index, address in ipairs(family.costs) do
+        if JokCombatMagic.readCost(family, address) == 0 then
+            JokCombatMagic.writeCost(
+                family, address, ReadShort(journal + 0x0E + index * 2))
+            restored = restored + 1
+        end
+    end
+    local rawOriginal = ReadByte(journal + 0x0D)
+    local rawInjected = ReadByte(journal + 0x0E)
+    if rawInjected ~= rawOriginal
+        and ReadByte(ADDRESS.rawButtons) == rawInjected then
+        WriteByte(ADDRESS.rawButtons, rawOriginal)
+        restored = restored + 1
+    end
+    if signature == JokCombatMagic.carrierRecoverySignature
+        or signature == JokCombatMagic.directMapRecoverySignature
+        or signature == JokCombatMagic.recoverySignature then
+        local shortcutControlOriginal = ReadByte(journal + 0x0F)
+        local ownedValue = signature == JokCombatMagic.directMapRecoverySignature
+            and CONTROL_INDEX.TRIANGLE or 0x20
+        if ReadByte(ADDRESS.shortcutControlSelector) == ownedValue then
+            WriteByte(ADDRESS.shortcutControlSelector,
+                shortcutControlOriginal)
+            restored = restored + 1
+        end
+    end
+    if signature == JokCombatMagic.recoverySignature
+        and ReadByte(ADDRESS.l2ControlMap) == CONTROL_INDEX.TRIANGLE then
+        WriteByte(ADDRESS.l2ControlMap, ReadByte(journal + 0x16))
+        restored = restored + 1
+    end
+    JokCombatMagic.clearRecovery()
+    ConsolePrint(string.format(
+        "[JokCombat:magic:recovery] stale %s cast restored (%d owned fields).",
+        family.name, restored))
+    return true
+end
+
+function JokCombatMagic.restorePrearm()
+    if not JokCombatMagic.prearmed then return false end
+    if ReadByte(ADDRESS.shortcutControlSelector) == 0x20 then
+        WriteByte(ADDRESS.shortcutControlSelector,
+            JokCombatMagic.prearmShortcutOriginal)
+    end
+    if ReadByte(ADDRESS.l2ControlMap) == CONTROL_INDEX.TRIANGLE then
+        WriteByte(ADDRESS.l2ControlMap, JokCombatMagic.prearmL2Original)
+    end
+    JokCombatMagic.prearmed = false
+    JokCombatMagic.prearmPrefix = nil
+    JokCombatMagic.prearmL2Original = nil
+    JokCombatMagic.prearmShortcutOriginal = nil
+    return true
+end
+
+function JokCombatMagic.prearm(prefix)
+    local childPath = prefix ~= nil and prefix .. "T" or nil
+    local child = childPath ~= nil and JokCombatBranch ~= nil
+        and JokCombatBranch.nodes[childPath] or nil
+    local family = child ~= nil and JokCombatMagic.catalog[child.id] or nil
+    if not JokCombatMagic.valid or JokCombatMagic.active
+        or child == nil or child.kind ~= "magic"
+        or family == nil then
+        JokCombatMagic.restorePrearm()
+        return false
+    end
+
+    if JokCombatMagic.prearmed then
+        JokCombatMagic.prearmPrefix = prefix
+        return true
+    end
+    local l2Original = ReadByte(ADDRESS.l2ControlMap)
+    local shortcutOriginal = ReadByte(ADDRESS.shortcutControlSelector)
+    if l2Original ~= NORMAL.l2ControlMap
+        or shortcutOriginal ~= NORMAL.shortcutControlSelector then
+        log(string.format(
+            "[magic] %s prearm rejected: L2/Shortcut maps are 0x%02X/0x%02X.",
+            family.name, l2Original, shortcutOriginal))
+        return false
+    end
+
+    JokCombatMagic.prearmL2Original = l2Original
+    JokCombatMagic.prearmShortcutOriginal = shortcutOriginal
+    JokCombatMagic.prearmPrefix = prefix
+    JokCombatMagic.prearmed = true
+    WriteByte(ADDRESS.l2ControlMap, CONTROL_INDEX.TRIANGLE)
+    WriteByte(ADDRESS.shortcutControlSelector, 0x20)
+    if ReadByte(ADDRESS.l2ControlMap) ~= CONTROL_INDEX.TRIANGLE
+        or ReadByte(ADDRESS.shortcutControlSelector) ~= 0x20 then
+        JokCombatMagic.restorePrearm()
+        log("[magic] L2<-Y + Shortcut<-L2 prearm was not retained.")
+        return false
+    end
+    log(string.format(
+        "[magic] %s prearmed at %s: L2<-physical Y + Shortcut<-L2.",
+        family.name, prefix))
+    return true
+end
+
+function JokCombatMagic.initialize()
+    JokCombatMagic.active = false
+    JokCombatMagic.family = nil
+    JokCombatMagic.path = nil
+    JokCombatMagic.phase = nil
+    JokCombatMagic.frames = 0
+    JokCombatMagic.exitFrames = 0
+    JokCombatMagic.l2ControlOriginal = nil
+    JokCombatMagic.shortcutControlOriginal = nil
+    JokCombatMagic.inputRestorePending = false
+    JokCombatMagic.prearmed = false
+    JokCombatMagic.prearmPrefix = nil
+    JokCombatMagic.prearmL2Original = nil
+    JokCombatMagic.prearmShortcutOriginal = nil
+
+    local count = 0
+    local valid = true
+    local shortcut = ReadByte(ADDRESS.nativeShortcutTriangle)
+    if shortcut ~= 0xFF and (shortcut < 0 or shortcut > 6) then
+        ConsolePrint(string.format(
+            "[JokCombat:magic:fault] native Y shortcut is 0x%02X.",
+            shortcut))
+        valid = false
+    end
+    for _, family in pairs(JokCombatMagic.catalog) do
+        count = count + 1
+        local level = ReadByte(ADDRESS.magicLevelBase + family.index)
+        if level > 3 or #family.costs ~= 3
+            or (family.costWidth ~= 1 and family.costWidth ~= 2) then
+            ConsolePrint(string.format(
+                "[JokCombat:magic:fault] %s metadata/level rejected "
+                .. "(level=%d width=%d costs=%d).",
+                family.name, level, family.costWidth, #family.costs))
+            valid = false
+        end
+        for _, address in ipairs(family.costs) do
+            local cost = JokCombatMagic.readCost(family, address)
+            if cost < 0 or cost > 2000 then
+                ConsolePrint(string.format(
+                    "[JokCombat:magic:fault] %s cost at 0x%X is %d.",
+                    family.name, address, cost))
+                valid = false
+            end
+        end
+    end
+    if count ~= 7 then valid = false end
+    JokCombatMagic.valid = valid and count == 7
+    return JokCombatMagic.valid, count
+end
+
+function JokCombatMagic.restoreSyntheticInput()
+    if not JokCombatMagic.inputRestorePending then return false end
+    if ReadByte(ADDRESS.shortcutControlSelector) == 0x20 then
+        WriteByte(ADDRESS.shortcutControlSelector,
+            JokCombatMagic.shortcutControlOriginal)
+    end
+    if ReadByte(ADDRESS.l2ControlMap) == CONTROL_INDEX.TRIANGLE then
+        WriteByte(ADDRESS.l2ControlMap, JokCombatMagic.l2ControlOriginal)
+    end
+    -- Retain conditional recovery for a stale v0.9.1 synthetic raw pulse. The
+    -- current dispatcher never writes rawButtons.
+    if JokCombatMagic.rawInjected ~= JokCombatMagic.rawOriginal
+        and ReadByte(ADDRESS.rawButtons) == JokCombatMagic.rawInjected then
+        WriteByte(ADDRESS.rawButtons, JokCombatMagic.rawOriginal)
+    end
+    JokCombatMagic.inputRestorePending = false
+    return true
+end
+
+function JokCombatMagic.restore(reason)
+    if not JokCombatMagic.active then
+        JokCombatMagic.restoreSyntheticInput()
+        return false
+    end
+    local family = JokCombatMagic.family
+    JokCombatMagic.restoreSyntheticInput()
+    local restored = 0
+    if family ~= nil then
+        if ReadByte(ADDRESS.nativeShortcutTriangle) == family.index then
+            WriteByte(ADDRESS.nativeShortcutTriangle,
+                JokCombatMagic.shortcutOriginal)
+            restored = restored + 1
+        end
+        local levelAddress = ADDRESS.magicLevelBase + family.index
+        if ReadByte(levelAddress) == JokCombatMagic.levelForced then
+            WriteByte(levelAddress, JokCombatMagic.levelOriginal)
+            restored = restored + 1
+        end
+        for index, address in ipairs(family.costs) do
+            if JokCombatMagic.readCost(family, address) == 0 then
+                JokCombatMagic.writeCost(
+                    family, address, JokCombatMagic.costOriginal[index])
+                restored = restored + 1
+            end
+        end
+    end
+    JokCombatMagic.clearRecovery()
+    JokCombatMagic.active = false
+    JokCombatMagic.family = nil
+    JokCombatMagic.path = nil
+    JokCombatMagic.phase = nil
+    JokCombatMagic.frames = 0
+    JokCombatMagic.exitFrames = 0
+    JokCombatMagic.shortcutOriginal = nil
+    JokCombatMagic.levelOriginal = nil
+    JokCombatMagic.levelForced = nil
+    JokCombatMagic.costOriginal = nil
+    JokCombatMagic.rawOriginal = nil
+    JokCombatMagic.rawInjected = nil
+    JokCombatMagic.l2ControlOriginal = nil
+    JokCombatMagic.shortcutControlOriginal = nil
+    JokCombatMagic.prearmed = false
+    JokCombatMagic.prearmPrefix = nil
+    JokCombatMagic.prearmL2Original = nil
+    JokCombatMagic.prearmShortcutOriginal = nil
+    if family ~= nil then
+        log(string.format("[magic] %s transient cast restored (%d fields)%s.",
+            family.name, restored,
+            reason ~= nil and ": " .. reason or ""))
+    end
+    return true
+end
+
+function JokCombatMagic.matchesAnimation(player)
+    return JokCombatMagic.family ~= nil
+        and JokCombatMagic.family.animations[player.animation] == true
+end
+
+function JokCombatMagic.request(player, path, node)
+    local family = node ~= nil and JokCombatMagic.catalog[node.id] or nil
+    if not JokCombatMagic.valid or JokCombatMagic.active
+        or family == nil then
+        log("[magic] " .. tostring(path)
+            .. " rejected: native magic adapter unavailable or busy.")
+        return false
+    end
+    local expectedPrefix = path:sub(1, #path - 1)
+    if not JokCombatMagic.prearmed
+        or JokCombatMagic.prearmPrefix ~= expectedPrefix
+        or ReadByte(ADDRESS.l2ControlMap) ~= CONTROL_INDEX.TRIANGLE
+        or ReadByte(ADDRESS.shortcutControlSelector) ~= 0x20 then
+        log("[magic] " .. tostring(path)
+            .. " rejected: L2<-Y + Shortcut<-L2 was not prearmed.")
+        JokCombatMagic.restorePrearm()
+        return false
+    end
+
+    clearComboIntent()
+    clearTransitionCheck()
+    clearDeferredAttackCommand()
+    restoreActionRoutes()
+    HUD.hideOwned()
+
+    JokCombatMagic.family = family
+    JokCombatMagic.path = path
+    JokCombatMagic.phase = "waiting"
+    JokCombatMagic.frames = CONFIG.branchInputTimeoutFrames
+    JokCombatMagic.exitFrames = 0
+    JokCombatMagic.shortcutOriginal =
+        ReadByte(ADDRESS.nativeShortcutTriangle)
+    JokCombatMagic.levelOriginal =
+        ReadByte(ADDRESS.magicLevelBase + family.index)
+    JokCombatMagic.levelForced = math.max(1, JokCombatMagic.levelOriginal)
+    JokCombatMagic.costOriginal = {}
+    for index, address in ipairs(family.costs) do
+        JokCombatMagic.costOriginal[index] =
+            JokCombatMagic.readCost(family, address)
+    end
+    JokCombatMagic.rawOriginal = ReadByte(ADDRESS.rawButtons)
+    JokCombatMagic.rawInjected = JokCombatMagic.rawOriginal
+    JokCombatMagic.l2ControlOriginal = JokCombatMagic.prearmL2Original
+    JokCombatMagic.shortcutControlOriginal =
+        JokCombatMagic.prearmShortcutOriginal
+    -- Transfer both already-written layers from prefix ownership to the cast.
+    -- Do not restore them before KH1 consumes this frame's physical Y edge.
+    JokCombatMagic.prearmed = false
+    JokCombatMagic.prearmPrefix = nil
+    JokCombatMagic.prearmL2Original = nil
+    JokCombatMagic.prearmShortcutOriginal = nil
+    JokCombatMagic.active = true
+    JokCombatMagic.publishRecovery(family)
+
+    WriteByte(ADDRESS.nativeShortcutTriangle, family.index)
+    WriteByte(ADDRESS.magicLevelBase + family.index,
+        JokCombatMagic.levelForced)
+    for _, address in ipairs(family.costs) do
+        JokCombatMagic.writeCost(family, address, 0)
+    end
+    WriteByte(player.pointer + PLAYER.actionControl, 0x03, true)
+    JokCombatMagic.inputRestorePending = true
+    JokCombatBranch.pendingPath = nil
+    JokCombatBranch.pendingSourceAnimation = nil
+    JokCombatBranch.pendingSourceTime = 0.0
+    JokCombatBranch.pendingRelease = 0.0
+    JokCombatBranch.waitingPath = nil
+    JokCombatBranch.active = true
+    log(string.format(
+        "[magic] %s requested by %s through prearmed L2<-Y + Shortcut<-L2; MP cost owned at zero.",
+        family.name, path))
+    return true
+end
+
+function JokCombatMagic.update(player)
+    if not JokCombatMagic.active then return false end
+    JokCombatMagic.frames = JokCombatMagic.frames - 1
+    if JokCombatMagic.phase == "waiting" then
+        if JokCombatMagic.matchesAnimation(player) then
+            JokCombatMagic.phase = "active"
+            JokCombatMagic.frames = 360
+            JokCombatBranch.path = JokCombatMagic.path
+            JokCombatBranch.animation = player.animation
+            log(string.format(
+                "[magic] %s accepted natively: anim=0x%02X context=%s.",
+                JokCombatMagic.family.name, player.animation,
+                player.airborne and "air" or "ground"))
+        elseif JokCombatMagic.frames <= 0 then
+            local name = JokCombatMagic.family.name
+            JokCombatMagic.restore("native entry timeout")
+            JokCombatBranch.reset(name .. " native entry timed out", true)
+        end
+        return true
+    end
+
+    if JokCombatMagic.matchesAnimation(player) then
+        JokCombatMagic.exitFrames = 0
+    else
+        -- Fire may pass through its wind-up and cast records. A short grace
+        -- keeps all three native costs zero across that internal transition.
+        JokCombatMagic.exitFrames = JokCombatMagic.exitFrames + 1
+    end
+    if JokCombatMagic.exitFrames >= 12
+        or JokCombatMagic.frames <= 0 then
+        local timedOut = JokCombatMagic.frames <= 0
+        local name = JokCombatMagic.family.name
+        JokCombatMagic.restore(timedOut and "animation timeout" or "complete")
+        JokCombatBranch.reset(name .. " complete", true)
+    end
+    return true
+end
+
 -- Pirate-style modifier-free X/T families. Keep this as one global table:
 -- Lua 5.3 limits a chunk to 200 local variables and this prototype already
 -- carries the validated loadout, HUD and route state in the same chunk.
 -- Every named move ends in T: X is always a physical/light continuation and
--- can never unexpectedly dispatch an Action Ability. The unavailable
--- magic/Limit reverse extensions remain declared so runtime and docs cannot
--- silently drift while their complete Steam dispatchers are being ported.
+-- can never unexpectedly dispatch an Action Ability. Seven magic reverse
+-- extensions use the native adapter above; Limit paths remain declared but
+-- disabled so runtime and docs cannot silently drift during their later port.
 JokCombatBranch = {
     nodes = {
         -- Strong combo: Y Y Y.
@@ -3307,9 +3616,9 @@ JokCombatBranch = {
         XXXT = { kind = "action", id = "counterattack" },
         XXXXT = { kind = "action", id = "zantetsuken" },
 
-        -- Reserved reverse extensions. Their final T is the only named move;
-        -- intervening X inputs will become physical links when those complete
-        -- magic/Limit dispatchers are enabled.
+        -- Reverse extensions. Their final T is the only named move; intervening
+        -- X inputs are physical links. Magic is active in v0.9.4; Limit and the
+        -- experimental Chain Attack path remain parked.
         TXT = { kind = "magic", id = "fire" },
         TXXT = { kind = "magic", id = "blizzard" },
         TTXT = { kind = "magic", id = "thunder" },
@@ -3361,16 +3670,32 @@ JokCombatBranch = {
     waitingFrames = 0,
     waitingSourceAnimation = nil,
     waitingSourceTime = 0.0,
+    reversePrefix = nil,
+    reverseWaitingKind = nil,
+    reverseWaitingFrames = 0,
 }
 
 function JokCombatBranch.kindReady(node)
     if node == nil then return false end
     if node.kind == "action" then return CONFIG.branchActionAbilities end
-    if node.kind == "magic" then return CONFIG.branchMagic end
+    if node.kind == "magic" then
+        return CONFIG.branchMagic and JokCombatMagic ~= nil
+            and JokCombatMagic.valid
+    end
     if node.kind == "limit" or node.kind == "experimental" then
         return CONFIG.branchLimits
     end
     return false
+end
+
+function JokCombatBranch.nodeReady(node, player, path)
+    if not JokCombatBranch.kindReady(node) then return false end
+    if player == nil or node.kind ~= "action" then return true end
+    local action = ACTION_BY_ID[node.id]
+    if action ~= nil and actionMatchesContext(action, player) then return true end
+    -- Ground C3 deliberately enters D6 before its D1 child. This is the only
+    -- cross-context exception; airborne routing itself remains strictly native.
+    return not player.airborne and path == "XXTT"
 end
 
 function JokCombatBranch.initialize()
@@ -3397,6 +3722,13 @@ function JokCombatBranch.initialize()
                     node.id, path))
                 valid = false
             end
+        elseif node.kind == "magic"
+            and (JokCombatMagic == nil
+                or JokCombatMagic.catalog[node.id] == nil) then
+            ConsolePrint(string.format(
+                "[JokCombat:branch:fault] unknown magic %s at %s.",
+                node.id, path))
+            valid = false
         end
         if node.cross ~= nil and JokCombatBranch.nodes[node.cross] == nil then
             ConsolePrint(string.format(
@@ -3426,12 +3758,20 @@ function JokCombatBranch.reset(reason, quiet, skipCleanup)
     local wasActive = JokCombatBranch.active
         or JokCombatBranch.pendingPath ~= nil
         or JokCombatBranch.waitingPath ~= nil
+        or JokCombatBranch.reverseWaitingKind ~= nil
+        or (JokCombatMagic ~= nil
+            and (JokCombatMagic.active or JokCombatMagic.prearmed))
+    if JokCombatMagic ~= nil and JokCombatMagic.active then
+        JokCombatMagic.restore(reason or "branch reset")
+    end
+    if JokCombatMagic ~= nil then JokCombatMagic.restorePrearm() end
     if wasActive and not skipCleanup and canRun then
-        if JokCombatBranch.waitingPath ~= nil then clearTransitionCheck() end
-        restoreActionRoutes()
-        if airGroundActionBridgeAnimation ~= nil then
-            restoreAirGroundActionBridge()
+        if JokCombatBranch.waitingPath ~= nil
+            or JokCombatBranch.reverseWaitingKind ~= nil then
+            clearTransitionCheck()
+            clearDeferredAttackCommand()
         end
+        restoreActionRoutes()
     end
     JokCombatBranch.active = false
     JokCombatBranch.path = nil
@@ -3445,6 +3785,9 @@ function JokCombatBranch.reset(reason, quiet, skipCleanup)
     JokCombatBranch.waitingFrames = 0
     JokCombatBranch.waitingSourceAnimation = nil
     JokCombatBranch.waitingSourceTime = 0.0
+    JokCombatBranch.reversePrefix = nil
+    JokCombatBranch.reverseWaitingKind = nil
+    JokCombatBranch.reverseWaitingFrames = 0
     if wasActive and not quiet then
         log("[branch] closed" .. (reason ~= nil and ": " .. reason or "."))
     end
@@ -3465,13 +3808,6 @@ function JokCombatBranch.dispatch(player, path)
             .. " could not dispatch a complete Action Ability record.")
         JokCombatBranch.reset("dispatcher unavailable")
         return true
-    end
-
-    -- A chained child must inherit the real aerial state, not the temporary
-    -- fake-ground value owned by its parent Action Ability.
-    if airGroundActionBridgeFakeGround then
-        restoreAirGroundActionBridge()
-        JokCombatBranch.refreshAirState(player)
     end
 
     -- Hurricane Blast is natively air-only. In C3 it is legal on the ground
@@ -3532,28 +3868,95 @@ function JokCombatBranch.fallback(player, path)
     return true
 end
 
+function JokCombatBranch.hasReadyDescendant(prefix, player)
+    if prefix == nil then return false end
+    for path, node in pairs(JokCombatBranch.nodes) do
+        if #path > #prefix and path:sub(1, #prefix) == prefix
+            and JokCombatBranch.nodeReady(node, player, path) then
+            return true
+        end
+    end
+    return false
+end
+
+function JokCombatBranch.observePhysicalLink(player, acceptedKind)
+    if JokCombatBranch.reverseWaitingKind == nil
+        or acceptedKind ~= JokCombatBranch.reverseWaitingKind then
+        return false
+    end
+    local prefix = JokCombatBranch.reversePrefix
+    JokCombatBranch.reversePrefix = nil
+    JokCombatBranch.reverseWaitingKind = nil
+    JokCombatBranch.reverseWaitingFrames = 0
+    JokCombatBranch.path = prefix
+    JokCombatBranch.animation = player.animation
+    JokCombatBranch.active = true
+    log(string.format(
+        "[branch] reverse prefix %s accepted through physical A: anim=0x%02X.",
+        prefix, player.animation))
+    JokCombatMagic.prearm(prefix)
+    return true
+end
+
 function JokCombatBranch.continuePhysical(player)
     local sourcePath = JokCombatBranch.path or "unknown"
+    local nextPrefix = sourcePath .. "X"
+    local preserveBranch = JokCombatBranch.hasReadyDescendant(
+        nextPrefix, player)
     log("[branch] " .. sourcePath
-        .. " + A -> native physical continuation; no named ability dispatched.")
-    JokCombatBranch.reset("physical A continuation", true)
+        .. " + A -> native physical continuation"
+        .. (preserveBranch and "; reverse prefix " .. nextPrefix .. " armed."
+            or "; no named ability dispatched."))
+
+    if not preserveBranch then
+        JokCombatBranch.reset("physical A continuation", true)
+    else
+        JokCombatBranch.pendingPath = nil
+        JokCombatBranch.pendingSourceAnimation = nil
+        JokCombatBranch.pendingSourceTime = 0.0
+        JokCombatBranch.pendingRelease = 0.0
+        JokCombatBranch.waitingPath = nil
+        JokCombatBranch.waitingAnimation = nil
+        JokCombatBranch.waitingFrames = 0
+        JokCombatBranch.waitingSourceAnimation = nil
+        JokCombatBranch.waitingSourceTime = 0.0
+        JokCombatBranch.reversePrefix = nextPrefix
+        JokCombatBranch.reverseWaitingKind = "pirate-light:" .. nextPrefix
+        JokCombatBranch.reverseWaitingFrames = CONFIG.branchInputTimeoutFrames
+        JokCombatBranch.path = nil
+        JokCombatBranch.animation = nil
+        JokCombatBranch.active = true
+    end
     clearComboIntent()
     clearTransitionCheck()
     clearDeferredAttackCommand()
     restoreActionRoutes()
     JokCombatBranch.refreshAirState(player)
     if not queueAttackAfterRelease(
-            player, "pirate-light:" .. sourcePath, nil, nil) then
+            player, preserveBranch and JokCombatBranch.reverseWaitingKind
+                or "pirate-light:" .. sourcePath, nil, nil) then
         log("[branch] " .. sourcePath
             .. " physical continuation could not be queued.")
+        if preserveBranch then
+            JokCombatBranch.reset("physical continuation queue failed")
+        end
     end
     return true
 end
 
 function JokCombatBranch.execute(player, path)
     local node = JokCombatBranch.nodes[path]
-    if JokCombatBranch.kindReady(node) then
+    if not JokCombatBranch.nodeReady(node, player, path) then
+        log("[branch] " .. tostring(path)
+            .. " is unavailable in the current ground/air context.")
+        JokCombatBranch.reset("context unavailable")
+        return true
+    end
+    if node.kind == "action" then
         return JokCombatBranch.dispatch(player, path)
+    end
+    if node.kind == "magic" then
+        if JokCombatMagic.request(player, path, node) then return true end
     end
     return JokCombatBranch.fallback(player, path)
 end
@@ -3562,6 +3965,12 @@ function JokCombatBranch.queue(player, path)
     local node = JokCombatBranch.nodes[path]
     if node == nil then
         JokCombatBranch.reset("unmapped sequence " .. tostring(path))
+        return true
+    end
+    if not JokCombatBranch.nodeReady(node, player, path) then
+        log("[branch] " .. path
+            .. " ignored: no native action exists for this air/ground context.")
+        JokCombatBranch.reset("context unavailable")
         return true
     end
     local window = JokCombatBranch.windows[player.animation]
@@ -3621,9 +4030,7 @@ function JokCombatBranch.observeRequest(player)
         log(string.format(
             "[branch] %s accepted: anim=0x%02X context=%s.",
             JokCombatBranch.path, player.animation,
-            player.airborne and "air" or
-                (airGroundActionBridgeFakeGround and "air-suspended"
-                    or "ground")))
+            player.airborne and "air-native" or "ground"))
         return true
     end
 
@@ -3635,51 +4042,99 @@ function JokCombatBranch.observeRequest(player)
 end
 
 function JokCombatBranch.rootPath(player)
-    local maximum = nil
     if isGroundNormalContext(player) then
-        maximum = ReadByte(ADDRESS.maxGroundComboLength)
-    elseif isAirNormalContext(player) then
-        maximum = ReadByte(ADDRESS.maxAirComboLength)
-    else
-        local neutral = player.control == 0x03
-            and not isAttackContext(player) and player.animation <= 0x07
-        return neutral and "T" or nil
+        local maximum = ReadByte(ADDRESS.maxGroundComboLength)
+        local position = ReadByte(ADDRESS.comboPosition)
+        if position < 1 or position >= maximum then return nil end
+        return string.rep("X", position) .. "T"
     end
-    local position = ReadByte(ADDRESS.comboPosition)
-    if position < 1 or position >= maximum then return nil end
-    return string.rep("X", position) .. "T"
+    if isAirNormalContext(player) then
+        local maximum = ReadByte(ADDRESS.maxAirComboLength)
+        local position = ReadByte(ADDRESS.comboPosition)
+        if position < 1 or position >= maximum then return nil end
+        -- Every intermediate native aerial hit aliases to the one validated air
+        -- family. This does not duplicate an Action Ability in the canonical
+        -- map: X/Y timing still comes from the live CC/CD animation, while the
+        -- shared XXT node dispatches Aerial Sweep and then Hurricane Blast.
+        return "XXT"
+    end
+    local neutral = player.control == 0x03
+        and not isAttackContext(player) and player.animation <= 0x07
+    return neutral and "T" or nil
 end
 
 function JokCombatBranch.nodeName(node)
     if node == nil then return nil end
     local action = ACTION_BY_ID[node.id]
     if node.kind == "action" and action ~= nil then return action.name end
+    local magic = JokCombatMagic ~= nil
+        and JokCombatMagic.catalog[node.id] or nil
+    if node.kind == "magic" and magic ~= nil then return magic.name end
     local label = tostring(node.id):gsub("_", " ")
     return label:gsub("^%l", string.upper)
 end
 
-function JokCombatBranch.guideLine(sequence, node)
-    if node == nil or not JokCombatBranch.kindReady(node) then
+function JokCombatBranch.guideLine(sequence, node, player, path)
+    if node == nil or not JokCombatBranch.nodeReady(node, player, path) then
         return sequence .. " -"
     end
     return sequence .. " " .. (JokCombatBranch.nodeName(node) or "-")
 end
 
-function JokCombatBranch.familyGuideEntries(node, includeCurrent)
+function JokCombatBranch.familyGuideEntries(node, includeCurrent, player, path)
     if node == nil then return nil end
     local entries = {}
     local current = node
+    local currentPath = path
     if not includeCurrent then
-        current = node.triangle ~= nil
-            and JokCombatBranch.nodes[node.triangle] or nil
+        currentPath = node.triangle
+        current = currentPath ~= nil
+            and JokCombatBranch.nodes[currentPath] or nil
     end
     local sequence = "[Y]"
     while current ~= nil and #entries < 4
-        and JokCombatBranch.kindReady(current) do
-        table.insert(entries, JokCombatBranch.guideLine(sequence, current))
+        and JokCombatBranch.nodeReady(current, player, currentPath) do
+        table.insert(entries, JokCombatBranch.guideLine(
+            sequence, current, player, currentPath))
         sequence = sequence .. "[Y]"
-        current = current.triangle ~= nil
-            and JokCombatBranch.nodes[current.triangle] or nil
+        currentPath = current.triangle
+        current = currentPath ~= nil
+            and JokCombatBranch.nodes[currentPath] or nil
+    end
+    if #entries == 0 then return nil end
+    while #entries < 4 do table.insert(entries, "-") end
+    return entries
+end
+
+function JokCombatBranch.guideEntriesFromPrefix(prefix, player)
+    if prefix == nil then return nil end
+    local entries = {}
+    local seen = {}
+    local directPath = prefix
+    local sequence = ""
+    for _ = 1, 4 do
+        directPath = directPath .. "T"
+        sequence = sequence .. "[Y]"
+        local node = JokCombatBranch.nodes[directPath]
+        if node == nil
+            or not JokCombatBranch.nodeReady(node, player, directPath) then
+            break
+        end
+        table.insert(entries, JokCombatBranch.guideLine(
+            sequence, node, player, directPath))
+        seen[directPath] = true
+        if #entries >= 4 then break end
+    end
+    for count = 1, 4 do
+        if #entries >= 4 then break end
+        local path = prefix .. string.rep("X", count) .. "T"
+        local node = JokCombatBranch.nodes[path]
+        if node ~= nil and JokCombatBranch.nodeReady(node, player, path)
+            and not seen[path] then
+            table.insert(entries, JokCombatBranch.guideLine(
+                string.rep("[A]", count) .. "[Y]", node, player, path))
+            seen[path] = true
+        end
     end
     if #entries == 0 then return nil end
     while #entries < 4 do table.insert(entries, "-") end
@@ -3691,8 +4146,8 @@ function JokCombatBranch.branchGuideEntries(player)
         or player.animation ~= JokCombatBranch.animation then
         return nil
     end
-    return JokCombatBranch.familyGuideEntries(
-        JokCombatBranch.nodes[JokCombatBranch.path], false)
+    return JokCombatBranch.guideEntriesFromPrefix(
+        JokCombatBranch.path, player)
 end
 
 function JokCombatBranch.guideEntries(player, buttons)
@@ -3701,7 +4156,9 @@ function JokCombatBranch.guideEntries(player, buttons)
         return nil
     end
     if JokCombatBranch.pendingPath ~= nil
-        or JokCombatBranch.waitingPath ~= nil then
+        or JokCombatBranch.waitingPath ~= nil
+        or JokCombatBranch.reverseWaitingKind ~= nil
+        or (JokCombatMagic ~= nil and JokCombatMagic.active) then
         return nil
     end
     if HUD.directEditGroup ~= nil
@@ -3721,16 +4178,20 @@ function JokCombatBranch.guideEntries(player, buttons)
     -- Never advertise a reserved adapter as executable. The late vanilla
     -- positions currently mapped to magic/Limit therefore keep the ordinary
     -- Command Menu until those complete Steam dispatchers are enabled.
-    if node == nil or not JokCombatBranch.kindReady(node) then return nil end
+    if node == nil
+        or not JokCombatBranch.nodeReady(node, player, path) then return nil end
     -- Do not cover the normal Command Menu permanently while Sora is idle.
     -- The neutral Strong family becomes visible immediately after its first Y.
     if path == "T" then return nil end
-    return JokCombatBranch.familyGuideEntries(node, true)
+    return JokCombatBranch.familyGuideEntries(node, true, player, path)
 end
 
 function JokCombatBranch.update(player, buttons, crossPressed,
         trianglePressed)
     if not CONFIG.branchCombos or not JokCombatBranch.valid then return false end
+    if JokCombatMagic ~= nil and JokCombatMagic.active then
+        return JokCombatMagic.update(player)
+    end
 
     local modified = (buttons & (BUTTON.L1 | BUTTON.R1
         | BUTTON.L2 | BUTTON.R2)) ~= 0
@@ -3743,6 +4204,21 @@ function JokCombatBranch.update(player, buttons, crossPressed,
     if not HUD.nativeRootSelectionAvailable() then
         if JokCombatBranch.active then
             JokCombatBranch.reset("native command took priority")
+        end
+        return false
+    end
+
+    if JokCombatBranch.reverseWaitingKind ~= nil then
+        JokCombatBranch.reverseWaitingFrames =
+            JokCombatBranch.reverseWaitingFrames - 1
+        if JokCombatBranch.reverseWaitingFrames <= 0 then
+            JokCombatBranch.reset("physical reverse link timed out")
+            return false
+        end
+        if crossPressed or trianglePressed then
+            log("[branch] input ignored while physical A is entering "
+                .. "the reverse prefix.")
+            return true
         end
         return false
     end
@@ -3777,8 +4253,11 @@ function JokCombatBranch.update(player, buttons, crossPressed,
             return JokCombatBranch.continuePhysical(player)
         end
         local node = JokCombatBranch.nodes[JokCombatBranch.path]
-        local child = node.triangle
-        if child == nil then
+        local child = node ~= nil and node.triangle
+            or JokCombatBranch.path .. "T"
+        local childNode = JokCombatBranch.nodes[child]
+        if childNode == nil
+            or not JokCombatBranch.nodeReady(childNode, player, child) then
             log("[branch] " .. JokCombatBranch.path
                 .. " is terminal; new input discarded until recovery.")
             return true
@@ -3794,9 +4273,9 @@ function JokCombatBranch.update(player, buttons, crossPressed,
     local root = JokCombatBranch.rootPath(player)
     local node = root ~= nil and JokCombatBranch.nodes[root] or nil
     if node == nil then return false end
-    if not JokCombatBranch.kindReady(node) then
-        log("[branch] " .. root .. " remains native in this build; "
-            .. node.kind .. " adapter is not enabled yet.")
+    if not JokCombatBranch.nodeReady(node, player, root) then
+        log("[branch] " .. root .. " left native: no compatible "
+            .. (player.airborne and "airborne" or "ground") .. " action.")
         return false
     end
     if root == "T" then return JokCombatBranch.execute(player, root) end
@@ -3836,18 +4315,6 @@ local function updateCrossActionPrime(player, buttons)
         restoreActionRoutes()
         currentPrimeKind = nil
         log("Action Ability X prime moved to the current air/ground context.")
-    end
-
-    local bridgeActive = airGroundActionBridgeAnimation ~= nil
-        and player.animation == airGroundActionBridgeAnimation
-    if bridgeActive and currentPrimeKind == nil then
-        -- Holding the modifier after a non-X shortcut used to pre-arm its X
-        -- binding immediately. That replaced the live bridge animation (for
-        -- example D0 with D8) and released the height stall mid-action. An
-        -- explicit cancel can still route another non-X shortcut later, but a
-        -- passive X prime never takes ownership from the active move.
-        clearActionPrimeCombo(true)
-        return false
     end
 
     local canStayPrimed = CONFIG.actionLoadout and desiredPrime ~= nil
@@ -3955,6 +4422,9 @@ local function updateModifierFaceRouting(buttons)
     local reactionActive = not HUD.nativeRootSelectionAvailable()
     local branchOwnsTriangle = CONFIG.branchCombos
         and JokCombatBranch ~= nil and JokCombatBranch.active
+        and not (JokCombatMagic ~= nil
+            and (JokCombatMagic.inputRestorePending
+                or JokCombatMagic.prearmed))
     return setByte("triangleControlMap", ADDRESS.triangleControlMap,
         (actionModifierHeld or branchOwnsTriangle)
             and not reactionActive and 0xFE
@@ -3963,26 +4433,8 @@ local function updateModifierFaceRouting(buttons)
 end
 
 local function updateAttackControlRouting(buttons, player)
-    local suppressPhysicalCross = airGroundActionBridgeFakeGround
-        or (CONFIG.branchCombos and JokCombatBranch ~= nil
-            and JokCombatBranch.active)
-    if not suppressPhysicalCross and buttons ~= nil and player ~= nil
-        and player.airborne then
-        local l2Held = (buttons & BUTTON.L2) ~= 0
-        local r2Held = (buttons & BUTTON.R2) ~= 0
-        local slot = nil
-        if l2Held and not r2Held then
-            slot = ACTION_SLOT_BY_ID.l2_cross
-        elseif r2Held and not l2Held then
-            slot = ACTION_SLOT_BY_ID.r2_cross
-        elseif l2Held and r2Held then
-            slot = ACTION_SLOT_BY_ID.dual_cross
-        end
-        local action = slot ~= nil and ACTION_BY_ID[loadout[slot.id]] or nil
-        suppressPhysicalCross = action ~= nil and action.airBridge == true
-            and action.recordAvailable == true
-            and (player.airborneState == 1 or player.airborneState == 2)
-    end
+    local suppressPhysicalCross = CONFIG.branchCombos
+        and JokCombatBranch ~= nil and JokCombatBranch.active
 
     if not CONFIG.triangleGroundFinisher then
         forceTriangleAttackFrames = 0
@@ -4137,15 +4589,6 @@ function _OnInit()
     airRouteKind = nil
     airRouteSourceAnimation = nil
     airRouteSourceTime = 0.0
-    airGroundActionBridgeAnimation = nil
-    airGroundActionBridgePositionPointer = nil
-    airGroundActionBridgeHeight = nil
-    airGroundActionBridgeLifted = false
-    airGroundActionBridgeUsesBranch = false
-    airGroundActionBridgePlayerPointer = nil
-    airGroundActionBridgeOriginalState = nil
-    airGroundActionBridgeFakeGround = false
-
     if not CONFIG.enabled then
         ConsolePrint("JokCombat Combat Prototype is disabled in CONFIG.")
         return
@@ -4155,6 +4598,10 @@ function _OnInit()
         ConsolePrint("JokCombat Combat Prototype - unsupported game/build; disabled.")
         return
     end
+
+    -- Recover before any later validation can return early. Every field is
+    -- restored only if it still contains JokCombat's owned patched value.
+    JokCombatMagic.recoverStale()
 
     local staleSyntheticAttack = ReadInt(ADDRESS.triggerMenu1) ~= 0
         or ReadInt(ADDRESS.triggerMenu2) ~= 0
@@ -4199,6 +4646,11 @@ function _OnInit()
         0xFF, { 0xFF, 0xFE }) and valid
     valid = normalizeByte("dpadLeftControlMap", ADDRESS.dpadLeftControlMap,
         0xFF, { 0xFF, 0xFE }) and valid
+    valid = normalizeByte("shortcutControlSelector",
+        ADDRESS.shortcutControlSelector, 0xFF,
+        { 0xFF, CONTROL_INDEX.TRIANGLE, 0x20 }) and valid
+    valid = normalizeByte("l2ControlMap", ADDRESS.l2ControlMap,
+        0xFF, { 0xFF, CONTROL_INDEX.TRIANGLE }) and valid
     valid = normalizeByte("triangleControlMap", ADDRESS.triangleControlMap,
         0xFF, { 0xFF, 0xFE }) and valid
     valid = normalizeByte("circleControlMap", ADDRESS.circleControlMap,
@@ -4213,6 +4665,7 @@ function _OnInit()
     local groundRouteValid = normalizeGroundActionRoute()
     local airRouteValid = normalizeAirActionRoute()
     local validActionRecordCount = validateCanonicalActionRecords()
+    local magicValid, magicCount = JokCombatMagic.initialize()
     local branchValid, branchNodeCount, branchActionCount =
         JokCombatBranch.initialize()
     loadActionLoadout()
@@ -4230,9 +4683,13 @@ function _OnInit()
     log(string.format("complete action records ready: %d/%d.",
         validActionRecordCount, #ACTION_CATALOG - 1))
     log(string.format("Pirate Y map %s: %d unique moves, "
-        .. "%d Action Ability slots enabled; reverse magic/Limit adapters parked.",
+        .. "%d Action Ability slots enabled; magic adapter=%s, Limits parked.",
         branchValid and "ready" or "disabled",
-        branchNodeCount, branchActionCount))
+        branchNodeCount, branchActionCount,
+        magicValid and "enabled" or "disabled"))
+    log(string.format("native combo magic adapter %s: %d/7 families; "
+        .. "combo casts use transient zero MP and conditional recovery.",
+        magicValid and "ready" or "disabled", magicCount))
     log("direct Action Loadout ready: hold L2/R2/L2+R2; "
         .. "D-pad Up/Down selects, Left/Right changes, release saves.")
     log("native editor cursor delegation ready: Up/Down uses KH1's complete "
@@ -4247,18 +4704,8 @@ function _OnInit()
         .. "show and edit the three rows KH1 currently renders.")
     log("native Ripple Drive/Stun Impact/Gravity Break/Zantetsuken "
         .. "selectors ready.")
-    log("airborne Action Ability routes ready: all 11 catalog actions; "
-        .. "ground-native moves use the complete ground dispatcher in a "
-        .. "temporary suspended fake-ground state.")
-    log(string.format("airborne action suspension ready: ground-native "
-        .. "actions lift by %.1f and lock vertical position until completion.",
-        CONFIG.airGroundActionLift))
-    log("airborne fake-ground lifecycle ready: raw70 is restored on complete, "
-        .. "cancel, route failure, script fault or player loss.")
-    log("airborne ground-native X shortcuts use a suppressed physical edge "
-        .. "followed by one synthetic ground-dispatch pulse.")
-    log("airborne bridge ownership ready: a passive X prime cannot replace "
-        .. "an active bridged action.")
+    log("airborne Action Ability policy ready: native air records only "
+        .. "(Aerial Sweep -> Hurricane Blast); fake-ground disabled.")
     if staleSyntheticAttack then
         log("cleared stale synthetic Attack flags during reload.")
     end
@@ -4311,13 +4758,11 @@ function _OnFrame()
         return
     end
 
+    -- Release the owned L2/Shortcut control layers before sampling this frame's
+    -- real controls. Conditional restoration never overwrites a newer state.
+    JokCombatMagic.restoreSyntheticInput()
     local buttons = ReadByte(ADDRESS.rawButtons)
     local dpad = ReadByte(ADDRESS.dpadButtons)
-    updateAirGroundActionBridge(player)
-    if faulted then
-        restoreAllPatches()
-        return
-    end
     local controlDpadOwned, controlConsumed =
         HUD.updateOverlayControls(buttons, dpad)
     local directDpadOwned = HUD.updateDirectEditor(
@@ -4502,18 +4947,8 @@ function _OnFrame()
                 actionConsumed = not isPhysicalCross
             elseif isPhysicalCross then
                 if actionMatchesContext(action, player) then
-                    local suspendedSynthetic = player.airborne
-                        and action.airBridge == true
-                        and (player.airborneState == 1
-                            or player.airborneState == 2)
-                    if suspendedSynthetic then
-                        -- The prior shoulder frame disabled native X and kept a
-                        -- harmless aerial prime. Replace it now: fake-ground must
-                        -- exist before KH1 consumes the synthetic Attack edge.
-                        restoreActionRoutes()
-                    end
                     actionConsumed = requestActionAbility(
-                        player, selectedSlot, action, not suspendedSynthetic)
+                        player, selectedSlot, action, true)
                 else
                     -- None or a ground/air mismatch deliberately preserves the
                     -- normal X combo rather than leaving the player inert.
@@ -4585,6 +5020,7 @@ function _OnFrame()
     end
 
     local acceptedKind = transitionAcceptedKind or deferredAcceptedKind
+    JokCombatBranch.observePhysicalLink(player, acceptedKind)
     if acceptedKind == "normal" then
         -- A completed link opens a new animation, but a Cross pressed on its
         -- first frame must still pass the late-window test below.

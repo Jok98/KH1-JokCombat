@@ -1,6 +1,6 @@
 # JokCombat — mappa combo Pirate A / Y
 
-Stato: **CORE ACTION 11/11 IMPLEMENTATO IN v0.9.0**
+Stato: **ACTION TERRA 11/11 + ACTION ARIA NATIVE 2/2 IN v0.9.7; MAGIE IN PROVA; LIMIT PARCHEGGIATI**
 
 Ambito: KH1 Final Mix, Steam Global, Sora
 Input abbreviati: `A` = Croce, `Y` = Triangolo
@@ -18,9 +18,14 @@ Input abbreviati: `A` = Croce, `Y` = Triangolo
    password eseguite soltanto all'ultimo tasto.
 5. I Reaction Command conservano la priorità su `Y`. Lo Strong combo neutrale
    esiste soltanto quando il Command Menu non espone una reaction.
-6. Lo stesso schema viene usato a terra e in aria; gli adapter già validati
-   gestiscono le differenze tecniche.
+6. A terra resta disponibile la mappa completa. In aria vengono esposte soltanto
+   Aerial Sweep e Hurricane Blast, le due Action Ability con record aereo nativo.
 7. Summon resta esclusa.
+
+La v0.9.6 rimuove interamente la sospensione fake-ground: nessuna mossa aerea
+scrive `raw70`, quota o stick. Le Action Ability terrestri restano disponibili
+nel loro loadout e nella mappa a terra, ma in aria non vengono mostrate né
+richieste.
 
 ## 2. Core Action Ability
 
@@ -59,6 +64,13 @@ soltanto i `Y` ancora disponibili nella famiglia.
 L'ordine mantiene il ponte Steam già validato: Aerial Sweep `D6` autorizza
 Hurricane Blast `D1` anche quando la famiglia è iniziata a terra.
 
+In aria questa è l'unica famiglia Action, ma dalla v0.9.7 può iniziare dopo
+qualunque colpo intermedio della combo: `A Y`, `A A Y`, `A A A Y` e le posizioni
+aggiunte da Air Combo Plus eseguono tutte Aerial Sweep; il successivo `Y` esegue
+Hurricane Blast. Internamente convergono sul solo nodo canonico `XXT`, quindi le
+abilità non vengono duplicate nella mappa. Ripple Drive resta ground-only e non
+viene proposta dalla Guide aerea. Il finisher `CE` non viene interrotto.
+
 ### C4 e C5
 
 | Famiglia | Sequenza | Mossa |
@@ -77,21 +89,35 @@ Hurricane Blast `D1` anche quando la famiglia è iniziata a terra.
 | C5 | 1 |
 | Totale | **11** |
 
-Nessuna Action Ability è duplicata e nessuna viene eseguita da `A`.
+Nessuna Action Ability è duplicata e nessuna viene eseguita da `A`. La copertura
+terrestre resta 11/11; la copertura aerea intenzionale è 2/2 record nativi.
 
-## 3. Reverse ed estensioni riservate
+## 3. Reverse e magie native
 
-La v0.9.0 rende già sicuro il primo passo delle reverse: premendo `A` dopo
-un'Action Ability, il ramo speciale viene chiuso e KH1 riceve un nuovo attacco
-fisico. Non viene eseguita alcuna abilità nominata.
+La v0.9.4 conserva il prefisso della famiglia mentre ogni `A` intermedio
+esegue un vero attacco fisico KH1. La mossa nominata parte esclusivamente sul
+`Y` finale. Se non esiste più una magia raggiungibile, il ramo viene chiuso e
+gli `A` successivi restano completamente vanilla.
 
-Le estensioni seguenti sono dichiarate nella mappa, tutte con un `Y` finale,
-ma restano disabilitate finché magia e Limit non possiedono dispatcher Steam
-completi per effetto, costo, bersaglio e follow-up.
+Le sette magie usano il dispatcher Shortcut nativo. Quando il prefisso reverse
+è stato accettato, JokCombat prearma due livelli autorizzati da Critical Mix:
+la mappa L2 punta al controllo fisico Y (`0x04`) e il selettore Shortcut punta
+al controllo logico L2 (`0x20`). La mappa nativa della selezione Y resta attiva,
+quindi il `Y` finale vale nello stesso frame come L2 e come prima casella
+Shortcut, anziché essere simulato scrivendo lo snapshot `rawButtons`. KH1
+sceglie grado,
+animazione terra/aria, bersaglio, VFX, hitbox ed effetto. Per il solo cast
+avviato dalla combo, JokCombat porta a zero i tre costi della famiglia e li
+ripristina alla fine. Le magie lanciate normalmente dal menu o dalle shortcut
+mantengono quindi il consumo MP vanilla. Anche il livello magia e lo slot
+Shortcut presi in prestito vengono ripristinati e un journal condizionale
+copre reload/F1 durante il cast, incluse entrambe le mappe di controllo. Il
+journal v0.9.4 sa inoltre recuperare eventuali cast transitori lasciati dalle
+v0.9.1, v0.9.2 e v0.9.3.
 
 ### Magie
 
-| Sequenza riservata | Famiglia |
+| Sequenza attiva | Famiglia |
 |---|---|
 | `Y A Y` | Fire |
 | `Y A A Y` | Blizzard |
@@ -101,7 +127,7 @@ completi per effetto, costo, bersaglio e follow-up.
 | `A Y Y Y A Y` | Gravity |
 | `A A Y Y Y A Y` | Stop |
 
-### Limit e speciale
+### Limit e speciale (ancora riservati)
 
 | Sequenza riservata | Mossa |
 |---|---|
@@ -112,9 +138,9 @@ completi per effetto, costo, bersaglio e follow-up.
 | `A A Y Y Y A A Y` | Trinity Limit |
 | `Y Y Y A A A Y` | Chain Attack / Burst |
 
-Queste assegnazioni sono riserve univoche, non funzionalità dichiarate come
-già giocabili. La futura reverse manterrà il contesto durante i colpi fisici
-intermedi e chiamerà la mossa soltanto sul `Y` conclusivo.
+Queste sei assegnazioni restano riserve univoche, non funzionalità dichiarate
+come già giocabili. Saranno abilitate soltanto dopo un collaudo separato del
+dispatcher nativo completo e del costo MP transitorio dei Limit.
 
 ## 4. Combo Guide
 
@@ -144,6 +170,26 @@ Dopo avere eseguito Slapshot, la prima voce già consumata scompare:
 [Y][Y] Blitz
 ```
 
+Dopo Vortex, le quattro righe mostrano sia il seguito Strong sia le reverse
+magiche raggiungibili:
+
+```text
+[Y] Stun Impact
+[Y][Y] Gravity Break
+[A][Y] Fire
+[A][A][Y] Blizzard
+```
+
+Dopo il primo `A` fisico della reverse, il prefisso viene accorciato alla
+scelta effettivamente rimasta:
+
+```text
+[Y] Fire
+[A][Y] Blizzard
+-
+-
+```
+
 La Guide non mostra `[A] Continua vanilla`: la stringa fisica è sempre
 implicita. Non rimane inoltre aperta mentre Sora è neutrale, evitando di
 coprire permanentemente il Command Menu; dopo il primo `Y` dello Strong combo
@@ -159,7 +205,10 @@ D-pad.
 - Guard, Dodge, salto, modificatori, reaction command, menu, reload e perdita
   del player object chiudono sempre la famiglia.
 - Un `A` durante una famiglia usa il percorso fisico target-free già validato:
-  prima rilascia l'azione corrente, poi genera un singolo nuovo edge Attack.
+  prima rilascia l'azione corrente, poi genera un singolo nuovo edge Attack e
+  conserva il prefisso soltanto se conduce ancora a una magia attiva.
+- Un cast combo modifica soltanto la famiglia scelta: slot Shortcut, livello e
+  tre record MP vengono ripristinati condizionalmente alla fine o dopo reload.
 - Se un adapter completo non è disponibile, la mossa riservata non compare
   nella Guide e non viene sostituita da un'altra abilità.
 - I follow-up nativi dei Limit apparterranno al Limit dopo la sua attivazione.
