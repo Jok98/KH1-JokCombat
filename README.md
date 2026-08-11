@@ -155,20 +155,22 @@ Air Combo Plus e Combo Master descritto sotto.
 > rilascia il finisher per un frame e pulsa Attack senza modificare alcun record
 > azione. Il dispatcher nativo sceglie quindi la nuova apertura terra/aria.
 >
-> **Candidato v0.7.1 — Action tree:** Triangolo senza modificatori entra nella
-> mappa canonica soltanto durante una normale X valida. Le posizioni native
-> `1..4` aprono rispettivamente `XT`, `XXT`, `XXXT` e `XXXXT`; ogni nodo
-> Action Ability puo' poi ricevere una sola X/T nella propria finestra sicura.
-> Le undici Action Ability sono univoche e riusano record, selettori nativi e
-> sospensione aerea gia' validati dal loadout. Mentre il ramo e' attivo, X e
-> Triangolo fisici sono isolati per evitare un attacco vanilla parallelo; spam,
-> Guard, Dodge, salto, reaction command, menu, reload e cambio player chiudono
-> sempre il ramo. Le sette magie e i sei nodi Limit/speciale sono gia' presenti
-> nella stessa tabella canonica ma restano parcheggiati: fino al porting dei
-> dispatcher Steam completi producono un solo fallback fisico nativo, mai una
-> semplice animazione priva di VFX, hitbox o danno.
-> La v0.7.1 mantiene Hurricane Blast `air-only` nelle shortcut, ma autorizza
-> il ponte terrestre esclusivo `XXT -> XXTX` dopo Aerial Sweep.
+> **Candidato v0.9.0 — combo Pirate A/Y:** la stringa di sole `A` resta
+> completamente nativa, comprese Combo Plus, Air Combo Plus, Combo Master e
+> finisher. `Y` è invece l'unico tasto capace di eseguire una mossa nominata.
+> Le undici Action Ability sono distribuite senza duplicati nelle famiglie
+> Strong `YYY`, C2 `AYYY`, C3 `AAYYY`, C4 `AAAY` e C5 `AAAAY`. Ogni `Y`
+> produce subito la propria Action Ability; non è una password attesa fino
+> all'ultimo input. Un `A` dopo una mossa speciale chiude la famiglia e genera
+> una sola continuazione fisica, senza poter attivare un'altra abilità.
+>
+> La Combo Guide riusa il Command Menu per mostrare soltanto i `Y` ancora
+> disponibili nella famiglia della posizione corrente. Dopo `A`, per esempio,
+> presenta `[Y] Slapshot`, `[Y][Y] Sliding Dash` e `[Y][Y][Y] Blitz`; dopo
+> Slapshot rimuove la voce consumata e mostra i due follow-up. La normale
+> continuazione con `A` resta implicita. Le reverse con magie e Limit sono già
+> riservate nella mappa, sempre con `Y` finale, ma restano disabilitate finché
+> non avranno dispatcher Steam completi per VFX, costo, bersaglio e follow-up.
 
 La repository contiene tre probe read-only e il primo prototipo combat:
 
@@ -180,18 +182,17 @@ La repository contiene tre probe read-only e il primo prototipo combat:
   faccia e valida gli indirizzi Steam portati prima che il prototipo scriva;
 - `JokCombat_CommandMenuProbe.lua`: confronta in sola lettura controller,
   transizioni e strutture delle quattro righe native del Command Menu;
-- `JokCombat_CombatPrototype.lua`: prototipo v0.7.1 con combo normali delegate
+- `JokCombat_CombatPrototype.lua`: prototipo v0.9.0 con combo normali delegate
   a KH1 e un bridge post-finisher per i cicli infiniti terra/aria, undici slot
-  Action Ability configurabili e albero canonico X/T Action-only,
+  Action Ability configurabili e famiglie Pirate Strong/C2/C3/C4/C5,
   jump-cancel terra -> aria, Guard universale su L2 + Cerchio e Dodge Roll
   fisso su Quadrato;
 - `JokCombat_NativeAbilities.lua`: imposta 99 AP massimi e assegna tramite la
   lista abilita' nativa le quantita' massime vanilla richieste: quattro Combo
   Plus, due Air Combo Plus e un Combo Master, tutte equipaggiate;
-- `docs/JokCombat_BranchCombo_Mapping.md`: mappa canonica di 24 mosse uniche,
-  ciascuna assegnata a una sola sequenza X/T e concatenabile soltanto verso
-  mosse differenti; comprende tutte le Action Ability, sette famiglie magiche,
-  cinque Limit e Chain Attack, senza Summon;
+- `docs/JokCombat_BranchCombo_Mapping.md`: mappa Pirate di 24 mosse uniche,
+  con undici Action Ability attive soltanto su `Y` e reverse riservate per
+  sette famiglie magiche, cinque Limit e Chain Attack, senza Summon;
 - `docs/JokCombat_BranchCombo_Mapping_Draft.md`: archivio delle proposte
   precedenti, incluse le matrici scartate perché duplicavano le abilità;
 - `docs/CMix_AnimCancel_AbilityHandler_analysis.md`: analisi tecnica dei primi
@@ -249,8 +250,8 @@ equipaggiate e non sono quindi un controllo affidabile del numero di copie.
 Il test live ha verificato `groundMax=7` e `airMax=5`: a terra KH1 sceglie
 contestualmente `C8`, `C9` o `CA` nelle posizioni `1..6` e `CB` chiude alla 7;
 in aria le posizioni `1..4` hanno mostrato `CC/CD` e `CE` chiude alla 5. Poiché
-lo stesso ID può comparire in posizioni diverse, il futuro controller X/T userà
-`comboPosition` come identità del nodo e l'animazione soltanto per il timing.
+lo stesso ID può comparire in posizioni diverse, il controller Pirate usa
+`comboPosition` per scegliere C2/C3/C4/C5 e l'animazione soltanto per il timing.
 
 Questa assegnazione e' intenzionalmente persistente: dopo un salvataggio le tre
 abilita' fanno parte della partita. Prima del primo test e' stata creata una
@@ -279,38 +280,42 @@ pacchetto Critical Mix sono conservati, ma non caricati, nelle directory
 `C:\Users\<utente>\Documents\KH_mod\reference\CriticalMix`. Backup, log e
 copie runtime restano locali e non fanno parte del repository.
 
-Per verificare la v0.7.1, premi `F1` nella console LuaBackend. Il log iniziale
-deve mostrare `v0.7.1`, `Native Abilities v0.3.0 ready`,
+Per verificare la v0.9.0, premi `F1` nella console LuaBackend. Il log iniziale
+deve mostrare `v0.9.0`, `Native Abilities v0.3.0 ready`,
 `ground action route ready`, `aerial action route ready`,
 `complete action records ready: 11/11`
-`native Command Menu overlay ready` e
+`native Command Menu overlay + Combo Guide ready` e
 `native Ripple Drive/Stun Impact/Gravity Break/Zantetsuken selectors ready`.
 Deve inoltre comparire
-`canonical X/T tree ready: 24 unique nodes, 11 Action Ability nodes enabled`.
+`Pirate Y map ready: 24 unique moves, 11 Action Ability slots enabled` e
+`Combo Guide ready`. Dopo una `A`, il Command Menu deve mostrare
+`[Y] Slapshot`, `[Y][Y] Sliding Dash` e `[Y][Y][Y] Blitz`; dopo due `A` deve
+mostrare Aerial Sweep, Hurricane Blast e Ripple Drive con le stesse profondità
+di `Y`. Dopo Slapshot, la Guide deve aggiornarsi a `[Y] Sliding Dash` e
+`[Y][Y] Blitz`, senza mai proporre una Action Ability su `[A]`.
 Deve inoltre comparire `native normal combo ownership ready`; durante i colpi
 intermedi non devono piu' apparire `normal route armed` o
 `target-free normal pulse`. Dopo una Croce valida su `CB`/`CE`, il solo bridge
 registra `infinite combo restart requested natively` e poi una transizione
 `restart` scelta dal dispatcher KH1.
 
-Il primo collaudo dell'Action tree va eseguito senza spammare: ogni input
+Il primo collaudo delle famiglie Pirate va eseguito senza spammare: ogni input
 successivo deve cadere nella coda visibile della mossa precedente. Verifica in
 quest'ordine, prima senza bersaglio e poi contro un nemico:
 
-- `XT`: Slapshot;
-- `XTX`: Slapshot -> Vortex;
-- `XTTX`: Slapshot -> Sliding Dash -> Counterattack;
-- `XXTX`: Aerial Sweep -> Hurricane Blast;
-- `XXXTX`: Ripple Drive -> Stun Impact;
-- `XXXTT`: Ripple Drive -> Gravity Break;
-- `XXXXTX`: Blitz -> Zantetsuken.
+- `YYY`: Vortex -> Stun Impact -> Gravity Break;
+- `AYYY`: attacco nativo -> Slapshot -> Sliding Dash -> Blitz;
+- `AAYYY`: due attacchi nativi -> Aerial Sweep -> Hurricane Blast -> Ripple Drive;
+- `AAAY`: Counterattack;
+- `AAAAY`: Zantetsuken;
+- `YA`: Vortex seguito da un solo attacco fisico, mai da un'Action Ability.
 
 Ogni passaggio valido registra `[branch] <sequenza> requested` e poi
 `[branch] <sequenza> accepted`. Un input premuto troppo presto deve produrre
 `ignored before prebuffer`; un secondo input durante lo stesso buffer deve
 essere ignorato, non accodato. I nodi magia/Limit non sono ancora il collaudo
-di questa build: raggiungerli registra `complete Steam adapter is not enabled`
-e riprende con un solo attacco fisico nativo.
+di questa build: le sequenze reverse restano riservate nella mappa e non sono
+ancora raggiungibili come mosse nominate.
 
 Tieni un modificatore per visualizzare e configurare il relativo gruppo: `L2`,
 `R2` oppure entrambi per `L2+R2`. Il riepilogo mostra sempre un massimo di
