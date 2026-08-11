@@ -2,7 +2,7 @@ LUAGUI_NAME = "JokCombat Combat Prototype"
 LUAGUI_AUTH = "Jok; Critical Mix reference by Xendra / KSX"
 LUAGUI_DESC = "Native Cross combo, Pirate-style Y Action/magic families, configurable loadout and universal defense."
 
--- JokCombat v0.9.7 prototype for the current Steam Global executable.
+-- JokCombat v0.9.8 prototype for the current Steam Global executable.
 -- Critical Mix was used as an authorized technical reference. This script is
 -- intentionally limited to combat/input state and does not persist changes to
 -- story flags, rewards, inventory, AP, levels, worlds, chests, or synthesis.
@@ -98,7 +98,7 @@ local CONFIG = {
 
 local EXPECTED_GAME_ID = 0xAF71841E
 local FINGERPRINT = 0x7265737563697065 -- "epicures", little endian
-local VERSION = "v0.9.7"
+local VERSION = "v0.9.8"
 
 local ADDRESS = {
     fingerprint = 0x3B2271,
@@ -318,7 +318,7 @@ local ACTION_CATALOG = {
         record = { 0xD2, 0x00, 0x05, 0xFF, 0x38, 0x4D, 0x00, 0x00,
             0x00, 0x00, 0x00, 0x00, 0x1B, 0x05, 0x06, 0x06,
             0x00, 0x00, 0x00, 0x00 } },
-    { id = "hurricane_blast", name = "Hurricane Blast", context = "air",
+    { id = "hurricane_blast", name = "Hurricane Blast", context = "both",
         animation = 0xD1, finisher = true,
         recordAddress = ADDRESS.airComboHurricane,
         record = { 0xD1, 0x00, 0x05, 0xFF, 0x48, 0x50, 0x00, 0x00,
@@ -3692,10 +3692,7 @@ function JokCombatBranch.nodeReady(node, player, path)
     if not JokCombatBranch.kindReady(node) then return false end
     if player == nil or node.kind ~= "action" then return true end
     local action = ACTION_BY_ID[node.id]
-    if action ~= nil and actionMatchesContext(action, player) then return true end
-    -- Ground C3 deliberately enters D6 before its D1 child. This is the only
-    -- cross-context exception; airborne routing itself remains strictly native.
-    return not player.airborne and path == "XXTT"
+    return action ~= nil and actionMatchesContext(action, player)
 end
 
 function JokCombatBranch.initialize()
@@ -3810,23 +3807,9 @@ function JokCombatBranch.dispatch(player, path)
         return true
     end
 
-    -- Hurricane Blast is natively air-only. In C3 it is legal on the ground
-    -- only after Aerial Sweep: D6 is already the validated bridge
-    -- into that aerial-style branch, so do not broaden the normal shortcut's
-    -- context or make Hurricane Blast independently ground-callable.
-    local branchContextAuthorized = path == "XXTT"
-        and JokCombatBranch.path == "XXT"
-        and player.animation == 0xD6
-        and not player.airborne
-    if branchContextAuthorized then
-        log("[branch] XXTT context bridge authorized: "
-            .. "ground Aerial Sweep -> Hurricane Blast.")
-    end
-
     JokCombatBranch.slot.label = path .. " -> " .. action.name
     local requested = requestActionAbility(
-        player, JokCombatBranch.slot, action, false, true,
-        branchContextAuthorized)
+        player, JokCombatBranch.slot, action, false, true)
     if not requested or transitionKind ~= actionKind(action) then
         log("[branch] " .. path .. " request was not armed; tree closed.")
         JokCombatBranch.reset("request rejected")
@@ -4704,8 +4687,8 @@ function _OnInit()
         .. "show and edit the three rows KH1 currently renders.")
     log("native Ripple Drive/Stun Impact/Gravity Break/Zantetsuken "
         .. "selectors ready.")
-    log("airborne Action Ability policy ready: native air records only "
-        .. "(Aerial Sweep -> Hurricane Blast); fake-ground disabled.")
+    log("Action Ability context ready: Hurricane Blast is callable on ground "
+        .. "and in air; airborne routing remains native and fake-ground disabled.")
     if staleSyntheticAttack then
         log("cleared stale synthetic Attack flags during reload.")
     end

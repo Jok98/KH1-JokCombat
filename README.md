@@ -218,6 +218,11 @@ Air Combo Plus e Combo Master descritto sotto.
 > Sweep; il successivo `Y` richiama Hurricane Blast. Il numero di Combo Plus non
 > cambia la combinazione e nessun colpo base deve essere consumato per raggiungere
 > una posizione prefissata. `CE` resta protetto fino alla propria conclusione.
+>
+> **Fix v0.9.8 — Hurricane Blast terra/aria:** Hurricane Blast usa ora il proprio
+> record completo anche nelle route terrestri. È quindi eseguibile direttamente
+> a terra dalle combo e dallo slot configurabile, oltre a conservare la route
+> aerea nativa; non vengono riattivati fake-ground o scritture di quota.
 
 La repository contiene tre probe read-only e il primo prototipo combat:
 
@@ -229,7 +234,7 @@ La repository contiene tre probe read-only e il primo prototipo combat:
   faccia e valida gli indirizzi Steam portati prima che il prototipo scriva;
 - `JokCombat_CommandMenuProbe.lua`: confronta in sola lettura controller,
   transizioni e strutture delle quattro righe native del Command Menu;
-- `JokCombat_CombatPrototype.lua`: prototipo v0.9.7 con combo normali delegate
+- `JokCombat_CombatPrototype.lua`: prototipo v0.9.8 con combo normali delegate
   a KH1 e un bridge post-finisher per i cicli infiniti terra/aria, undici slot
   Action Ability configurabili, famiglie Pirate Strong/C2/C3/C4/C5 e sette
   reverse magiche native a costo MP zero soltanto dentro la combo,
@@ -328,8 +333,8 @@ pacchetto Critical Mix sono conservati, ma non caricati, nelle directory
 `C:\Users\<utente>\Documents\KH_mod\reference\CriticalMix`. Backup, log e
 copie runtime restano locali e non fanno parte del repository.
 
-Per verificare la v0.9.7, premi `F1` nella console LuaBackend. Il log iniziale
-deve mostrare `v0.9.7`, `Native Abilities v0.3.0 ready`,
+Per verificare la v0.9.8, premi `F1` nella console LuaBackend. Il log iniziale
+deve mostrare `v0.9.8`, `Native Abilities v0.3.0 ready`,
 `ground action route ready`, `aerial action route ready`,
 `complete action records ready: 11/11`
 `native Command Menu overlay + Combo Guide ready` e
@@ -424,7 +429,7 @@ Gli undici default sono tutti differenti:
 | `L2 + Quadrato` | Sliding Dash |
 | `R2 + Croce` | Gravity Break |
 | `R2 + Triangolo` | Ripple Drive |
-| `R2 + Cerchio` | Hurricane Blast, solo in aria |
+| `R2 + Cerchio` | Hurricane Blast, terra e aria |
 | `R2 + Quadrato` | Zantetsuken |
 | `L2 + R2 + Croce` | Blitz |
 | `L2 + R2 + Triangolo` | Vortex |
