@@ -1,7 +1,7 @@
-"""Static regression checks for the Pirate-style JokCombat X/T families.
+"""Static regression checks for JokCombat's contextual A/Y moveset.
 
-The production script is Lua 5.3 and is loaded by LuaBackendHook.  This test
-keeps the data table reviewable without emulating KH1 memory or dispatch code.
+The production script is Lua 5.3 and runs inside LuaBackendHook. These checks
+keep the approved map and its native adapters reviewable without emulating KH1.
 """
 
 from __future__ import annotations
@@ -15,40 +15,41 @@ SOURCE = (ROOT / "JokCombat_CombatPrototype.lua").read_text(encoding="utf-8")
 
 
 EXPECTED = {
+    # Strong / energy.
     "T": ("action", "vortex"),
-    "TT": ("action", "stun_impact"),
-    "TTT": ("action", "gravity_break"),
-    "XT": ("action", "slapshot"),
-    "XTT": ("action", "sliding_dash"),
-    "XTTT": ("action", "blitz"),
-    "XXT": ("action", "aerial_sweep"),
-    "XXTT": ("action", "hurricane_blast"),
-    "XXTTT": ("action", "ripple_drive"),
-    "XXXT": ("action", "counterattack"),
+    "TT": ("action", "gravity_break"),
+    "TTT": ("limit", "ragnarok"),
+    # C2 / mobility.
+    "XT": ("action", "sliding_dash"),
+    "XTT": ("action", "blitz"),
+    "XTTT": ("limit", "sonic_blade"),
+    # C3 / area.
+    "XXT": ("action", "stun_impact"),
+    "XXTT": ("action", "ripple_drive"),
+    "XXTTT": ("limit", "trinity_limit"),
+    # C4 / range.
+    "XXXT": ("action", "slapshot"),
+    "XXXTT": ("limit", "strike_raid"),
+    # C5 / execution.
     "XXXXT": ("action", "zantetsuken"),
-    "TXT": ("magic", "fire"),
-    "TXXT": ("magic", "blizzard"),
-    "TTXT": ("magic", "thunder"),
-    "TTXXT": ("magic", "aero"),
-    "TTTXT": ("magic", "cure"),
-    "XTTTXT": ("magic", "gravity"),
-    "XXTTTXT": ("magic", "stop"),
-    "TXXXT": ("limit", "sonic_blade"),
-    "TTXXXT": ("limit", "ars_arcanum"),
-    "TTTXXT": ("limit", "strike_raid"),
-    "XTTTXXT": ("limit", "ragnarok"),
-    "XXTTTXXT": ("limit", "trinity_limit"),
-    "TTTXXXT": ("experimental", "chain_attack_burst"),
+    "XXXXTT": ("limit", "ars_arcanum"),
+}
+
+LIMITS = {
+    "sonic_blade": ("XTTT", "XTT", "0x004B"),
+    "ars_arcanum": ("XXXXTT", "XXXXT", "0x0057"),
+    "strike_raid": ("XXXTT", "XXXT", "0x005E"),
+    "ragnarok": ("TTT", "TT", "0x005A"),
+    "trinity_limit": ("XXTTT", "XXTT", "0x0052"),
 }
 
 
 def parse_nodes() -> dict[str, dict[str, str]]:
     start = SOURCE.index("    nodes = {")
     end = SOURCE.index("    windows = {", start)
-    lines = SOURCE[start:end].splitlines()[1:]
     entries: dict[str, dict[str, str]] = {}
     current: list[str] = []
-    for line in lines:
+    for line in SOURCE[start:end].splitlines()[1:]:
         if re.match(r"^        [XT]+ = \{", line):
             current = [line]
         elif current:
@@ -62,233 +63,244 @@ def parse_nodes() -> dict[str, dict[str, str]]:
             assert match is not None, f"cannot parse node: {text}"
             path, kind, ability_id, remainder = match.groups()
             node = {"kind": kind, "id": ability_id}
-            for field in ("cross", "triangle"):
-                child = re.search(rf'{field} = "([XT]+)"', remainder)
-                if child:
-                    node[field] = child.group(1)
+            child = re.search(r'triangle = "([XT]+)"', remainder)
+            if child:
+                node["triangle"] = child.group(1)
             entries[path] = node
             current = []
     return entries
 
 
-def main() -> None:
-    nodes = parse_nodes()
-    actual = {path: (node["kind"], node["id"]) for path, node in nodes.items()}
-    assert actual == EXPECTED, "runtime tree differs from the approved map"
-    assert len(nodes) == 24
-    assert len(set(actual.values())) == 24, "canonical actions are duplicated"
-
-    action_nodes = {
-        node["id"] for node in nodes.values() if node["kind"] == "action"
-    }
-    assert len(action_nodes) == 11
-
-    catalog_start = SOURCE.index("local ACTION_CATALOG = {")
-    catalog_end = SOURCE.index("local ACTION_BY_ID = {}", catalog_start)
-    catalog_source = SOURCE[catalog_start:catalog_end]
-    catalog_ids = set(re.findall(r'\{ id = "([^"]+)"', catalog_source))
-    assert action_nodes <= catalog_ids, "branch references an unknown Action Ability"
-
-    action_contexts: dict[str, str] = {}
-    for entry in re.finditer(
-        r'(?ms)^    \{ id = "([^"]+)"(.*?)(?=^    \{ id = |^})',
-        catalog_source,
-    ):
-        context = re.search(r'context = "([^"]+)"', entry.group(2))
-        if context:
-            action_contexts[entry.group(1)] = context.group(1)
-
+def action_catalog() -> tuple[set[str], dict[str, str], dict[str, int], str]:
+    start = SOURCE.index("local ACTION_CATALOG = {")
+    end = SOURCE.index("local ACTION_BY_ID = {}", start)
+    text = SOURCE[start:end]
+    ids = set(re.findall(r'\{ id = "([^"]+)"', text))
+    contexts: dict[str, str] = {}
     animations: dict[str, int] = {}
     for entry in re.finditer(
-        r'(?ms)^    \{ id = "([^"]+)"(.*?)(?=^    \{ id = |^})',
-        catalog_source,
+        r'(?ms)^    \{ id = "([^"]+)"(.*?)(?=^    \{ id = |^})', text
     ):
-        animation = re.search(r'animation = (0x[0-9A-F]+)', entry.group(2))
+        ability_id, body = entry.groups()
+        context = re.search(r'context = "([^"]+)"', body)
+        animation = re.search(r'animation = (0x[0-9A-F]+)', body)
+        if context:
+            contexts[ability_id] = context.group(1)
         if animation:
-            animations[entry.group(1)] = int(animation.group(1), 16)
-    window_start = SOURCE.index("    windows = {", catalog_end)
-    window_end = SOURCE.index("    slot = {", window_start)
-    window_animations = {
-        int(value, 16)
-        for value in re.findall(r'\[(0x[0-9A-F]+)\]', SOURCE[window_start:window_end])
-    }
-    for node in nodes.values():
-        if node["kind"] == "action" and (
-            "cross" in node or "triangle" in node
-        ):
-            assert animations[node["id"]] in window_animations, (
-                f'{node["id"]} can continue but has no safe window'
-            )
+            animations[ability_id] = int(animation.group(1), 16)
+    return ids, contexts, animations, text
+
+
+def assert_map(nodes: dict[str, dict[str, str]]) -> None:
+    actual = {path: (node["kind"], node["id"]) for path, node in nodes.items()}
+    assert actual == EXPECTED, "runtime tree differs from the approved map"
+    assert len(nodes) == 13
+    assert len(set(actual.values())) == 13, "ground roles are duplicated"
+    assert sum(node["kind"] == "action" for node in nodes.values()) == 8
+    assert sum(node["kind"] == "limit" for node in nodes.values()) == 5
 
     for path, node in nodes.items():
         assert path.endswith("T"), f"named move {path} does not end in Y/T"
-        assert "cross" not in node, f"A/X dispatches a named move at {path}"
         if "triangle" in node:
             assert node["triangle"] == path + "T"
             assert node["triangle"] in nodes
 
-    action_families = {
-        "strong": ("T", "TT", "TTT"),
-        "c2": ("XT", "XTT", "XTTT"),
-        "c3": ("XXT", "XXTT", "XXTTT"),
-        "c4": ("XXXT",),
-        "c5": ("XXXXT",),
+    assert set(nodes) == {
+        path
+        for family in (
+            ("T", "TT", "TTT"),
+            ("XT", "XTT", "XTTT"),
+            ("XXT", "XXTT", "XXTTT"),
+            ("XXXT", "XXXTT"),
+            ("XXXXT", "XXXXTT"),
+        )
+        for path in family
     }
-    family_actions = {
-        path for family in action_families.values() for path in family
-    }
-    assert family_actions == {
-        path for path, node in nodes.items() if node["kind"] == "action"
-    }
-    assert sum(len(family) for family in action_families.values()) == 11
 
-    assert "branchActionAbilities = true" in SOURCE
-    assert "branchMagic = true" in SOURCE
-    assert "branchLimits = false" in SOURCE
-    assert 'VERSION = "v0.10.3"' in SOURCE
-    slot_start = SOURCE.index("local ACTION_SLOTS = {")
-    slot_end = SOURCE.index("local ACTION_SLOT_BY_ID = {}", slot_start)
-    slot_source = SOURCE[slot_start:slot_end]
-    assert set(re.findall(r'id = "([^"]+)"', slot_source)) == {
-        "r2_cross", "r2_triangle", "r2_circle", "r2_square"
-    }
-    assert 'if modifier == BUTTON.R2 then return "r2" end' in SOURCE
-    assert 'return "l2"' not in SOURCE
-    assert 'return "dual"' not in SOURCE
-    assert "and r2Held and not l2Held then" in SOURCE
-    assert 'slot = ACTION_SLOT_BY_ID.r2_cross' in SOURCE
-    assert 'return string.rep("X", position) .. "T"' in SOURCE
-    assert 'if isAirNormalContext(player) then' in SOURCE
-    assert 'return "XXTT"' in SOURCE
-    assert "Every intermediate native aerial hit aliases" in SOURCE
-    assert re.search(
-        r'id = "hurricane_blast", name = "Hurricane Blast", context = "both"',
-        catalog_source,
-    ), "Hurricane Blast must be callable on ground and in air"
 
-    integration_guards = (
-        "branchWindowAuthorized == true",
+def assert_action_partition(nodes: dict[str, dict[str, str]]) -> None:
+    ids, contexts, animations, catalog_source = action_catalog()
+    ground_actions = {
+        node["id"] for node in nodes.values() if node["kind"] == "action"
+    }
+    contextual = {"hurricane_blast", "aerial_sweep", "counterattack"}
+    assert ground_actions | contextual == ids - {"none"}
+    assert ground_actions.isdisjoint(contextual)
+    assert len(ids - {"none"}) == 11
+    assert contexts["counterattack"] == "ground"
+    assert contexts["hurricane_blast"] == "both"
+    assert contexts["aerial_sweep"] == "both"
+    assert 'contextual = true' in catalog_source
+
+    window_start = SOURCE.index("    windows = {", SOURCE.index("JokCombatBranch = {"))
+    window_end = SOURCE.index("    slot = {", window_start)
+    window_animations = {
+        int(value, 16)
+        for value in re.findall(
+            r'\[(0x[0-9A-F]+)\]', SOURCE[window_start:window_end]
+        )
+    }
+    for node in nodes.values():
+        if node["kind"] == "action" and "triangle" in node:
+            assert animations[node["id"]] in window_animations, (
+                f'{node["id"]} can continue but has no safe window'
+            )
+
+
+def assert_aerial_is_independent() -> None:
+    guards = (
+        'airFinisherPath = "AIR_CE"',
+        'airHurricanePath = "AIR_D1"',
+        'airSweepPath = "AIR_D6"',
+        'id = "aerial_finisher"',
+        'id = "hurricane_blast"',
+        'id = "aerial_sweep"',
+        "return JokCombatBranch.airHurricanePath",
+        "return JokCombatBranch.airSweepPath",
+        "if path == JokCombatBranch.airSweepPath then return nil end",
+        "return JokCombatBranch.airFinisherPath",
+        "native CE -> Hurricane Blast -> Aerial Sweep",
+        "Aerial Finisher physical continuation ignored before",
+    )
+    for guard in guards:
+        assert guard in SOURCE, f"missing independent aerial guard: {guard}"
+    assert 'if path == JokCombatBranch.airFinisherPath then return "XXTT" end' not in SOURCE
+    assert "fake-ground" in SOURCE
+    assert "leftStickInput" not in SOURCE
+
+
+def assert_native_limits() -> None:
+    start = SOURCE.index("JokCombatNativeLimit = {")
+    end = SOURCE.index("function JokCombatNativeLimit.buildIndex", start)
+    catalog = SOURCE[start:end]
+    for ability_id, (path, prefix, reaction_id) in LIMITS.items():
+        pattern = (
+            rf'id = "{ability_id}".*?path = "{path}".*?prefix = "{prefix}"'
+            rf'.*?reactionId = {reaction_id}'
+        )
+        assert re.search(pattern, catalog, re.S), f"bad native Limit map: {ability_id}"
+
+    guards = (
+        "function JokCombatNativeLimit.publishJournal",
+        "function JokCombatNativeLimit.restorePartyMpSnapshot",
+        "function JokCombatNativeLimit.recoverStale",
+        "function JokCombatNativeLimit.dispatcherCanonical",
+        "function JokCombatNativeLimit.contextReady",
+        "function JokCombatNativeLimit.forPrefix",
+        "function JokCombatNativeLimit.arm",
+        "function JokCombatNativeLimit.selectorOwned",
+        "function JokCombatNativeLimit.update",
+        "if limit.costAddress ~= nil then WriteShort(limit.costAddress, 0) end",
+        "WriteShort(ADDRESS.reactionCommandId, limit.reactionId)",
+        "function JokCombatBranch.prearmLimitChild",
+        "local limit = JokCombatNativeLimit.forPrefix(JokCombatBranch.path)",
+        "JokCombatBranch.prearmLimitChild(player)",
+        "parent Action ended before final Y",
+        "and JokCombatNativeLimit.selectionFrames <= 0",
+        "branch closed before final Y",
+        '"[branch] %s final Y delegated to native %s."',
+        "Final Y belongs to KH1",
+        "native Limit combos ready: %d/5",
+    )
+    for guard in guards:
+        assert guard in SOURCE, f"missing native Limit guard: {guard}"
+    assert "observePhysicalLink" not in SOURCE
+    assert "reverseWaiting" not in SOURCE
+    assert "hasReadyDescendant" not in SOURCE
+
+
+def assert_guard_counter() -> None:
+    guards = (
+        "connectCounter = 0x296B230",
+        "JokCombatGuardCounter = {",
+        "guardAnimation = 0xD4",
+        "connectValue = 0x10",
+        "function JokCombatGuardCounter.begin",
+        "function JokCombatGuardCounter.update",
+        "function JokCombatGuardCounter.ready",
+        "function JokCombatGuardCounter.dispatch",
+        "signal == JokCombatGuardCounter.connectValue",
+        "player.animation == JokCombatGuardCounter.guardAnimation",
+        "JokCombatGuardCounter.begin()",
+        "and JokCombatGuardCounter.ready(player) then",
+        "and JokCombatGuardCounter.ready(player))",
+        "ACTION_BY_ID.counterattack, false, true",
+        '"[A] Counterattack"',
+        "successful-Guard Counterattack detector",
+    )
+    for guard in guards:
+        assert guard in SOURCE, f"missing Guard Counterattack guard: {guard}"
+    # The event byte is an observation source only.
+    assert "WriteByte(ADDRESS.connectCounter" not in SOURCE
+
+
+def assert_integration() -> None:
+    guards = (
+        'VERSION = "v0.13.3"',
+        "branchActionAbilities = true",
+        "branchLimits = true",
+        "comboGuide = true",
+        'return string.rep("X", position) .. "T"',
+        'if root == "T" then return JokCombatBranch.execute(player, root) end',
+        "function JokCombatBranch.continuePhysical",
+        "+ A -> native physical continuation; family closed",
         "JokCombatBranch.reset(\"Guard cancel\")",
         "JokCombatBranch.reset(\"Dodge cancel\")",
         "JokCombatBranch.reset(\"jump\")",
-        "JokCombatBranch.reset(\"loadout editor opened\", true)",
-        "and JokCombatBranch.active",
-        "new input discarded until recovery",
-        "function JokCombatBranch.continuePhysical",
-        "function JokCombatBranch.observePhysicalLink",
-        "function JokCombatBranch.hasReadyDescendant",
-        'JokCombatBranch.reverseWaitingKind = "pirate-light:" .. nextPrefix',
-        "JokCombatBranch.observePhysicalLink(player, acceptedKind)",
-        "+ A -> native physical continuation",
-        "; no named ability dispatched.",
-        'if root == "T" then return JokCombatBranch.execute(player, root) end',
-    )
-    for guard in integration_guards:
-        assert guard in SOURCE, f"missing branch integration guard: {guard}"
-    assert action_contexts == {
-        "none": "none",
-        "slapshot": "ground",
-        "sliding_dash": "ground",
-        "vortex": "ground",
-        "aerial_sweep": "both",
-        "counterattack": "ground",
-        "blitz": "ground",
-        "hurricane_blast": "both",
-        "ripple_drive": "ground",
-        "stun_impact": "ground",
-        "gravity_break": "ground",
-        "zantetsuken": "ground",
-    }
-    native_air_guards = (
-        "function JokCombatBranch.nodeReady",
-        "return action ~= nil and actionMatchesContext(action, player)",
-        "function JokCombatBranch.triangleChild",
-        'if path == "XXTT" then return "XXT" end',
-        'if path == "XXT" then return nil end',
-        'JokCombatBranch.airFamily = player.airborne and root == "XXTT"',
-        "node, false, player, JokCombatBranch.path, true",
-        "JokCombatBranch.nodeReady(node, player, root)",
-        "JokCombatBranch.nodeReady(childNode, player, child)",
-        "Hurricane Blast is callable on ground",
-        "and in air; airborne family is Hurricane Blast -> Aerial Sweep",
-        "terminal, with native routing",
-        "fake-ground disabled",
-    )
-    for guard in native_air_guards:
-        assert guard in SOURCE, f"missing native-air policy guard: {guard}"
-    assert "airBridge" not in catalog_source
-    assert "airGroundActionBridge" not in SOURCE
-    assert "leftStickInput" not in SOURCE
-    guide_guards = (
-        "comboGuide = true",
+        "if nativeLimitActive then",
+        "native Limit owns input",
+        "if configurationInputActive or nativeLimitActive then",
+        "updateDefenseRouting(buttons, false, false, true)",
+        "local nativeReaction = ReadShort(ADDRESS.reactionCommandId)",
+        "native Reaction Command took priority",
+        "Y delegated to native Reaction 0x%04X",
+        "Pirate family not opened",
         "function JokCombatBranch.guideEntries",
-        "function JokCombatBranch.branchGuideEntries",
         "function JokCombatBranch.familyGuideEntries",
-        "function JokCombatBranch.guideEntriesFromPrefix",
         'local sequence = "[Y]"',
         'sequence = sequence .. "[Y]"',
-        'string.rep("[A]", count) .. "[Y]"',
         'if path == "T" then return nil end',
         'return HUD.showOverlay("guide", guideEntries, "Combo Guide")',
-        "not JokCombatBranch.nodeReady(node, player, path)",
+        "legacy combo-magic recovery ready; no combo path can cast magic.",
     )
-    for guard in guide_guards:
-        assert guard in SOURCE, f"missing Combo Guide guard: {guard}"
+    for guard in guards:
+        assert guard in SOURCE, f"missing integration guard: {guard}"
 
-    magic_ids = {
-        node["id"] for node in nodes.values() if node["kind"] == "magic"
-    }
-    assert magic_ids == {
-        "fire", "blizzard", "thunder", "aero", "cure", "gravity", "stop"
-    }
-    magic_start = SOURCE.index("JokCombatMagic = {")
-    magic_end = SOURCE.index(
-        "-- Pirate-style modifier-free X/T families", magic_start
+    branch_start = SOURCE.index("function JokCombatBranch.update")
+    branch_end = SOURCE.index("local function updateCrossActionPrime", branch_start)
+    branch_update = SOURCE[branch_start:branch_end]
+    selector_gate = branch_update.index("JokCombatNativeLimit.selectorOwned()")
+    reaction_gate = branch_update.index(
+        "local nativeReaction = ReadShort(ADDRESS.reactionCommandId)"
     )
-    magic_source = SOURCE[magic_start:magic_end]
-    for magic_id in magic_ids:
-        assert re.search(rf'^        {magic_id} = \{{', magic_source, re.M), (
-            f"missing native magic metadata for {magic_id}"
-        )
-    magic_guards = (
-        "magicLevelBase = 0x2DE97E2",
-        "nativeShortcutTriangle = 0x2DE9B94",
-        "l2ControlMap = 0x22C9340",
-        "shortcutControlSelector = 0x22C9342",
-        "magicRecovery = 0x2DB79B0",
-        "rawRecoverySignature = 0x313047414D4B4F4A",
-        "carrierRecoverySignature = 0x323047414D4B4F4A",
-        "directMapRecoverySignature = 0x333047414D4B4F4A",
-        "recoverySignature = 0x343047414D4B4F4A",
-        "function JokCombatMagic.recoverStale",
-        "function JokCombatMagic.publishRecovery",
-        "function JokCombatMagic.prearm",
-        "function JokCombatMagic.restorePrearm",
-        "function JokCombatMagic.restoreSyntheticInput",
-        "function JokCombatMagic.request",
-        "function JokCombatMagic.update",
-        "JokCombatMagic.writeCost(family, address, 0)",
-        "WriteByte(ADDRESS.l2ControlMap, CONTROL_INDEX.TRIANGLE)",
-        "WriteByte(ADDRESS.shortcutControlSelector, 0x20)",
-        "WriteByte(journal + 0x16, JokCombatMagic.l2ControlOriginal)",
-        "JokCombatMagic.prearm(prefix)",
-        "or JokCombatMagic.prearmed",
-        "JokCombatMagic.recoverStale()",
-        "local magicValid, magicCount = JokCombatMagic.initialize()",
-        "native combo magic adapter %s: %d/7 families",
-        "JokCombatMagic.inputRestorePending",
+    strong_dispatch = branch_update.index(
+        'if root == "T" then return JokCombatBranch.execute(player, root) end'
     )
-    for guard in magic_guards:
-        assert guard in SOURCE, f"missing native magic guard: {guard}"
-    assert "shortcutControlCarrier" not in SOURCE
-    assert "shortcutControlMap" not in SOURCE
-    assert "WriteByte(ADDRESS.rawButtons, JokCombatMagic.rawInjected)" not in SOURCE
-    assert "HUD.boxesClaimable(HUD.boxCount)" in SOURCE
-    assert "notification buffers unavailable" not in SOURCE
+    assert selector_gate < reaction_gate < strong_dispatch, (
+        "native Limit selector must keep priority; contextual Reaction must "
+        "then gate neutral Strong dispatch"
+    )
+    assert "branchMagic" not in SOURCE
+    assert "JokCombatMagic" not in SOURCE
     assert '"[A] Continua vanilla"' not in SOURCE
+
+    slot_start = SOURCE.index("local ACTION_SLOTS = {")
+    slot_end = SOURCE.index("local ACTION_SLOT_BY_ID = {}", slot_start)
+    slots = set(re.findall(r'id = "([^"]+)"', SOURCE[slot_start:slot_end]))
+    assert slots == {"r2_cross", "r2_triangle", "r2_circle", "r2_square"}
+
+
+def main() -> None:
+    nodes = parse_nodes()
+    assert_map(nodes)
+    assert_action_partition(nodes)
+    assert_aerial_is_independent()
+    assert_native_limits()
+    assert_guard_counter()
+    assert_integration()
     print(
-        "PASS: 24 unique Y-ended moves; 11/11 Action and 7/7 native magic "
-        "routes enabled; Limits parked"
+        "PASS: 13-node ground map; 8 ground Actions + 5 native Limits; "
+        "aerial family independent; Counterattack gated by successful Guard"
     )
 
 
