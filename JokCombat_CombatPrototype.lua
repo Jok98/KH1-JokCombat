@@ -2,7 +2,7 @@ LUAGUI_NAME = "JokCombat Combat Prototype"
 LUAGUI_AUTH = "Jok; Critical Mix reference by Xendra / KSX"
 LUAGUI_DESC = "Native Cross combo, Pirate-style Y Action/magic families, configurable loadout and universal defense."
 
--- JokCombat v0.10.0 prototype for the current Steam Global executable.
+-- JokCombat v0.10.3 prototype for the current Steam Global executable.
 -- Critical Mix was used as an authorized technical reference. This script is
 -- intentionally limited to combat/input state and does not persist changes to
 -- story flags, rewards, inventory, AP, levels, worlds, chests, or synthesis.
@@ -64,13 +64,6 @@ local CONFIG = {
     groundFinisherRestartTime = 67.0,
     airFinisherRestartTime = 20.0,
 
-    -- Aerial Sweep's native airborne D6 root motion trends toward the floor.
-    -- Once D6 is actually observed, apply one upward displacement on KH1's
-    -- inverted Y axis. This is not a height lock: gravity and native movement
-    -- resume immediately and raw70 is never changed.
-    aerialSweepAirLift = 50.0,
-    aerialSweepLiftWaitFrames = 120,
-
     -- Legacy routed-normal rollback settings (inactive while
     -- nativeNormalAttacks=true). A press made early in an attack is remembered
     -- until the native link
@@ -105,7 +98,7 @@ local CONFIG = {
 
 local EXPECTED_GAME_ID = 0xAF71841E
 local FINGERPRINT = 0x7265737563697065 -- "epicures", little endian
-local VERSION = "v0.10.0"
+local VERSION = "v0.10.3"
 
 local ADDRESS = {
     fingerprint = 0x3B2271,
@@ -229,7 +222,6 @@ local ADDRESS = {
 
 local PLAYER = {
     actionControl = 0x000,
-    positionY = 0x014,
     slotReference = 0x06C,
     airborneState = 0x070,
     animationId = 0x164,
@@ -1916,9 +1908,6 @@ end
 local function restoreActionRoutes(restorePrimeCombo)
     restoreGroundActionRoute()
     restoreAirActionRoute()
-    if JokCombatMotion ~= nil and JokCombatMotion.clearAerialSweepLift ~= nil then
-        JokCombatMotion.clearAerialSweepLift(nil, true)
-    end
     if restorePrimeCombo ~= false and clearActionPrimeCombo ~= nil then
         clearActionPrimeCombo(true)
     end
@@ -2957,10 +2946,6 @@ local function requestActionAbility(player, slot, action, usesPhysicalInput,
             and physicalPrimeAcceptedActionId == action.id then
             physicalPrimeAcceptedActionId = nil
             clearActionPrimeCombo(false)
-            if requestedFromAir and action.id == "aerial_sweep"
-                and JokCombatMotion ~= nil then
-                JokCombatMotion.armAerialSweepLift(player)
-            end
             log(action.name
                 .. " accepted by physical X with its complete action record.")
             return true
@@ -3036,10 +3021,6 @@ local function requestActionAbility(player, slot, action, usesPhysicalInput,
         return true
     end
     if routeWasPrimed then clearActionPrimeCombo(false) end
-    if requestedFromAir and action.id == "aerial_sweep"
-        and JokCombatMotion ~= nil then
-        JokCombatMotion.armAerialSweepLift(player)
-    end
 
     armTransitionCheck(player, kind, action.animation,
         comboPosition, usesPhysicalInput)
@@ -3637,68 +3618,10 @@ JokCombatBranch = {
     reversePrefix = nil,
     reverseWaitingKind = nil,
     reverseWaitingFrames = 0,
+    -- The airborne family reuses the two canonical C3 nodes in reverse order:
+    -- Hurricane Blast keeps altitude first, then downward Aerial Sweep closes.
+    airFamily = false,
 }
-
--- A one-shot, air-only correction for Aerial Sweep. Keep this state in a
--- global table so the Lua 5.3 main chunk stays below its 200-local limit.
-JokCombatMotion = {
-    aerialSweepLiftFrames = 0,
-    aerialSweepLiftPlayerPointer = nil,
-}
-
-function JokCombatMotion.clearAerialSweepLift(reason, quiet)
-    local wasArmed = JokCombatMotion.aerialSweepLiftFrames > 0
-    JokCombatMotion.aerialSweepLiftFrames = 0
-    JokCombatMotion.aerialSweepLiftPlayerPointer = nil
-    if wasArmed and not quiet and reason ~= nil then
-        log("Aerial Sweep lift cancelled: " .. reason .. ".")
-    end
-end
-
-function JokCombatMotion.armAerialSweepLift(player)
-    if player == nil or not player.airborne then return false end
-    JokCombatMotion.clearAerialSweepLift(nil, true)
-    JokCombatMotion.aerialSweepLiftFrames = CONFIG.aerialSweepLiftWaitFrames
-    JokCombatMotion.aerialSweepLiftPlayerPointer = player.pointer
-    log("Aerial Sweep one-shot lift armed; waiting for airborne D6.")
-    return true
-end
-
-function JokCombatMotion.update(player)
-    if JokCombatMotion.aerialSweepLiftFrames <= 0 then return false end
-    if player == nil
-        or player.pointer ~= JokCombatMotion.aerialSweepLiftPlayerPointer then
-        JokCombatMotion.clearAerialSweepLift("player pointer changed")
-        return false
-    end
-    if not player.airborne then
-        JokCombatMotion.clearAerialSweepLift("Sora left the airborne state")
-        return false
-    end
-
-    if player.animation == 0xD6 then
-        local height = ReadFloat(player.pointer + PLAYER.positionY, true)
-        if height ~= height or math.abs(height) > 10000000 then
-            JokCombatMotion.clearAerialSweepLift("invalid vertical position")
-            return false
-        end
-        local liftedHeight = height - CONFIG.aerialSweepAirLift
-        WriteFloat(player.pointer + PLAYER.positionY, liftedHeight, true)
-        log(string.format(
-            "Aerial Sweep one-shot lift applied: %.3f -> %.3f; gravity remains native.",
-            height, liftedHeight))
-        JokCombatMotion.clearAerialSweepLift(nil, true)
-        return true
-    end
-
-    if JokCombatMotion.aerialSweepLiftFrames <= 1 then
-        JokCombatMotion.clearAerialSweepLift("D6 was not observed")
-    else
-        JokCombatMotion.aerialSweepLiftFrames =
-            JokCombatMotion.aerialSweepLiftFrames - 1
-    end
-    return false
-end
 
 function JokCombatBranch.kindReady(node)
     if node == nil then return false end
@@ -3718,6 +3641,14 @@ function JokCombatBranch.nodeReady(node, player, path)
     if player == nil or node.kind ~= "action" then return true end
     local action = ACTION_BY_ID[node.id]
     return action ~= nil and actionMatchesContext(action, player)
+end
+
+function JokCombatBranch.triangleChild(path, node, airFamily)
+    if airFamily then
+        if path == "XXTT" then return "XXT" end
+        if path == "XXT" then return nil end
+    end
+    return node ~= nil and node.triangle or nil
 end
 
 function JokCombatBranch.initialize()
@@ -3810,6 +3741,7 @@ function JokCombatBranch.reset(reason, quiet, skipCleanup)
     JokCombatBranch.reversePrefix = nil
     JokCombatBranch.reverseWaitingKind = nil
     JokCombatBranch.reverseWaitingFrames = 0
+    JokCombatBranch.airFamily = false
     if wasActive and not quiet then
         log("[branch] closed" .. (reason ~= nil and ": " .. reason or "."))
     end
@@ -4060,11 +3992,11 @@ function JokCombatBranch.rootPath(player)
         local maximum = ReadByte(ADDRESS.maxAirComboLength)
         local position = ReadByte(ADDRESS.comboPosition)
         if position < 1 or position >= maximum then return nil end
-        -- Every intermediate native aerial hit aliases to the one validated air
-        -- family. This does not duplicate an Action Ability in the canonical
-        -- map: X/Y timing still comes from the live CC/CD animation, while the
-        -- shared XXT node dispatches Aerial Sweep and then Hurricane Blast.
-        return "XXT"
+        -- Every intermediate native aerial hit aliases to the same contextual
+        -- family. It starts from canonical XXTT (Hurricane Blast), then the
+        -- air-only child resolver closes with canonical XXT (Aerial Sweep).
+        -- No Action Ability is duplicated and the ground C3 remains unchanged.
+        return "XXTT"
     end
     local neutral = player.control == 0x03
         and not isAttackContext(player) and player.animation <= 0x07
@@ -4089,13 +4021,15 @@ function JokCombatBranch.guideLine(sequence, node, player, path)
     return sequence .. " " .. (JokCombatBranch.nodeName(node) or "-")
 end
 
-function JokCombatBranch.familyGuideEntries(node, includeCurrent, player, path)
+function JokCombatBranch.familyGuideEntries(node, includeCurrent, player, path,
+        airFamily)
     if node == nil then return nil end
     local entries = {}
     local current = node
     local currentPath = path
     if not includeCurrent then
-        currentPath = node.triangle
+        currentPath = JokCombatBranch.triangleChild(
+            currentPath, node, airFamily)
         current = currentPath ~= nil
             and JokCombatBranch.nodes[currentPath] or nil
     end
@@ -4105,7 +4039,8 @@ function JokCombatBranch.familyGuideEntries(node, includeCurrent, player, path)
         table.insert(entries, JokCombatBranch.guideLine(
             sequence, current, player, currentPath))
         sequence = sequence .. "[Y]"
-        currentPath = current.triangle
+        currentPath = JokCombatBranch.triangleChild(
+            currentPath, current, airFamily)
         current = currentPath ~= nil
             and JokCombatBranch.nodes[currentPath] or nil
     end
@@ -4154,8 +4089,12 @@ function JokCombatBranch.branchGuideEntries(player)
         or player.animation ~= JokCombatBranch.animation then
         return nil
     end
-    return JokCombatBranch.guideEntriesFromPrefix(
-        JokCombatBranch.path, player)
+    if JokCombatBranch.airFamily then
+        local node = JokCombatBranch.nodes[JokCombatBranch.path]
+        return JokCombatBranch.familyGuideEntries(
+            node, false, player, JokCombatBranch.path, true)
+    end
+    return JokCombatBranch.guideEntriesFromPrefix(JokCombatBranch.path, player)
 end
 
 function JokCombatBranch.guideEntries(player, buttons)
@@ -4191,7 +4130,9 @@ function JokCombatBranch.guideEntries(player, buttons)
     -- Do not cover the normal Command Menu permanently while Sora is idle.
     -- The neutral Strong family becomes visible immediately after its first Y.
     if path == "T" then return nil end
-    return JokCombatBranch.familyGuideEntries(node, true, player, path)
+    local airFamily = isAirNormalContext(player) and path == "XXTT"
+    return JokCombatBranch.familyGuideEntries(
+        node, true, player, path, airFamily)
 end
 
 function JokCombatBranch.update(player, buttons, crossPressed,
@@ -4261,8 +4202,8 @@ function JokCombatBranch.update(player, buttons, crossPressed,
             return JokCombatBranch.continuePhysical(player)
         end
         local node = JokCombatBranch.nodes[JokCombatBranch.path]
-        local child = node ~= nil and node.triangle
-            or JokCombatBranch.path .. "T"
+        local child = JokCombatBranch.triangleChild(
+            JokCombatBranch.path, node, JokCombatBranch.airFamily)
         local childNode = JokCombatBranch.nodes[child]
         if childNode == nil
             or not JokCombatBranch.nodeReady(childNode, player, child) then
@@ -4286,8 +4227,11 @@ function JokCombatBranch.update(player, buttons, crossPressed,
             .. (player.airborne and "airborne" or "ground") .. " action.")
         return false
     end
+    JokCombatBranch.airFamily = player.airborne and root == "XXTT"
     if root == "T" then return JokCombatBranch.execute(player, root) end
-    return JokCombatBranch.queue(player, root)
+    local consumed = JokCombatBranch.queue(player, root)
+    if not JokCombatBranch.active then JokCombatBranch.airFamily = false end
+    return consumed
 end
 
 local function updateCrossActionPrime(player, buttons)
@@ -4704,10 +4648,8 @@ function _OnInit()
     log("native Ripple Drive/Stun Impact/Gravity Break/Zantetsuken "
         .. "selectors ready.")
     log("Action Ability context ready: Hurricane Blast is callable on ground "
-        .. "and in air; airborne routing remains native and fake-ground disabled.")
-    log(string.format("Aerial Sweep airborne lift ready: one-shot %.1f-unit "
-        .. "rise on accepted D6; no height lock or raw70 write.",
-        CONFIG.aerialSweepAirLift))
+        .. "and in air; airborne family is Hurricane Blast -> Aerial Sweep "
+        .. "terminal, with native routing and fake-ground disabled.")
     if staleSyntheticAttack then
         log("cleared stale synthetic Attack flags during reload.")
     end
@@ -4759,7 +4701,6 @@ function _OnFrame()
         lastDpad = 0
         return
     end
-    JokCombatMotion.update(player)
 
     -- Release the owned L2/Shortcut control layers before sampling this frame's
     -- real controls. Conditional restoration never overwrites a newer state.
