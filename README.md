@@ -291,6 +291,14 @@ Air Combo Plus e Combo Master descritto sotto.
 > diverso da zero impedisce ora l'apertura della famiglia Strong nello stesso
 > frame di Triangolo. Salva, Esamina e Parla restano quindi native e il primo
 > Cross di conferma non viene piu soppresso da una route Vortex in attesa.
+>
+> **v0.14.0 — ruoli distinti e ciclo terra-aria-terra:** Strong resta burst,
+> C2 diventa una famiglia corta di inseguimento, C3 conserva il controllo area,
+> C4 diventa la Ultimate contestuale e C5 resta esecuzione singolo bersaglio.
+> La Ultimate usa `AAAY` Slapshot, `B` per un vero jump-cancel, quindi
+> Aerial Finisher -> Hurricane Blast -> Aerial Sweep. Solo dopo l'atterraggio
+> naturale riprende su `Y` con Blitz e termina su `Y` con Strike Raid. Non
+> scrive quota, stick o stato airborne.
 
 La repository contiene tre probe read-only e il primo prototipo combat:
 
@@ -302,7 +310,7 @@ La repository contiene tre probe read-only e il primo prototipo combat:
   faccia e valida gli indirizzi Steam portati prima che il prototipo scriva;
 - `JokCombat_CommandMenuProbe.lua`: confronta in sola lettura controller,
   transizioni e strutture delle quattro righe native del Command Menu;
-- `JokCombat_CombatPrototype.lua`: prototipo v0.13.3 con combo normali delegate
+- `JokCombat_CombatPrototype.lua`: prototipo v0.14.0 con combo normali delegate
   a KH1 e un bridge post-finisher per i cicli infiniti terra/aria, quattro slot
   R2 configurabili, otto Action Ability e cinque Limit nativi nelle famiglie
   Pirate terrestri, due Action aeree separate e Counterattack contestuale,
@@ -320,7 +328,8 @@ La repository contiene tre probe read-only e il primo prototipo combat:
   due script Critical Mix e architettura minima proposta.
 
 Il prototipo combat e' stato attivato dopo la conferma live della probe input.
-Perfect Guard, launcher del nemico e aerial chase non sono ancora implementati.
+Perfect Guard e launcher fisico del nemico non sono ancora implementati. C4
+offre invece un aerial chase tramite il salto nativo, senza simulare la quota.
 Counterattack usa invece una finestra breve aperta esclusivamente dal segnale
 reale di una Guard riuscita.
 
@@ -403,8 +412,8 @@ pacchetto Critical Mix sono conservati, ma non caricati, nelle directory
 `C:\Users\<utente>\Documents\KH_mod\reference\CriticalMix`. Backup, log e
 copie runtime restano locali e non fanno parte del repository.
 
-Per verificare la v0.13.3, premi `F1` nella console LuaBackend. Il log iniziale
-deve mostrare `v0.13.3`, `Native Abilities v0.3.0 ready`,
+Per verificare la v0.14.0, premi `F1` nella console LuaBackend. Il log iniziale
+deve mostrare `v0.14.0`, `Native Abilities v0.3.0 ready`,
 `ground action route ready`, `aerial action route ready`,
 `complete action records ready: 11/11`
 `native Command Menu overlay + Combo Guide ready` e
@@ -413,12 +422,12 @@ Deve inoltre comparire
 `Pirate Y map ready: 13 ground nodes, 8 ground Action routes + five native
 Limits; two aerial Actions and Counterattack remain contextual`,
 `native Limit combos ready: 5/5`, `successful-Guard Counterattack detector
-ready` e `legacy combo-magic recovery ready` e
-`Combo Guide ready`. Dopo una `A`, il Command Menu deve mostrare
-`[Y] Sliding Dash`, `[Y][Y] Blitz` e `[Y][Y][Y] Sonic Blade`; dopo due `A`
+ready` e `legacy combo-magic recovery ready`, oltre a
+`family roles ready` e `ground-air Ultimate ready`. Dopo una `A`, il Command
+Menu deve mostrare `[Y] Sliding Dash` e `[Y][Y] Sonic Blade`; dopo due `A`
 deve mostrare Stun Impact, Ripple Drive e, con Donald e Goofy, Trinity Limit.
-Dopo Sliding Dash, la Guide deve aggiornarsi a `[Y] Blitz` e
-`[Y][Y] Sonic Blade`, senza proporre una Action Ability offensiva su `[A]`.
+Dopo Sliding Dash, la Guide deve aggiornarsi a `[Y] Sonic Blade`, senza
+proporre una Action Ability offensiva su `[A]`.
 Nessuna sequenza deve più registrare `[magic]` o modificare lo slot Shortcut.
 Solo il costo del Limit combo attivo può essere zero durante la sua finestra
 posseduta e per la durata della sequenza nativa; per Trinity vengono invece
@@ -437,10 +446,12 @@ successivo deve cadere nella coda visibile della mossa precedente. Verifica in
 quest'ordine, prima senza bersaglio e poi contro un nemico:
 
 - `YYY`: Vortex -> Gravity Break -> Ragnarok;
-- `AYYY`: attacco nativo -> Sliding Dash -> Blitz -> Sonic Blade;
+- `AYY`: attacco nativo -> Sliding Dash -> Sonic Blade;
 - `AAYYY`: due attacchi nativi -> Stun Impact -> Ripple Drive -> Trinity Limit,
   soltanto a terra con Donald + Goofy nel party.
-- `AAAYY`: tre attacchi nativi -> Slapshot -> Strike Raid;
+- Ultimate C4: `AAAY` -> Slapshot, poi `B` -> salto reale, quindi `YYY` ->
+  Aerial Finisher -> Hurricane Blast -> Aerial Sweep; dopo l'atterraggio
+  naturale `YY` -> Blitz -> Strike Raid;
 - `AAAAYY`: quattro attacchi nativi -> Zantetsuken -> Ars Arcanum;
 - combo aerea dopo qualunque colpo intermedio: Aerial Finisher `CE` ->
   Hurricane Blast -> Aerial Sweep;
@@ -606,8 +617,9 @@ essere caricati sulla Steam senza un porting e una validazione specifici.
 ## Criterio per il prossimo passo
 
 Le finestre iniziali sono intenzionalmente conservative e configurabili. La
-prima transizione terra -> aria e' un jump-cancel, non ancora un
-launcher/aerial chase. Per il primo test Guard e Dodge vengono resi disponibili
+transizione C4 terra -> aria resta un jump-cancel nativo: Slapshot ne apre la
+finestra e la state machine conserva soltanto il contesto Ultimate fino alla
+chiusura dopo l'atterraggio. Per il primo test Guard e Dodge vengono resi disponibili
 solo in RAM anche prima dello sblocco vanilla; il save non viene modificato.
 La v0.2.10 ha confermato la transizione diretta a `0xD8`, senza uno stato `0xC8`
 intermedio e senza pulse sintetici, quando L2 viene tenuto prima di Croce. La

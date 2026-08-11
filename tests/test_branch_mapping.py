@@ -19,26 +19,26 @@ EXPECTED = {
     "T": ("action", "vortex"),
     "TT": ("action", "gravity_break"),
     "TTT": ("limit", "ragnarok"),
-    # C2 / mobility.
+    # C2 / pursuit.
     "XT": ("action", "sliding_dash"),
-    "XTT": ("action", "blitz"),
-    "XTTT": ("limit", "sonic_blade"),
+    "XTT": ("limit", "sonic_blade"),
     # C3 / area.
     "XXT": ("action", "stun_impact"),
     "XXTT": ("action", "ripple_drive"),
     "XXTTT": ("limit", "trinity_limit"),
-    # C4 / range.
+    # C4 / ground-air-ground Ultimate.
     "XXXT": ("action", "slapshot"),
-    "XXXTT": ("limit", "strike_raid"),
+    "XXXTT": ("action", "blitz"),
+    "XXXTTT": ("limit", "strike_raid"),
     # C5 / execution.
     "XXXXT": ("action", "zantetsuken"),
     "XXXXTT": ("limit", "ars_arcanum"),
 }
 
 LIMITS = {
-    "sonic_blade": ("XTTT", "XTT", "0x004B"),
+    "sonic_blade": ("XTT", "XT", "0x004B"),
     "ars_arcanum": ("XXXXTT", "XXXXT", "0x0057"),
-    "strike_raid": ("XXXTT", "XXXT", "0x005E"),
+    "strike_raid": ("XXXTTT", "XXXTT", "0x005E"),
     "ragnarok": ("TTT", "TT", "0x005A"),
     "trinity_limit": ("XXTTT", "XXTT", "0x0052"),
 }
@@ -109,13 +109,17 @@ def assert_map(nodes: dict[str, dict[str, str]]) -> None:
         path
         for family in (
             ("T", "TT", "TTT"),
-            ("XT", "XTT", "XTTT"),
+            ("XT", "XTT"),
             ("XXT", "XXTT", "XXTTT"),
-            ("XXXT", "XXXTT"),
+            ("XXXT", "XXXTT", "XXXTTT"),
             ("XXXXT", "XXXXTT"),
         )
         for path in family
     }
+    assert "triangle" not in nodes["XXXT"], (
+        "Slapshot must enter C4 through the real B jump, not a ground Y"
+    )
+    assert nodes["XXXTT"]["triangle"] == "XXXTTT"
 
 
 def assert_action_partition(nodes: dict[str, dict[str, str]]) -> None:
@@ -161,6 +165,22 @@ def assert_aerial_is_independent() -> None:
         "return JokCombatBranch.airFinisherPath",
         "native CE -> Hurricane Blast -> Aerial Sweep",
         "Aerial Finisher physical continuation ignored before",
+        'ultimateLauncherPath = "XXXT"',
+        'ultimateReturnPath = "XXXTT"',
+        'ultimateLimitPath = "XXXTTT"',
+        'ultimatePhase = "launch_buffered"',
+        'ultimatePhase = "jumping"',
+        'ultimatePhase = "air_ready"',
+        'ultimatePhase = "air_chain"',
+        'ultimatePhase = "returning"',
+        'ultimatePhase = "ground_ready"',
+        'ultimatePhase = "closing"',
+        "function JokCombatBranch.beginUltimate",
+        "function JokCombatBranch.updateUltimateState",
+        '"[B] Aerial Chase"',
+        '"[Y] Blitz after landing"',
+        "natural landing confirmed",
+        "player.airborne",
     )
     for guard in guards:
         assert guard in SOURCE, f"missing independent aerial guard: {guard}"
@@ -236,7 +256,7 @@ def assert_guard_counter() -> None:
 
 def assert_integration() -> None:
     guards = (
-        'VERSION = "v0.13.3"',
+        'VERSION = "v0.14.0"',
         "branchActionAbilities = true",
         "branchLimits = true",
         "comboGuide = true",
@@ -262,6 +282,12 @@ def assert_integration() -> None:
         'if path == "T" then return nil end',
         'return HUD.showOverlay("guide", guideEntries, "Combo Guide")',
         "legacy combo-magic recovery ready; no combo path can cast magic.",
+        "groundAirUltimate = true",
+        "groundAirUltimateTimeoutFrames = 600",
+        "Strong=burst, C2=pursuit, C3=crowd control",
+        "ground-air Ultimate ready: AAAY Slapshot -> B real jump",
+        "ultimate-aerial-chase",
+        "natural landing -> Y Blitz",
     )
     for guard in guards:
         assert guard in SOURCE, f"missing integration guard: {guard}"
@@ -283,6 +309,13 @@ def assert_integration() -> None:
     assert "branchMagic" not in SOURCE
     assert "JokCombatMagic" not in SOURCE
     assert '"[A] Continua vanilla"' not in SOURCE
+    assert "leftStickInput" not in SOURCE
+
+    ultimate_start = SOURCE.index("function JokCombatBranch.beginUltimate")
+    ultimate_end = SOURCE.index("function JokCombatBranch.nodeName", ultimate_start)
+    ultimate_source = SOURCE[ultimate_start:ultimate_end]
+    assert "WriteFloat" not in ultimate_source
+    assert "WriteInt(player.pointer + PLAYER.airborneState" not in ultimate_source
 
     slot_start = SOURCE.index("local ACTION_SLOTS = {")
     slot_end = SOURCE.index("local ACTION_SLOT_BY_ID = {}", slot_start)
@@ -300,7 +333,7 @@ def main() -> None:
     assert_integration()
     print(
         "PASS: 13-node ground map; 8 ground Actions + 5 native Limits; "
-        "aerial family independent; Counterattack gated by successful Guard"
+        "C4 ground-air-ground Ultimate; Counterattack gated by successful Guard"
     )
 
 
