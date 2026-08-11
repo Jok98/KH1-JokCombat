@@ -228,6 +228,12 @@ Air Combo Plus e Combo Master descritto sotto.
 > `R2 + Y/X/A/B`. `L2` non apre più un gruppo Action e `L2+R2` non esegue più
 > Action Ability; `L2 + Cerchio` resta riservato esclusivamente a Guard. La mappa
 > Pirate continua comunque a contenere tutte le undici Action Ability.
+>
+> **Fix v0.10.0 — risalita Aerial Sweep in aria:** quando la route aerea accetta
+> davvero `D6`, JokCombat applica una sola risalita di 50 unità sull'asse Y
+> invertito già validato. Non mantiene la quota, non altera `raw70` e non blocca
+> stick o gravità; il movimento torna immediatamente al motore nativo. A terra
+> Aerial Sweep conserva integralmente il proprio launcher nativo.
 
 La repository contiene tre probe read-only e il primo prototipo combat:
 
@@ -239,7 +245,7 @@ La repository contiene tre probe read-only e il primo prototipo combat:
   faccia e valida gli indirizzi Steam portati prima che il prototipo scriva;
 - `JokCombat_CommandMenuProbe.lua`: confronta in sola lettura controller,
   transizioni e strutture delle quattro righe native del Command Menu;
-- `JokCombat_CombatPrototype.lua`: prototipo v0.9.9 con combo normali delegate
+- `JokCombat_CombatPrototype.lua`: prototipo v0.10.0 con combo normali delegate
   a KH1 e un bridge post-finisher per i cicli infiniti terra/aria, quattro slot
   R2 configurabili, undici Action Ability nelle famiglie Pirate
   Strong/C2/C3/C4/C5 e sette
@@ -339,8 +345,8 @@ pacchetto Critical Mix sono conservati, ma non caricati, nelle directory
 `C:\Users\<utente>\Documents\KH_mod\reference\CriticalMix`. Backup, log e
 copie runtime restano locali e non fanno parte del repository.
 
-Per verificare la v0.9.9, premi `F1` nella console LuaBackend. Il log iniziale
-deve mostrare `v0.9.9`, `Native Abilities v0.3.0 ready`,
+Per verificare la v0.10.0, premi `F1` nella console LuaBackend. Il log iniziale
+deve mostrare `v0.10.0`, `Native Abilities v0.3.0 ready`,
 `ground action route ready`, `aerial action route ready`,
 `complete action records ready: 11/11`
 `native Command Menu overlay + Combo Guide ready` e
@@ -466,8 +472,9 @@ finisher: da ognuna di queste posizioni `Y` deve eseguire Aerial Sweep `D6`; un
 altro `Y` nella sua finestra deve eseguire Hurricane Blast `D1`. Il log deve
 mostrare `context=air-native` e
 una route aerea completa. La State Probe deve conservare `raw70=1/2`: non devono
-più comparire `airborne action suspension armed`, `context=air-suspended` o
-scritture di quota. Vortex, Slapshot, Ripple Drive, Stun Impact, Gravity Break,
+più comparire `airborne action suspension armed` o `context=air-suspended`.
+Aerial Sweep deve registrare una sola riga `one-shot lift applied`, senza stall
+della quota nei frame successivi. Vortex, Slapshot, Ripple Drive, Stun Impact, Gravity Break,
 Zantetsuken e le altre Action Ability terrestri non devono partire in aria e
 non devono comparire nella Combo Guide aerea. Gli stessi slot restano invariati
 a terra.

@@ -1,6 +1,6 @@
 # JokCombat — mappa combo Pirate A / Y
 
-Stato: **ACTION TERRA 11/11 + ACTION ARIA NATIVE 2/2 IN v0.9.9; MAGIE IN PROVA; LIMIT PARCHEGGIATI**
+Stato: **ACTION TERRA 11/11 + ACTION ARIA NATIVE 2/2 IN v0.10.0; MAGIE IN PROVA; LIMIT PARCHEGGIATI**
 
 Ambito: KH1 Final Mix, Steam Global, Sora
 Input abbreviati: `A` = Croce, `Y` = Triangolo
@@ -26,6 +26,10 @@ La v0.9.6 rimuove interamente la sospensione fake-ground: nessuna mossa aerea
 scrive `raw70`, quota o stick. Le Action Ability terrestri restano disponibili
 nel loro loadout e nella mappa a terra, ma in aria non vengono mostrate né
 richieste.
+La v0.10.0 mantiene questa politica e aggiunge una sola eccezione di movimento:
+se Aerial Sweep viene richiesta mentre Sora è già airborne, all'accettazione di
+`D6` la coordinata verticale riceve un unico impulso di risalita. Non esiste
+clamp successivo e stato airborne, stick e gravità restano nativi.
 
 ## 2. Core Action Ability
 

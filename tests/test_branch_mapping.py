@@ -145,7 +145,7 @@ def main() -> None:
     assert "branchActionAbilities = true" in SOURCE
     assert "branchMagic = true" in SOURCE
     assert "branchLimits = false" in SOURCE
-    assert 'VERSION = "v0.9.9"' in SOURCE
+    assert 'VERSION = "v0.10.0"' in SOURCE
     slot_start = SOURCE.index("local ACTION_SLOTS = {")
     slot_end = SOURCE.index("local ACTION_SLOT_BY_ID = {}", slot_start)
     slot_source = SOURCE[slot_start:slot_end]
@@ -213,6 +213,22 @@ def main() -> None:
     assert "airBridge" not in catalog_source
     assert "airGroundActionBridge" not in SOURCE
     assert "leftStickInput" not in SOURCE
+    aerial_sweep_lift_guards = (
+        "aerialSweepAirLift = 50.0",
+        "aerialSweepLiftWaitFrames = 120",
+        "positionY = 0x014",
+        "JokCombatMotion = {",
+        "function JokCombatMotion.armAerialSweepLift",
+        "function JokCombatMotion.update",
+        'requestedFromAir and action.id == "aerial_sweep"',
+        "player.animation == 0xD6",
+        "WriteFloat(player.pointer + PLAYER.positionY, liftedHeight, true)",
+        "gravity remains native",
+        "no height lock or raw70 write",
+    )
+    for guard in aerial_sweep_lift_guards:
+        assert guard in SOURCE, f"missing one-shot Aerial Sweep lift guard: {guard}"
+    assert "WriteInt(player.pointer + PLAYER.airborneState" not in SOURCE
     guide_guards = (
         "comboGuide = true",
         "function JokCombatBranch.guideEntries",
