@@ -1,195 +1,208 @@
-# JokCombat — mappa combo Pirate A / Y
+# JokCombat — mappa combo contestuale A / Y
 
-Stato: **ACTION TERRA 11/11 + FINISHER CE + ACTION ARIA NATIVE 2/2 IN v0.11.0; MAGIE COMBO RITIRATE; SONIC BLADE NATIVO/GRATUITO; ALTRI LIMIT 4/5 PARCHEGGIATI**
+Stato: **v0.13.2 — MAPPA TERRA 13 NODI; ACTION 8/8 + LIMIT NATIVI 5/5; PROTEZIONE STATO LIMIT**
 
 Ambito: KH1 Final Mix, Steam Global, Sora
 Input abbreviati: `A` = Croce, `Y` = Triangolo
 
-## 1. Regole del nuovo sistema
+## 1. Regole
 
-1. La stringa composta soltanto da `A` resta completamente nativa: Combo
-   Master, Combo Plus, Air Combo Plus, attacchi contestuali e finisher
-   appartengono a KH1.
-2. `Y` è l'unico input che può eseguire un'Action Ability o, dopo validazione,
-   un Limit nominato. Le magie restano esclusivamente vanilla.
-3. `A` dopo una mossa speciale produce sempre una continuazione fisica e non
-   può selezionare un'altra abilità.
-4. Ogni input della sequenza produce un'azione; le combinazioni non sono
-   password eseguite soltanto all'ultimo tasto.
-5. I Reaction Command conservano la priorità su `Y`. Lo Strong combo neutrale
-   esiste soltanto quando il Command Menu non espone una reaction.
-6. A terra resta disponibile la mappa completa. In aria vengono esposte soltanto
-   Aerial Sweep e Hurricane Blast, le due Action Ability con record aereo nativo.
-7. Summon resta esclusa.
+1. La stringa composta soltanto da `A` resta nativa. Combo Master, Combo Plus,
+   Air Combo Plus, attacchi contestuali e finisher appartengono a KH1.
+2. Il numero di `A` prima del primo `Y` sceglie la famiglia terrestre. Dopo il
+   primo `Y`, soltanto `Y` avanza nella stessa famiglia.
+3. Un `A` dopo una mossa nominata chiude immediatamente la famiglia e torna a
+   una continuazione fisica vanilla. Non esistono prefissi reverse nascosti.
+4. Ogni `Y` produce subito la mossa indicata: la sequenza non è una password
+   attesa fino all'ultimo tasto.
+5. Ogni Action Ability ha un solo ruolo contestuale. Le otto Action terrestri
+   sono nella mappa offensiva; Hurricane Blast e Aerial Sweep restano nella
+   famiglia aerea; Counterattack appartiene alla Guard riuscita.
+6. I Reaction Command hanno priorità su `Y`. Magie, menu, shortcut e costi MP
+   vanilla non vengono modificati. Summon è esclusa.
 
-La v0.9.6 rimuove interamente la sospensione fake-ground: nessuna mossa aerea
-scrive `raw70`, quota o stick. Le Action Ability terrestri restano disponibili
-nel loro loadout e nella mappa a terra, ma in aria non vengono mostrate né
-richieste.
+## 2. Mappa terrestre completa
 
-## 2. Core Action Ability
+### Strong — energia
 
-La struttura ispirata a Pirate Warriors offre esattamente undici posizioni
-attivate da `Y`, tante quante le Action Ability disponibili.
-
-### Strong combo — `Y Y Y`
-
-| Sequenza | Mossa dell'ultimo `Y` |
+| Sequenza | Mossa |
 |---|---|
 | `Y` | Vortex |
-| `Y Y` | Stun Impact |
-| `Y Y Y` | Gravity Break |
+| `Y Y` | Gravity Break |
+| `Y Y Y` | Ragnarok |
 
-Lo Strong combo può partire da neutrale. Dopo il primo colpo, la Guide mostra
-soltanto i `Y` ancora disponibili nella famiglia.
+Ragnarok è terminale.
 
-### C2 — `A Y Y Y`
+### C2 — mobilità
 
-| Sequenza | Mossa dell'ultimo `Y` |
+| Sequenza | Mossa |
 |---|---|
-| `A Y` | Slapshot |
-| `A Y Y` | Sliding Dash |
-| `A Y Y Y` | Blitz |
+| `A Y` | Sliding Dash |
+| `A Y Y` | Blitz |
+| `A Y Y Y` | Sonic Blade |
 
-È la famiglia rapida e di avanzamento.
+Sonic Blade è terminale.
 
-### C3 — `A A Y Y Y`
+### C3 — area
 
-| Sequenza | Mossa dell'ultimo `Y` |
+| Sequenza | Mossa |
 |---|---|
-| `A A Y` | Aerial Sweep |
-| `A A Y Y` | Hurricane Blast |
-| `A A Y Y Y` | Ripple Drive |
+| `A A Y` | Stun Impact |
+| `A A Y Y` | Ripple Drive |
+| `A A Y Y Y` | Trinity Limit |
 
-L'ordine mantiene il ponte Steam già validato: Aerial Sweep `D6` autorizza
-Hurricane Blast `D1` anche quando la famiglia è iniziata a terra.
-Da v0.9.8 Hurricane Blast è inoltre dichiarato `both`: la stessa route completa
-`D1` può essere richiesta direttamente a terra da uno slot configurabile, senza
-dover prima eseguire Aerial Sweep.
+Trinity Limit è terminale ed è disponibile soltanto a terra con Donald e Goofy
+nel party. Se manca uno dei due, la Guide termina su Ripple Drive e non propone
+né sostituisce Trinity.
 
-In aria questa è l'unica famiglia Action e può iniziare dopo qualunque colpo
-intermedio della combo: `A Y`, `A A Y`, `A A A Y` e le posizioni aggiunte da Air
-Combo Plus eseguono tutte la finisher aerea nativa `CE`. Gli input `Y` prima del
-tempo `20` vengono scartati; una nuova pressione valida esegue Hurricane Blast e
-il successivo `Y` esegue Aerial Sweep come chiusura discendente. La v0.10.5
-realizza l'ordine contestuale con il nodo virtuale `AIR_CE`, poi il canonico
-`XXTT` e infine `XXT`, senza duplicare abilità né cambiare la C3 terrestre.
-Ripple Drive resta ground-only e non viene proposta dalla Guide aerea.
+### C4 — distanza
 
-### C4 e C5
+| Sequenza | Mossa |
+|---|---|
+| `A A A Y` | Slapshot |
+| `A A A Y Y` | Strike Raid |
 
-| Famiglia | Sequenza | Mossa |
-|---|---|---|
-| C4 | `A A A Y` | Counterattack |
-| C5 | `A A A A Y` | Zantetsuken |
+Strike Raid è terminale.
 
-### Copertura
+### C5 — esecuzione
 
-| Famiglia | Slot |
+| Sequenza | Mossa |
+|---|---|
+| `A A A A Y` | Zantetsuken |
+| `A A A A Y Y` | Ars Arcanum |
+
+Ars Arcanum è terminale. Se Combo Plus porta la stringa oltre il quarto `A`,
+le posizioni successive restano vanilla: la mappa non inventa C6/C7.
+
+### Copertura terrestre
+
+| Tipo | Quantità |
 |---|---:|
-| Strong | 3 |
-| C2 | 3 |
-| C3 | 3 |
-| C4 | 1 |
-| C5 | 1 |
-| Totale | **11** |
+| Action Ability nella mappa | 8 |
+| Limit nativi | 5 |
+| Nodi terrestri totali | **13** |
 
-Nessuna Action Ability è duplicata e nessuna viene eseguita da `A`. La copertura
-terrestre resta 11/11; la copertura aerea intenzionale è 2/2 record nativi.
+Non ci sono mosse duplicate e nessuna mossa nominata viene eseguita da `A`.
 
-## 3. Reverse Limit
+## 3. Famiglia aerea invariata
 
-La v0.10.6 ritira le sette reverse magiche: il remap dell'ultimo `Y` non
-generava un ingresso reale nel dispatcher Shortcut. Menu e shortcut magiche
-restano vanilla e conservano i propri costi MP. Il codice runtime mantiene
-soltanto il recupero condizionale di un journal eventualmente lasciato dalle
-versioni precedenti; nessuna combo può più scrivere slot, livello o costi magia.
+Dopo qualunque colpo intermedio della combo aerea, `Y` apre sempre la stessa
+catena già validata:
 
-Le cinque sequenze reverse rimaste appartengono ai Limit. Ogni `A` intermedio
-è un vero attacco fisico KH1 e soltanto il `Y` finale può consegnare il
-controllo alla Reaction nativa. La v0.11.0 abilita esclusivamente Sonic Blade:
-dopo `Y A A A`, JokCombat pre-arma la Reaction nativa `0x004B`; l'ultimo `Y`
-resta fisico e viene elaborato da KH1, che conserva bersaglio, movimento,
-hitbox, danno e follow-up del Limit.
+| Input contestuale | Mossa |
+|---|---|
+| primo `Y` | Aerial Finisher nativa `CE` |
+| `Y` successivo | Hurricane Blast `D1` |
+| `Y` successivo | Aerial Sweep `D6`, terminale |
 
-| Sequenza | Mossa | Stato v0.11.0 |
-|---|---|---|
-| `Y A A A Y` | Sonic Blade | **attiva, Reaction nativa, 0 MP nella sola chiamata combo** |
-| `Y Y A A A Y` | Ars Arcanum | parcheggiata |
-| `Y Y Y A A Y` | Strike Raid | parcheggiata |
-| `A Y Y Y A A Y` | Ragnarok | parcheggiata |
-| `A A Y Y Y A A Y` | Trinity Limit | parcheggiata |
+La catena usa i nodi virtuali `AIR_CE -> AIR_D1 -> AIR_D6`. Hurricane Blast e
+Aerial Sweep puntano ai loro record canonici, ma non occupano più nodi della
+mappa terrestre. Restano disabilitati fake-ground, sospensione, scritture di
+quota e manipolazione dello stick.
 
-Il costo di Sonic Blade viene portato a zero soltanto tra il pre-arm e la fine
-confermata del Limit. Dopo l'ingresso, i byte del selettore Reaction vengono
-ripristinati subito, mentre il costo resta zero fino all'uscita dallo stato
-Limit. Un journal con firma distinta salva il costo e i byte del dispatcher
-prima di ogni scrittura e consente un ripristino
-condizionale anche con `F1`/reload. Sonic Blade lanciato dal menu conserva quindi
-il costo vanilla. Le altre quattro assegnazioni restano riserve univoche e non
-sono ancora dichiarate giocabili.
+## 4. Counterattack contestuale
 
-## 4. Combo Guide
+Counterattack non è una C4 offensiva. JokCombat osserva in sola lettura il byte
+Steam `0x296B230`, port dello stesso segnale usato dal riferimento Critical Mix.
+La finestra si apre soltanto quando sono vere insieme queste condizioni:
 
-La Guide usa le righe native del Command Menu e mostra la famiglia relativa
-alla posizione vanilla corrente.
+1. JokCombat ha accettato `L2 + Cerchio` come Guard;
+2. Sora è realmente nell'animazione Guard `D4`;
+3. il segnale di contatto riporta `0x10`.
 
-Dopo un `A`, per esempio:
+Dopo il blocco riuscito, una Croce fisica senza modificatori esegue
+Counterattack `D5`. Una Guard a vuoto, un attacco dopo una parata mancata o un
+generico deflect non aprono la finestra. JokCombat non scrive e non azzera mai
+il segnale di contatto.
 
-```text
-[Y] Slapshot
-[Y][Y] Sliding Dash
-[Y][Y][Y] Blitz
-```
+## 5. Limit nativi e gratuiti soltanto in combo
 
-Dopo `A A`:
+L'Action immediatamente precedente pre-arma una sola Reaction nativa; il `Y`
+finale rimane fisico e KH1 gestisce bersaglio, movimento, animazione, VFX,
+hitbox, danno e follow-up.
 
-```text
-[Y] Aerial Sweep
-[Y][Y] Hurricane Blast
-[Y][Y][Y] Ripple Drive
-```
+| Famiglia | Parent Action | Limit | Reaction |
+|---|---|---|---:|
+| Strong | Gravity Break | Ragnarok | `0x005A` |
+| C2 | Blitz | Sonic Blade | `0x004B` |
+| C3 | Ripple Drive | Trinity Limit | `0x0052` |
+| C4 | Slapshot | Strike Raid | `0x005E` |
+| C5 | Zantetsuken | Ars Arcanum | `0x0057` |
 
-Dopo avere eseguito Slapshot, la prima voce già consumata scompare:
+Sonic Blade, Ars Arcanum, Strike Raid e Ragnarok prendono in prestito a zero
+soltanto il proprio costo durante la selezione e lo stato Limit. Trinity salva
+gli MP runtime di Sora, Donald e Goofy e ripristina il consumo nativo. Il
+journal conserva sempre gli originali prima di scrivere e ripristina soltanto
+campi ancora posseduti da JokCombat, anche con cancel, timeout o `F1`/reload.
+I Limit lanciati dal menu conservano il costo vanilla.
+
+Se il parent Action termina senza un `Y` finale, la famiglia viene cancellata o
+si preme `A`, il selettore pre-armato viene restituito subito. Dopo un `Y`
+finale realmente osservato, resta invece disponibile per una grazia massima di
+20 frame: alcune transizioni native diventano visibili soltanto dopo un frame
+intermedio a idle. Se il pre-arm non è disponibile, il `Y` viene scartato e non
+viene sostituito da un falso attacco fisico.
+
+Quando `raw70 >= 0x20`, KH1 possiede lo stato Limit completo. JokCombat lascia
+fisici gli input di follow-up ma neutralizza ogni propria route, pulse, Guard,
+Dodge e Action Ability fino all'uscita nativa. Cancellare soltanto l'animazione
+di un Limit puo lasciare `raw70` orfano e bloccare permanentemente il movimento,
+come osservato interrompendo Strike Raid in `ED/EE`. Durante il collaudo il log
+registra inoltre ogni variazione del Reaction Command nativo e ogni `Y` di
+follow-up, cosi da isolare Impact senza forzarne l'ID alla cieca.
+
+## 6. Combo Guide
+
+La Guide usa al massimo quattro righe del Command Menu nativo e mostra soltanto
+i `Y` ancora disponibili. Dopo un `A`:
 
 ```text
 [Y] Sliding Dash
 [Y][Y] Blitz
-```
-
-Dopo Vortex, la v0.11.0 mostra il seguito Strong e la reverse Sonic Blade:
-
-```text
-[Y] Stun Impact
-[Y][Y] Gravity Break
-[A][A][A][Y] Sonic Blade
+[Y][Y][Y] Sonic Blade
 -
 ```
 
-La Guide non mostra `[A] Continua vanilla`: la stringa fisica è sempre
-implicita. Non rimane inoltre aperta mentre Sora è neutrale, evitando di
-coprire permanentemente il Command Menu; dopo il primo `Y` dello Strong combo
-mostra immediatamente i follow-up rimasti.
+Dopo due `A` con Donald e Goofy:
 
-Il toggle condiviso con l'Action Loadout resta `L1+R1+L2+R2`, rilasciato senza
-D-pad.
-Il loadout diretto v0.9.9 espone soltanto i quattro slot `R2`; L2 resta dedicato
-a Guard e la combinazione L2+R2 non seleziona più un gruppo Action Ability.
+```text
+[Y] Stun Impact
+[Y][Y] Ripple Drive
+[Y][Y][Y] Trinity Limit
+-
+```
 
-## 5. Timing, sicurezza e fallback
+Dopo Sliding Dash:
 
-- Ogni Action Ability concatenabile conserva la propria finestra di prebuffer
-  e release; viene memorizzato al massimo un input.
+```text
+[Y] Blitz
+[Y][Y] Sonic Blade
+-
+-
+```
+
+Durante la finestra di una Guard riuscita:
+
+```text
+[A] Counterattack
+-
+-
+-
+```
+
+La continuazione vanilla su `A` resta implicita. La Guide non copre il Command
+Menu mentre Sora è neutrale; lo Strong appare dopo il primo `Y`. Il toggle
+condiviso resta `L1 + R1 + L2 + R2` rilasciato senza D-pad.
+
+## 7. Timing e sicurezza
+
+- Ogni Action concatenabile conserva la propria finestra di prebuffer/release
+  e accetta al massimo un input.
 - Guard, Dodge, salto, modificatori, reaction command, menu, reload e perdita
-  del player object chiudono sempre la famiglia.
-- Un `A` durante una famiglia usa il percorso fisico target-free già validato:
-  prima rilascia l'azione corrente, poi genera un singolo nuovo edge Attack e
-  conserverà il prefisso soltanto quando conduce a un Limit validato.
-- Nessuna combo modifica slot Shortcut, livelli o costi magia. Sonic Blade
-  prende in prestito soltanto il proprio costo Limit e i byte Reaction, con un
-  journal dedicato e ripristino condizionale dopo attivazione, cancel, timeout,
-  fault, uscita o reload.
-- Se un adapter completo non è disponibile, la mossa riservata non compare
-  nella Guide e non viene sostituita da un'altra abilità.
-- I follow-up di Sonic Blade appartengono interamente al Limit nativo dopo la
-  sua attivazione; JokCombat non intercetta gli input interni alla sequenza.
+  del player object chiudono sempre la famiglia e ogni selector posseduto.
+- La stringa `A` e il suo ciclo infinito post-finisher restano gestiti dal
+  dispatcher KH1 con Combo Master/Combo Plus/Air Combo Plus.
+- Nessuna combo modifica slot Shortcut, livelli magia, salvataggio, inventario
+  o progressione.
+- I follow-up dei Limit appartengono interamente allo stato nativo: dopo
+  l'attivazione JokCombat non intercetta i loro input interni.

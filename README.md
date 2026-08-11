@@ -258,6 +258,36 @@ Air Combo Plus e Combo Master descritto sotto.
 > a zero soltanto durante questa selezione e il Limit nativo, poi ripristinato
 > condizionalmente a fine Limit, cancel, timeout, fault, uscita o `F1`/reload.
 > Ars Arcanum, Strike Raid, Ragnarok e Trinity Limit restano parcheggiati.
+>
+> **v0.12.0 — tutti i Limit nativi e gratuiti in combo:** lo stesso dispatcher
+> validato con Sonic Blade copre ora anche Ars Arcanum (`0x0057`), Strike Raid
+> (`0x005E`), Ragnarok (`0x005A`) e Trinity Limit (`0x0052`). I primi quattro
+> prendono in prestito a zero soltanto il proprio costo; Trinity conserva da un
+> journal gli MP runtime di Sora, Donald e Goofy. Trinity viene proposta solo a
+> terra e con Donald + Goofy nel party, perché l'animazione nativa dipende da
+> entrambi. Il selettore è condiviso e può appartenere a un solo Limit per volta.
+>
+> **v0.13.0 — famiglie contestuali complete:** le vecchie reverse con `A` dopo
+> una mossa speciale sono state rimosse. Strong/C2/C3 terminano ora
+> rispettivamente in Ragnarok, Sonic Blade e Trinity Limit; C4 collega Slapshot
+> a Strike Raid e C5 collega Zantetsuken ad Ars Arcanum. Le otto Action
+> terrestri, i cinque Limit, Hurricane Blast/Aerial Sweep aerei e Counterattack
+> dopo una Guard realmente riuscita hanno così ruoli distinti. `A` dopo un nodo
+> speciale chiude sempre la famiglia e torna alla stringa vanilla.
+>
+> **Fix v0.13.1 — ingresso Limit dopo la fine del parent:** il `Y` finale può
+> raggiungere il selector nativo nell'ultimo frame di Gravity Break o di
+> un'altra Action, mentre lo stato Limit diventa visibile a LuaBackend soltanto
+> dopo il ritorno intermedio a idle. Se il `Y` è stato realmente osservato,
+> JokCombat conserva ora il selector per la finestra di grazia già limitata a
+> 20 frame, invece di ripristinarlo appena termina il parent.
+>
+> **Fix v0.13.2 — ownership sicura dei Limit:** finche `raw70 >= 0x20`, KH1
+> possiede completamente input e recovery del Limit. Guard, Dodge, Action
+> Ability, route e pulse JokCombat vengono neutralizzati: interrompere Strike
+> Raid in `ED/EE` cancellava la posa ma lasciava `raw70=0x27`, bloccando Sora.
+> Il logger segue ora anche le variazioni del Reaction Command e i `Y` nativi
+> durante Ragnarok, per identificare con certezza il mancato Impact.
 
 La repository contiene tre probe read-only e il primo prototipo combat:
 
@@ -269,32 +299,32 @@ La repository contiene tre probe read-only e il primo prototipo combat:
   faccia e valida gli indirizzi Steam portati prima che il prototipo scriva;
 - `JokCombat_CommandMenuProbe.lua`: confronta in sola lettura controller,
   transizioni e strutture delle quattro righe native del Command Menu;
-- `JokCombat_CombatPrototype.lua`: prototipo v0.11.0 con combo normali delegate
+- `JokCombat_CombatPrototype.lua`: prototipo v0.13.2 con combo normali delegate
   a KH1 e un bridge post-finisher per i cicli infiniti terra/aria, quattro slot
-  R2 configurabili, undici Action Ability nelle famiglie Pirate
-  Strong/C2/C3/C4/C5, Sonic Blade nativo su `Y A A A Y` e quattro foglie Limit
-  ancora parcheggiate,
+  R2 configurabili, otto Action Ability e cinque Limit nativi nelle famiglie
+  Pirate terrestri, due Action aeree separate e Counterattack contestuale,
   jump-cancel terra -> aria, Guard universale su L2 + Cerchio e Dodge Roll
   fisso su Quadrato;
 - `JokCombat_NativeAbilities.lua`: imposta 99 AP massimi e assegna tramite la
   lista abilita' nativa le quantita' massime vanilla richieste: quattro Combo
   Plus, due Air Combo Plus e un Combo Master, tutte equipaggiate;
-- `docs/JokCombat_BranchCombo_Mapping.md`: mappa Pirate di 16 mosse uniche,
-  con undici Action Ability e Sonic Blade attivi, quattro Limit riservati e
-  nessuna magia combo, Chain Attack o Summon;
+- `docs/JokCombat_BranchCombo_Mapping.md`: mappa Pirate terrestre di 13 nodi,
+  con otto Action Ability e cinque Limit nativi, famiglia aerea separata,
+  Counterattack contestuale e nessuna magia combo, Chain Attack o Summon;
 - `docs/JokCombat_BranchCombo_Mapping_Draft.md`: archivio delle proposte
   precedenti, incluse le matrici scartate perché duplicavano le abilità;
 - `docs/CMix_AnimCancel_AbilityHandler_analysis.md`: analisi tecnica dei primi
   due script Critical Mix e architettura minima proposta.
 
 Il prototipo combat e' stato attivato dopo la conferma live della probe input.
-Perfect Guard, counter, launcher del nemico e aerial chase non sono ancora
-implementati.
+Perfect Guard, launcher del nemico e aerial chase non sono ancora implementati.
+Counterattack usa invece una finestra breve aperta esclusivamente dal segnale
+reale di una Guard riuscita.
 
 Il loadout Action Ability resta runtime-only e non inserisce le undici mosse
 nel salvataggio. Guard e Dodge Roll restano comandi fissi; magie e Limit non
-compaiono nell'editor. Sonic Blade è accessibile soltanto dalla sua combo
-Pirate e non viene aggiunto alla lista abilità. Le tre passive costituiscono una
+compaiono nell'editor. I cinque Limit sono accessibili soltanto dalle combo
+Pirate e non vengono aggiunti alla lista abilità. Le tre passive costituiscono una
 scelta strutturale del moveset e vengono apprese/equipaggiate nativamente.
 
 ## Passive combo native
@@ -370,25 +400,27 @@ pacchetto Critical Mix sono conservati, ma non caricati, nelle directory
 `C:\Users\<utente>\Documents\KH_mod\reference\CriticalMix`. Backup, log e
 copie runtime restano locali e non fanno parte del repository.
 
-Per verificare la v0.11.0, premi `F1` nella console LuaBackend. Il log iniziale
-deve mostrare `v0.11.0`, `Native Abilities v0.3.0 ready`,
+Per verificare la v0.13.2, premi `F1` nella console LuaBackend. Il log iniziale
+deve mostrare `v0.13.2`, `Native Abilities v0.3.0 ready`,
 `ground action route ready`, `aerial action route ready`,
 `complete action records ready: 11/11`
 `native Command Menu overlay + Combo Guide ready` e
 `native Ripple Drive/Stun Impact/Gravity Break/Zantetsuken selectors ready`.
 Deve inoltre comparire
-`Pirate Y map ready: 16 unique moves, 11 Action Ability slots enabled; combo
-magic retired, Sonic Blade native, four Limits parked`, `native Sonic Blade
-combo ready` e `legacy combo-magic recovery ready` e
+`Pirate Y map ready: 13 ground nodes, 8 ground Action routes + five native
+Limits; two aerial Actions and Counterattack remain contextual`,
+`native Limit combos ready: 5/5`, `successful-Guard Counterattack detector
+ready` e `legacy combo-magic recovery ready` e
 `Combo Guide ready`. Dopo una `A`, il Command Menu deve mostrare
-`[Y] Slapshot`, `[Y][Y] Sliding Dash` e `[Y][Y][Y] Blitz`; dopo due `A` deve
-mostrare Aerial Sweep, Hurricane Blast e Ripple Drive con le stesse profondità
-di `Y`. Dopo Slapshot, la Guide deve aggiornarsi a `[Y] Sliding Dash` e
-`[Y][Y] Blitz`, senza mai proporre una Action Ability su `[A]`.
+`[Y] Sliding Dash`, `[Y][Y] Blitz` e `[Y][Y][Y] Sonic Blade`; dopo due `A`
+deve mostrare Stun Impact, Ripple Drive e, con Donald e Goofy, Trinity Limit.
+Dopo Sliding Dash, la Guide deve aggiornarsi a `[Y] Blitz` e
+`[Y][Y] Sonic Blade`, senza proporre una Action Ability offensiva su `[A]`.
 Nessuna sequenza deve più registrare `[magic]` o modificare lo slot Shortcut.
-Solo il costo del Limit Sonic può essere zero durante la sua finestra posseduta
-e per la durata della sequenza nativa;
-ogni costo magia resta invariato. La Guide deve aprirsi anche se i puntatori colore delle
+Solo il costo del Limit combo attivo può essere zero durante la sua finestra
+posseduta e per la durata della sequenza nativa; per Trinity vengono invece
+preservati gli MP dei tre membri. Ogni costo magia resta invariato. La Guide
+deve aprirsi anche se i puntatori colore delle
 notification box non coincidono con il baseline Steam, purché le box non siano
 effettivamente in uso.
 Deve inoltre comparire `native normal combo ownership ready`; durante i colpi
@@ -401,22 +433,29 @@ Il primo collaudo delle famiglie Pirate va eseguito senza spammare: ogni input
 successivo deve cadere nella coda visibile della mossa precedente. Verifica in
 quest'ordine, prima senza bersaglio e poi contro un nemico:
 
-- `YYY`: Vortex -> Stun Impact -> Gravity Break;
-- `AYYY`: attacco nativo -> Slapshot -> Sliding Dash -> Blitz;
-- `AAYYY`: due attacchi nativi -> Aerial Sweep -> Hurricane Blast -> Ripple Drive;
-- `AAAY`: Counterattack;
-- `AAAAY`: Zantetsuken;
-- `YAAAY`: Vortex -> tre attacchi fisici -> Sonic Blade nativo.
+- `YYY`: Vortex -> Gravity Break -> Ragnarok;
+- `AYYY`: attacco nativo -> Sliding Dash -> Blitz -> Sonic Blade;
+- `AAYYY`: due attacchi nativi -> Stun Impact -> Ripple Drive -> Trinity Limit,
+  soltanto a terra con Donald + Goofy nel party.
+- `AAAYY`: tre attacchi nativi -> Slapshot -> Strike Raid;
+- `AAAAYY`: quattro attacchi nativi -> Zantetsuken -> Ars Arcanum;
+- combo aerea dopo qualunque colpo intermedio: Aerial Finisher `CE` ->
+  Hurricane Blast -> Aerial Sweep;
+- Guard riuscita `L2+Cerchio`, poi `A` senza modificatori: Counterattack.
 
 Ogni passaggio Action valido registra `[branch] <sequenza> requested` e poi
 `[branch] <sequenza> accepted`. Un input premuto troppo presto deve produrre
 `ignored before prebuffer`; un secondo input durante lo stesso buffer deve
-essere ignorato, non accodato. Per `YAAAY`, il terzo attacco fisico deve
-registrare `native Sonic Blade pre-armed`; l'ultimo `Y` deve registrare
-`delegated to native Sonic Blade` e poi `native Sonic Blade entered`. Verifica
-con MP a zero che il Limit completo parta comunque; terminata la selezione, un
-Sonic Blade vanilla deve conservare il proprio costo. Le altre quattro reverse
-Limit non devono comparire nella Guide né eseguire una mossa sostitutiva.
+essere ignorato, non accodato. Per ogni Limit, il parent Action deve registrare
+`native <Limit> pre-armed`; l'ultimo `Y` deve registrare
+`delegated to native <Limit>` e poi `native <Limit> entered`. Verifica con MP a
+zero che Sonic, Ars, Strike e Ragnarok partano comunque e che, terminata la
+sequenza, lo stesso Limit lanciato dal menu conservi il costo vanilla. Trinity
+deve lasciare invariati gli MP di Sora, Donald e Goofy; senza entrambi gli
+alleati non deve comparire nella Guide né sostituirsi con un'altra mossa.
+Una Guard mancata non deve mostrare Counterattack; una Guard che intercetta
+realmente un colpo deve registrare `successful Guard observed`, mostrare
+`[A] Counterattack` e accettare una sola Croce nella finestra di 35 frame.
 
 Tieni `R2` da solo per visualizzare e configurare l'unico gruppo Action. Il
 riepilogo mostra sempre un massimo di quattro righe nel Command Menu originale
