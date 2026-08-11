@@ -1,6 +1,6 @@
 # JokCombat — mappa combo Pirate A / Y
 
-Stato: **ACTION TERRA 11/11 + ACTION ARIA NATIVE 2/2 IN v0.9.7; MAGIE IN PROVA; LIMIT PARCHEGGIATI**
+Stato: **ACTION TERRA 11/11 + ACTION ARIA NATIVE 2/2 IN v0.10.3; MAGIE IN PROVA; LIMIT PARCHEGGIATI**
 
 Ambito: KH1 Final Mix, Steam Global, Sora
 Input abbreviati: `A` = Croce, `Y` = Triangolo
@@ -63,13 +63,17 @@ soltanto i `Y` ancora disponibili nella famiglia.
 
 L'ordine mantiene il ponte Steam già validato: Aerial Sweep `D6` autorizza
 Hurricane Blast `D1` anche quando la famiglia è iniziata a terra.
+Da v0.9.8 Hurricane Blast è inoltre dichiarato `both`: la stessa route completa
+`D1` può essere richiesta direttamente a terra da uno slot configurabile, senza
+dover prima eseguire Aerial Sweep.
 
-In aria questa è l'unica famiglia Action, ma dalla v0.9.7 può iniziare dopo
-qualunque colpo intermedio della combo: `A Y`, `A A Y`, `A A A Y` e le posizioni
-aggiunte da Air Combo Plus eseguono tutte Aerial Sweep; il successivo `Y` esegue
-Hurricane Blast. Internamente convergono sul solo nodo canonico `XXT`, quindi le
-abilità non vengono duplicate nella mappa. Ripple Drive resta ground-only e non
-viene proposta dalla Guide aerea. Il finisher `CE` non viene interrotto.
+In aria questa è l'unica famiglia Action e può iniziare dopo qualunque colpo
+intermedio della combo: `A Y`, `A A Y`, `A A A Y` e le posizioni aggiunte da Air
+Combo Plus eseguono tutte Hurricane Blast; il successivo `Y` esegue Aerial Sweep
+come chiusura discendente. La v0.10.3 realizza l'ordine contestuale riusando prima
+il nodo canonico `XXTT` e poi `XXT`, senza duplicare abilità e senza cambiare la
+C3 terrestre. Ripple Drive resta ground-only e non viene proposta dalla Guide
+aerea. Il finisher `CE` non viene interrotto.
 
 ### C4 e C5
 
@@ -197,6 +201,8 @@ mostra immediatamente i follow-up rimasti.
 
 Il toggle condiviso con l'Action Loadout resta `L1+R1+L2+R2`, rilasciato senza
 D-pad.
+Il loadout diretto v0.9.9 espone soltanto i quattro slot `R2`; L2 resta dedicato
+a Guard e la combinazione L2+R2 non seleziona più un gruppo Action Ability.
 
 ## 5. Timing, sicurezza e fallback
 

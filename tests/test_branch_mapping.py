@@ -145,25 +145,26 @@ def main() -> None:
     assert "branchActionAbilities = true" in SOURCE
     assert "branchMagic = true" in SOURCE
     assert "branchLimits = false" in SOURCE
-    assert 'VERSION = "v0.9.7"' in SOURCE
+    assert 'VERSION = "v0.10.3"' in SOURCE
+    slot_start = SOURCE.index("local ACTION_SLOTS = {")
+    slot_end = SOURCE.index("local ACTION_SLOT_BY_ID = {}", slot_start)
+    slot_source = SOURCE[slot_start:slot_end]
+    assert set(re.findall(r'id = "([^"]+)"', slot_source)) == {
+        "r2_cross", "r2_triangle", "r2_circle", "r2_square"
+    }
+    assert 'if modifier == BUTTON.R2 then return "r2" end' in SOURCE
+    assert 'return "l2"' not in SOURCE
+    assert 'return "dual"' not in SOURCE
+    assert "and r2Held and not l2Held then" in SOURCE
+    assert 'slot = ACTION_SLOT_BY_ID.r2_cross' in SOURCE
     assert 'return string.rep("X", position) .. "T"' in SOURCE
     assert 'if isAirNormalContext(player) then' in SOURCE
-    assert 'return "XXT"' in SOURCE
+    assert 'return "XXTT"' in SOURCE
     assert "Every intermediate native aerial hit aliases" in SOURCE
     assert re.search(
-        r'id = "hurricane_blast", name = "Hurricane Blast", context = "air"',
+        r'id = "hurricane_blast", name = "Hurricane Blast", context = "both"',
         catalog_source,
-    ), "normal Hurricane Blast shortcut must remain air-only"
-
-    hurricane_bridge_guards = (
-        'path == "XXTT"',
-        'JokCombatBranch.path == "XXT"',
-        'player.animation == 0xD6',
-        'and not player.airborne',
-        'branchContextAuthorized)',
-    )
-    for guard in hurricane_bridge_guards:
-        assert guard in SOURCE, f"missing Hurricane Blast bridge guard: {guard}"
+    ), "Hurricane Blast must be callable on ground and in air"
 
     integration_guards = (
         "branchWindowAuthorized == true",
@@ -192,7 +193,7 @@ def main() -> None:
         "aerial_sweep": "both",
         "counterattack": "ground",
         "blitz": "ground",
-        "hurricane_blast": "air",
+        "hurricane_blast": "both",
         "ripple_drive": "ground",
         "stun_impact": "ground",
         "gravity_break": "ground",
@@ -200,10 +201,17 @@ def main() -> None:
     }
     native_air_guards = (
         "function JokCombatBranch.nodeReady",
-        'return not player.airborne and path == "XXTT"',
+        "return action ~= nil and actionMatchesContext(action, player)",
+        "function JokCombatBranch.triangleChild",
+        'if path == "XXTT" then return "XXT" end',
+        'if path == "XXT" then return nil end',
+        'JokCombatBranch.airFamily = player.airborne and root == "XXTT"',
+        "node, false, player, JokCombatBranch.path, true",
         "JokCombatBranch.nodeReady(node, player, root)",
         "JokCombatBranch.nodeReady(childNode, player, child)",
-        "airborne Action Ability policy ready: native air records only",
+        "Hurricane Blast is callable on ground",
+        "and in air; airborne family is Hurricane Blast -> Aerial Sweep",
+        "terminal, with native routing",
         "fake-ground disabled",
     )
     for guard in native_air_guards:

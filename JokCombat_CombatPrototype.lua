@@ -2,7 +2,7 @@ LUAGUI_NAME = "JokCombat Combat Prototype"
 LUAGUI_AUTH = "Jok; Critical Mix reference by Xendra / KSX"
 LUAGUI_DESC = "Native Cross combo, Pirate-style Y Action/magic families, configurable loadout and universal defense."
 
--- JokCombat v0.9.7 prototype for the current Steam Global executable.
+-- JokCombat v0.10.3 prototype for the current Steam Global executable.
 -- Critical Mix was used as an authorized technical reference. This script is
 -- intentionally limited to combat/input state and does not persist changes to
 -- story flags, rewards, inventory, AP, levels, worlds, chests, or synthesis.
@@ -98,7 +98,7 @@ local CONFIG = {
 
 local EXPECTED_GAME_ID = 0xAF71841E
 local FINGERPRINT = 0x7265737563697065 -- "epicures", little endian
-local VERSION = "v0.9.7"
+local VERSION = "v0.10.3"
 
 local ADDRESS = {
     fingerprint = 0x3B2271,
@@ -318,7 +318,7 @@ local ACTION_CATALOG = {
         record = { 0xD2, 0x00, 0x05, 0xFF, 0x38, 0x4D, 0x00, 0x00,
             0x00, 0x00, 0x00, 0x00, 0x1B, 0x05, 0x06, 0x06,
             0x00, 0x00, 0x00, 0x00 } },
-    { id = "hurricane_blast", name = "Hurricane Blast", context = "air",
+    { id = "hurricane_blast", name = "Hurricane Blast", context = "both",
         animation = 0xD1, finisher = true,
         recordAddress = ADDRESS.airComboHurricane,
         record = { 0xD1, 0x00, 0x05, 0xFF, 0x48, 0x50, 0x00, 0x00,
@@ -366,12 +366,6 @@ for index, action in ipairs(ACTION_CATALOG) do
 end
 
 local ACTION_SLOTS = {
-    { id = "l2_cross", label = "L2 + X", modifier = BUTTON.L2,
-        face = BUTTON.CROSS, faceName = "A" },
-    { id = "l2_triangle", label = "L2 + Triangle", modifier = BUTTON.L2,
-        face = BUTTON.TRIANGLE, faceName = "Y" },
-    { id = "l2_square", label = "L2 + Square", modifier = BUTTON.L2,
-        face = BUTTON.SQUARE, faceName = "X" },
     { id = "r2_cross", label = "R2 + X", modifier = BUTTON.R2,
         face = BUTTON.CROSS, faceName = "A" },
     { id = "r2_triangle", label = "R2 + Triangle", modifier = BUTTON.R2,
@@ -380,15 +374,6 @@ local ACTION_SLOTS = {
         face = BUTTON.CIRCLE, faceName = "B" },
     { id = "r2_square", label = "R2 + Square", modifier = BUTTON.R2,
         face = BUTTON.SQUARE, faceName = "X" },
-    { id = "dual_cross", label = "L2 + R2 + X",
-        modifier = SHOULDER_MASK, face = BUTTON.CROSS, faceName = "A" },
-    { id = "dual_triangle", label = "L2 + R2 + Triangle",
-        modifier = SHOULDER_MASK, face = BUTTON.TRIANGLE,
-        faceName = "Y" },
-    { id = "dual_circle", label = "L2 + R2 + Circle",
-        modifier = SHOULDER_MASK, face = BUTTON.CIRCLE, faceName = "B" },
-    { id = "dual_square", label = "L2 + R2 + Square",
-        modifier = SHOULDER_MASK, face = BUTTON.SQUARE, faceName = "X" },
 }
 
 local ACTION_SLOT_BY_ID = {}
@@ -399,22 +384,10 @@ local function slotModifierMatches(buttons, slot)
 end
 
 local function slotModifierName(slot)
-    if slot.modifier == SHOULDER_MASK then return "L2+R2" end
-    if slot.modifier == BUTTON.L2 then return "L2" end
     return "R2"
 end
 
 local LOADOUT_MENU_GROUPS = {
-    l2 = {
-        id = "l2",
-        label = "L2",
-        openDirection = "Left",
-        slots = {
-            ACTION_SLOT_BY_ID.l2_triangle,
-            ACTION_SLOT_BY_ID.l2_square,
-            ACTION_SLOT_BY_ID.l2_cross,
-        },
-    },
     r2 = {
         id = "r2",
         label = "R2",
@@ -426,31 +399,13 @@ local LOADOUT_MENU_GROUPS = {
             ACTION_SLOT_BY_ID.r2_circle,
         },
     },
-    dual = {
-        id = "dual",
-        label = "L2+R2",
-        openDirection = "Up",
-        slots = {
-            ACTION_SLOT_BY_ID.dual_triangle,
-            ACTION_SLOT_BY_ID.dual_square,
-            ACTION_SLOT_BY_ID.dual_cross,
-            ACTION_SLOT_BY_ID.dual_circle,
-        },
-    },
 }
 
 local DEFAULT_LOADOUT = {
-    l2_cross = "stun_impact",
-    l2_triangle = "slapshot",
-    l2_square = "sliding_dash",
     r2_cross = "gravity_break",
     r2_triangle = "ripple_drive",
     r2_circle = "hurricane_blast",
     r2_square = "zantetsuken",
-    dual_cross = "blitz",
-    dual_triangle = "vortex",
-    dual_circle = "aerial_sweep",
-    dual_square = "counterattack",
 }
 
 -- These are deliberately conservative first-pass windows, measured in the
@@ -670,7 +625,7 @@ local HUD = {
     directEditGroup = nil,
     directEditActive = false,
     directEditDirty = false,
-    directEditIndex = { l2 = 1, r2 = 1, dual = 1 },
+    directEditIndex = { r2 = 1 },
     dpadReleaseLock = false,
     controlChordHeld = false,
     controlChordUsed = false,
@@ -752,8 +707,9 @@ local function saveActionLoadout()
         return false
     end
 
-    file:write("# JokCombat v0.9.4 Action Ability loadout\n")
+    file:write("# JokCombat v0.9.9 Action Ability loadout\n")
     file:write("# Guard remains fixed on L2+Circle; Dodge Roll on Square.\n")
+    file:write("# Only the four exact-R2 Action Ability slots are active.\n")
     file:write("# action_overlay controls both loadout labels and Combo Guide.\n")
     file:write("action_overlay=", HUD.enabled and "true" or "false", "\n")
     for _, slot in ipairs(ACTION_SLOTS) do
@@ -1065,15 +1021,6 @@ function HUD.actionLine(slot)
 end
 
 function HUD.overlayEntries(groupId)
-    if groupId == "l2" then
-        return {
-            HUD.actionLine(ACTION_SLOT_BY_ID.l2_triangle),
-            HUD.actionLine(ACTION_SLOT_BY_ID.l2_square),
-            HUD.actionLine(ACTION_SLOT_BY_ID.l2_cross),
-            "[B] Guard",
-        }
-    end
-
     local group = LOADOUT_MENU_GROUPS[groupId]
     if group == nil then return nil end
     local entries = {}
@@ -2063,9 +2010,7 @@ end
 
 function HUD.shoulderGroup(buttons)
     local modifier = buttons & SHOULDER_MASK
-    if modifier == BUTTON.L2 then return "l2" end
     if modifier == BUTTON.R2 then return "r2" end
-    if modifier == SHOULDER_MASK then return "dual" end
     return nil
 end
 
@@ -2121,7 +2066,7 @@ function HUD.updateOverlayControls(buttons, dpad)
         HUD.overlaySignature = nil
         saveActionLoadout()
         ConsolePrint(
-            "[JokCombat:loadout] all 11 slots restored to JokCombat defaults.")
+            "[JokCombat:loadout] all four R2 slots restored to defaults.")
     end
 
     if not toggleHeld and HUD.controlChordHeld then
@@ -3673,6 +3618,9 @@ JokCombatBranch = {
     reversePrefix = nil,
     reverseWaitingKind = nil,
     reverseWaitingFrames = 0,
+    -- The airborne family reuses the two canonical C3 nodes in reverse order:
+    -- Hurricane Blast keeps altitude first, then downward Aerial Sweep closes.
+    airFamily = false,
 }
 
 function JokCombatBranch.kindReady(node)
@@ -3692,10 +3640,15 @@ function JokCombatBranch.nodeReady(node, player, path)
     if not JokCombatBranch.kindReady(node) then return false end
     if player == nil or node.kind ~= "action" then return true end
     local action = ACTION_BY_ID[node.id]
-    if action ~= nil and actionMatchesContext(action, player) then return true end
-    -- Ground C3 deliberately enters D6 before its D1 child. This is the only
-    -- cross-context exception; airborne routing itself remains strictly native.
-    return not player.airborne and path == "XXTT"
+    return action ~= nil and actionMatchesContext(action, player)
+end
+
+function JokCombatBranch.triangleChild(path, node, airFamily)
+    if airFamily then
+        if path == "XXTT" then return "XXT" end
+        if path == "XXT" then return nil end
+    end
+    return node ~= nil and node.triangle or nil
 end
 
 function JokCombatBranch.initialize()
@@ -3788,6 +3741,7 @@ function JokCombatBranch.reset(reason, quiet, skipCleanup)
     JokCombatBranch.reversePrefix = nil
     JokCombatBranch.reverseWaitingKind = nil
     JokCombatBranch.reverseWaitingFrames = 0
+    JokCombatBranch.airFamily = false
     if wasActive and not quiet then
         log("[branch] closed" .. (reason ~= nil and ": " .. reason or "."))
     end
@@ -3810,23 +3764,9 @@ function JokCombatBranch.dispatch(player, path)
         return true
     end
 
-    -- Hurricane Blast is natively air-only. In C3 it is legal on the ground
-    -- only after Aerial Sweep: D6 is already the validated bridge
-    -- into that aerial-style branch, so do not broaden the normal shortcut's
-    -- context or make Hurricane Blast independently ground-callable.
-    local branchContextAuthorized = path == "XXTT"
-        and JokCombatBranch.path == "XXT"
-        and player.animation == 0xD6
-        and not player.airborne
-    if branchContextAuthorized then
-        log("[branch] XXTT context bridge authorized: "
-            .. "ground Aerial Sweep -> Hurricane Blast.")
-    end
-
     JokCombatBranch.slot.label = path .. " -> " .. action.name
     local requested = requestActionAbility(
-        player, JokCombatBranch.slot, action, false, true,
-        branchContextAuthorized)
+        player, JokCombatBranch.slot, action, false, true)
     if not requested or transitionKind ~= actionKind(action) then
         log("[branch] " .. path .. " request was not armed; tree closed.")
         JokCombatBranch.reset("request rejected")
@@ -4052,11 +3992,11 @@ function JokCombatBranch.rootPath(player)
         local maximum = ReadByte(ADDRESS.maxAirComboLength)
         local position = ReadByte(ADDRESS.comboPosition)
         if position < 1 or position >= maximum then return nil end
-        -- Every intermediate native aerial hit aliases to the one validated air
-        -- family. This does not duplicate an Action Ability in the canonical
-        -- map: X/Y timing still comes from the live CC/CD animation, while the
-        -- shared XXT node dispatches Aerial Sweep and then Hurricane Blast.
-        return "XXT"
+        -- Every intermediate native aerial hit aliases to the same contextual
+        -- family. It starts from canonical XXTT (Hurricane Blast), then the
+        -- air-only child resolver closes with canonical XXT (Aerial Sweep).
+        -- No Action Ability is duplicated and the ground C3 remains unchanged.
+        return "XXTT"
     end
     local neutral = player.control == 0x03
         and not isAttackContext(player) and player.animation <= 0x07
@@ -4081,13 +4021,15 @@ function JokCombatBranch.guideLine(sequence, node, player, path)
     return sequence .. " " .. (JokCombatBranch.nodeName(node) or "-")
 end
 
-function JokCombatBranch.familyGuideEntries(node, includeCurrent, player, path)
+function JokCombatBranch.familyGuideEntries(node, includeCurrent, player, path,
+        airFamily)
     if node == nil then return nil end
     local entries = {}
     local current = node
     local currentPath = path
     if not includeCurrent then
-        currentPath = node.triangle
+        currentPath = JokCombatBranch.triangleChild(
+            currentPath, node, airFamily)
         current = currentPath ~= nil
             and JokCombatBranch.nodes[currentPath] or nil
     end
@@ -4097,7 +4039,8 @@ function JokCombatBranch.familyGuideEntries(node, includeCurrent, player, path)
         table.insert(entries, JokCombatBranch.guideLine(
             sequence, current, player, currentPath))
         sequence = sequence .. "[Y]"
-        currentPath = current.triangle
+        currentPath = JokCombatBranch.triangleChild(
+            currentPath, current, airFamily)
         current = currentPath ~= nil
             and JokCombatBranch.nodes[currentPath] or nil
     end
@@ -4146,8 +4089,12 @@ function JokCombatBranch.branchGuideEntries(player)
         or player.animation ~= JokCombatBranch.animation then
         return nil
     end
-    return JokCombatBranch.guideEntriesFromPrefix(
-        JokCombatBranch.path, player)
+    if JokCombatBranch.airFamily then
+        local node = JokCombatBranch.nodes[JokCombatBranch.path]
+        return JokCombatBranch.familyGuideEntries(
+            node, false, player, JokCombatBranch.path, true)
+    end
+    return JokCombatBranch.guideEntriesFromPrefix(JokCombatBranch.path, player)
 end
 
 function JokCombatBranch.guideEntries(player, buttons)
@@ -4183,7 +4130,9 @@ function JokCombatBranch.guideEntries(player, buttons)
     -- Do not cover the normal Command Menu permanently while Sora is idle.
     -- The neutral Strong family becomes visible immediately after its first Y.
     if path == "T" then return nil end
-    return JokCombatBranch.familyGuideEntries(node, true, player, path)
+    local airFamily = isAirNormalContext(player) and path == "XXTT"
+    return JokCombatBranch.familyGuideEntries(
+        node, true, player, path, airFamily)
 end
 
 function JokCombatBranch.update(player, buttons, crossPressed,
@@ -4253,8 +4202,8 @@ function JokCombatBranch.update(player, buttons, crossPressed,
             return JokCombatBranch.continuePhysical(player)
         end
         local node = JokCombatBranch.nodes[JokCombatBranch.path]
-        local child = node ~= nil and node.triangle
-            or JokCombatBranch.path .. "T"
+        local child = JokCombatBranch.triangleChild(
+            JokCombatBranch.path, node, JokCombatBranch.airFamily)
         local childNode = JokCombatBranch.nodes[child]
         if childNode == nil
             or not JokCombatBranch.nodeReady(childNode, player, child) then
@@ -4278,8 +4227,11 @@ function JokCombatBranch.update(player, buttons, crossPressed,
             .. (player.airborne and "airborne" or "ground") .. " action.")
         return false
     end
+    JokCombatBranch.airFamily = player.airborne and root == "XXTT"
     if root == "T" then return JokCombatBranch.execute(player, root) end
-    return JokCombatBranch.queue(player, root)
+    local consumed = JokCombatBranch.queue(player, root)
+    if not JokCombatBranch.active then JokCombatBranch.airFamily = false end
+    return consumed
 end
 
 local function updateCrossActionPrime(player, buttons)
@@ -4289,12 +4241,8 @@ local function updateCrossActionPrime(player, buttons)
     local otherFaceHeld = (buttons & (BUTTON.TRIANGLE
         | BUTTON.CIRCLE | BUTTON.SQUARE)) ~= 0
     local slot = nil
-    if l2Held and not r2Held then
-        slot = ACTION_SLOT_BY_ID.l2_cross
-    elseif r2Held and not l2Held then
+    if r2Held and not l2Held then
         slot = ACTION_SLOT_BY_ID.r2_cross
-    elseif l2Held and r2Held then
-        slot = ACTION_SLOT_BY_ID.dual_cross
     end
     local action = slot ~= nil
         and ACTION_BY_ID[loadout[slot.id]] or nil
@@ -4418,7 +4366,7 @@ end
 local function updateModifierFaceRouting(buttons)
     local l2Held = (buttons & BUTTON.L2) ~= 0
     local r2Held = (buttons & BUTTON.R2) ~= 0
-    local actionModifierHeld = l2Held or r2Held
+    local actionModifierHeld = r2Held and not l2Held
     local reactionActive = not HUD.nativeRootSelectionAvailable()
     local branchOwnsTriangle = CONFIG.branchCombos
         and JokCombatBranch ~= nil and JokCombatBranch.active
@@ -4465,12 +4413,7 @@ local function updateDefenseRouting(buttons, guardAvailable, dodgeActive)
 
     local circleMap = NORMAL.circleControlMap
     local squareMap = NORMAL.squareControlMap
-    if l2Held and r2Held then
-        -- Both shoulders belong to the editor chord; no face action leaks into
-        -- gameplay while the player prepares either loadout editor chord.
-        circleMap = 0xFE
-        squareMap = 0xFE
-    elseif CONFIG.guardOnL2Circle and l2Held then
+    if CONFIG.guardOnL2Circle and l2Held and not r2Held then
         -- The override table is action -> physical control. Disable the native
         -- Circle/jump action and source the virtual Square/defense action from
         -- physical Circle (control index 0x05).
@@ -4479,7 +4422,7 @@ local function updateDefenseRouting(buttons, guardAvailable, dodgeActive)
         if circleHeld then
             squareMap = guardAvailable and 0x05 or 0xFE
         end
-    elseif r2Held then
+    elseif r2Held and not l2Held then
         -- R2+Circle and R2+Square are configurable Action Ability slots.
         circleMap = 0xFE
         squareMap = 0xFE
@@ -4690,7 +4633,7 @@ function _OnInit()
     log(string.format("native combo magic adapter %s: %d/7 families; "
         .. "combo casts use transient zero MP and conditional recovery.",
         magicValid and "ready" or "disabled", magicCount))
-    log("direct Action Loadout ready: hold L2/R2/L2+R2; "
+    log("direct Action Loadout ready: hold exact R2; "
         .. "D-pad Up/Down selects, Left/Right changes, release saves.")
     log("native editor cursor delegation ready: Up/Down uses KH1's complete "
         .. "native transition; Left/Right remains isolated for editing.")
@@ -4704,8 +4647,9 @@ function _OnInit()
         .. "show and edit the three rows KH1 currently renders.")
     log("native Ripple Drive/Stun Impact/Gravity Break/Zantetsuken "
         .. "selectors ready.")
-    log("airborne Action Ability policy ready: native air records only "
-        .. "(Aerial Sweep -> Hurricane Blast); fake-ground disabled.")
+    log("Action Ability context ready: Hurricane Blast is callable on ground "
+        .. "and in air; airborne family is Hurricane Blast -> Aerial Sweep "
+        .. "terminal, with native routing and fake-ground disabled.")
     if staleSyntheticAttack then
         log("cleared stale synthetic Attack flags during reload.")
     end
@@ -4918,10 +4862,11 @@ function _OnFrame()
             player, buttons, crossPressed, trianglePressed)
     end
 
-    -- The exact shoulder layer selects one of eleven configurable slots. X uses
+    -- Exact R2 selects one of four configurable slots. X uses
     -- the proven pre-armed physical route; the other face buttons are suppressed
     -- while their modifier is held and dispatch a delayed synthetic Attack edge.
-    if not actionConsumed and CONFIG.actionLoadout and (l2Held or r2Held) then
+    if not actionConsumed and CONFIG.actionLoadout
+        and r2Held and not l2Held then
         local selectedSlot = nil
         for _, slot in ipairs(ACTION_SLOTS) do
             if slotModifierMatches(buttons, slot)
