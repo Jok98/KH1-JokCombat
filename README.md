@@ -1,9 +1,10 @@
 # KH1 JokCombat
 
-Mod combat-only sperimentale per **KINGDOM HEARTS FINAL MIX PC**. Il progetto
-mantiene storia, reward, chest, synthesis, boss e world flags vanilla. La sola
-eccezione di progressione intenzionale e' il bootstrap nativo di High Jump,
-Combo Plus, Air Combo Plus e Combo Master descritto sotto.
+Mod combat-oriented sperimentale per **KINGDOM HEARTS FINAL MIX PC**. Il
+progetto mantiene storia, reward fissi, chest, synthesis, boss e world flags
+vanilla. Le sole eccezioni intenzionali sono il bootstrap nativo di High Jump,
+Combo Plus, Air Combo Plus e Combo Master e il moltiplicatore globale dei drop
+descritto sotto.
 
 ## Stato attuale
 
@@ -337,6 +338,8 @@ La repository contiene tre probe read-only e il primo prototipo combat:
 - `JokCombat_NativeAbilities.lua`: imposta 99 AP massimi e assegna tramite la
   lista abilita' nativa High Jump e le quantita' massime vanilla richieste:
   quattro Combo Plus, due Air Combo Plus e un Combo Master, tutte equipaggiate;
+- `JokCombat_DropRate.lua`: imposta a `2.0x` sia il moltiplicatore degli item
+  sia quello dei prize, con firma Steam verificata e ripristino condizionale;
 - `docs/JokCombat_BranchCombo_Mapping.md`: mappa Pirate terrestre di 13 nodi,
   con otto Action Ability e cinque Limit nativi, famiglia aerea separata,
   Counterattack contestuale e nessuna magia combo, Chain Attack o Summon;
@@ -412,6 +415,22 @@ Questa assegnazione e' intenzionalmente persistente: dopo un salvataggio High
 Jump e le passive fanno parte della partita. Prima del primo test e' stata creata una
 copia locale di `KHFM_WW.png` sotto `KH_mod/backups/saves`.
 
+## Drop rate globale al 200%
+
+`JokCombat_DropRate.lua` porta a `2.0x` entrambi i moltiplicatori nativi: drop
+degli item e drop dei prize. Gli operandi Steam Global `0x2A63E4` e
+`0x2A63EE` sono stati verificati in sola lettura sul processo supportato: prima
+della patch valevano entrambi `1.0`. Il modulo controlla inoltre la firma delle
+due istruzioni, scrive una sola volta all'inizializzazione e ripristina i valori
+precedenti all'uscita soltanto se nessun altro script li ha cambiati. Non scrive
+nel salvataggio.
+
+Non e' esatto dire che Critical Mix sia sempre configurato al 200%: il suo
+`CMix_StatHandler.lua` usa una base del 100%, 150% o 200% secondo la difficolta'
+selezionata e applica poi bonus separati di Three Wishes e Lady Luck.
+JokCombat sceglie invece intenzionalmente un valore base fisso del 200%,
+indipendente dalla difficolta'.
+
 ## Directory runtime prevista
 
 La directory prevista per gli script KH1 e':
@@ -428,8 +447,8 @@ scripts = [{ path = "C:\\Users\\<utente>\\Documents\\KH_mod\\scripts\\kh1", rela
 ```
 
 La directory runtime contiene `JokCombat_StateProbe.lua`,
-`JokCombat_CombatPrototype.lua` e `JokCombat_NativeAbilities.lua`. La Input
-Probe validata e i 40 script del
+`JokCombat_CombatPrototype.lua`, `JokCombat_NativeAbilities.lua` e
+`JokCombat_DropRate.lua`. La Input Probe validata e i 40 script del
 pacchetto Critical Mix sono conservati, ma non caricati, nelle directory
 `reference` sotto
 `C:\Users\<utente>\Documents\KH_mod\reference\CriticalMix`. Backup, log e
@@ -441,7 +460,7 @@ deve mostrare `v0.15.3`, `Native Abilities v0.4.0 ready`,
 `complete action records ready: 11/11`
 `native Command Menu overlay + Combo Guide ready` e
 `native Ripple Drive/Stun Impact/Gravity Break/Zantetsuken selectors ready`.
-Deve inoltre comparire
+Deve inoltre comparire `Drop Rate v0.1.0 active` e
 `Pirate Y map ready: 13 ground nodes, 8 ground Action routes + five native
 Limits; two aerial Actions and Counterattack remain contextual`,
 `native Limit combos ready: 5/5`, `successful-Guard Counterattack detector
