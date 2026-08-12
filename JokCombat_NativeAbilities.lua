@@ -1,6 +1,6 @@
 LUAGUI_NAME = "JokCombat Native Abilities"
 LUAGUI_AUTH = "Jok; Critical Mix reference by Xendra"
-LUAGUI_DESC = "Keeps JokCombat's native combo passives at vanilla-max counts."
+LUAGUI_DESC = "Keeps High Jump and JokCombat's native combo passives learned and equipped."
 
 -- JokCombat native ability grant for the current Steam Global build.
 --
@@ -20,11 +20,13 @@ LUAGUI_DESC = "Keeps JokCombat's native combo passives at vanilla-max counts."
 -- Unlike the retired NativePassiveTest, these are deliberate progression
 -- writes. Once the player saves, the equipped abilities become part of that
 -- save. JokCombat keeps the exact vanilla maxima requested by the combat
--- design: four Combo Plus, two Air Combo Plus and one Combo Master. If later
+-- design: High Jump, four Combo Plus, two Air Combo Plus and one Combo Master.
+-- KH1FM has a single High Jump ability rather than the leveled KH2 variants;
+-- equipping that one entry enables its full native jump upgrade. If later
 -- vanilla rewards append a surplus copy, it is removed and the contiguous
 -- ability list is compacted before gameplay continues.
 
-local VERSION = "v0.3.0"
+local VERSION = "v0.4.0"
 local EXPECTED_GAME_ID = 0xAF71841E
 local FINGERPRINT = 0x7265737563697065 -- "epicures", little endian
 local ABILITY_SLOT_COUNT = 48
@@ -68,6 +70,8 @@ local PLAYER = {
 local PASSIVES = {
     -- KH1 uses the high bit as the disabled flag: the base ID is equipped,
     -- while ID|0x80 is learned but unequipped.
+    { name = "High Jump", base = 0x01, equipped = 0x01,
+        unequipped = 0x81, targetCopies = 1 },
     { name = "Combo Plus", base = 0x06, equipped = 0x06,
         unequipped = 0x86, targetCopies = 4 },
     { name = "Air Combo Plus", base = 0x07, equipped = 0x07,
@@ -320,9 +324,10 @@ local function ensureNativePassives()
     end
 
     if changed then
-        log("native passive grant complete; changes will persist when KH1 saves.")
+        log("native ability grant complete; changes will persist when KH1 saves.")
     else
-        log("native passive counts already exact and equipped (4/2/1); no writes.")
+        log("High Jump and native passive counts already exact and equipped "
+            .. "(1 + 4/2/1); no writes.")
     end
     applied = true
     pendingReport = true
@@ -375,7 +380,7 @@ function _OnInit()
 
     canRun = true
     log("Native Abilities " .. VERSION
-        .. " ready: exact native counts 4/2/1 + persistent grant.")
+        .. " ready: High Jump + exact native counts 4/2/1 + persistent grant.")
 end
 
 function _OnFrame()

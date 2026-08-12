@@ -12,6 +12,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = (ROOT / "JokCombat_CombatPrototype.lua").read_text(encoding="utf-8")
+NATIVE_SOURCE = (ROOT / "JokCombat_NativeAbilities.lua").read_text(
+    encoding="utf-8"
+)
 
 
 EXPECTED = {
@@ -254,9 +257,103 @@ def assert_guard_counter() -> None:
     assert "WriteByte(ADDRESS.connectCounter" not in SOURCE
 
 
+def assert_native_second_jump() -> None:
+    guards = (
+        "secondJump = true",
+        "secondJumpArmFrames = 45",
+        "secondJumpRouteFrames = 60",
+        "secondJumpLiftAmount = 30.0",
+        "secondJumpLiftEndTime = 25.0",
+        "secondJumpSpeedDivisor = 1.1",
+        "gameSpeed = 0x233FBCC",
+        "verticalPosition = 0x014",
+        "animationSpeed = 0x284",
+        "JokCombatAirJump = {",
+        "function JokCombatAirJump.routeAnimation",
+        "function JokCombatAirJump.entryMatchesOwnedRoute",
+        "function JokCombatAirJump.initialize",
+        "function JokCombatAirJump.restoreRoutes",
+        "function JokCombatAirJump.noteGroundJump",
+        "function JokCombatAirJump.boost",
+        "function JokCombatAirJump.observe",
+        "function JokCombatAirJump.canBegin",
+        "function JokCombatAirJump.ownsCircle",
+        "function JokCombatAirJump.begin",
+        'if entry.name == "flyingCombo1" then return 0x09 end',
+        "WriteByte(entry.address, JokCombatAirJump.routeAnimation(entry))",
+        "WriteFloat(player.pointer + PLAYER.verticalPosition,",
+        "position - lift, true)",
+        "if player.animation == 0x0F then",
+        "and JokCombatAirJump.ownsCircle(buttons) then",
+        "if not triggerAttackCommand() then",
+        "WriteByte(ADDRESS.comboPosition, 1)",
+        'JokCombatBranch.reset("second jump")',
+        'cancelPlayer(player, "second-jump")',
+        "second jump is not charged",
+        "the charge remains consumed until landing",
+        "landing confirmed; second jump recharges",
+        "Kinetic Step accepted",
+        "air route 0x0F + Attack pulse armed",
+        "releaseRequired = false",
+        "first-jump B released; second-jump input unlocked",
+        "release the first-jump input",
+        "not nativeShortcutHeld",
+    )
+    for guard in guards:
+        assert guard in SOURCE, f"missing native second-jump guard: {guard}"
+
+    start = SOURCE.index("JokCombatAirJump = {")
+    end = SOURCE.index("local function actionKind", start)
+    adapter = SOURCE[start:end]
+    assert adapter.count("WriteFloat(") == 1
+    assert "PLAYER.animationId" not in adapter
+    assert "WriteInt(player.pointer + PLAYER.airborneState" not in adapter
+    assert "WriteLong(ADDRESS.circleHandler" not in adapter
+    assert "circleHandlerAirEntry" not in SOURCE
+    assert "circleHandlerFallEntry" not in SOURCE
+
+    # Model the transient route set: all eight canonical air entries must be
+    # covered, with 0x09 reserved exclusively for FlyingCombo1 and 0x0F used
+    # by every ordinary aerial selector. This catches a future table addition
+    # that would otherwise escape the byte-only Kinetic Step patch.
+    air_start = SOURCE.index("local AIR_ACTION_ROUTE = {")
+    air_end = SOURCE.index("-- Canonical complete records", air_start)
+    air_names = re.findall(
+        r'\{ name = "([^"]+)"', SOURCE[air_start:air_end]
+    )
+    expected_air_names = [
+        "airComboAerialSweep",
+        "airCombo1C",
+        "airCombo1B",
+        "airComboHurricane",
+        "airComboFinisher",
+        "airCombo2",
+        "airCombo1",
+        "flyingCombo1",
+    ]
+    assert air_names == expected_air_names
+    simulated_heads = {
+        name: 0x09 if name == "flyingCombo1" else 0x0F
+        for name in air_names
+    }
+    assert list(simulated_heads.values()).count(0x0F) == 7
+    assert list(simulated_heads.values()).count(0x09) == 1
+
+    native_guards = (
+        'VERSION = "v0.4.0"',
+        '{ name = "High Jump", base = 0x01, equipped = 0x01,',
+        "unequipped = 0x81, targetCopies = 1",
+        "High Jump + exact native counts 4/2/1",
+    )
+    for guard in native_guards:
+        assert guard in NATIVE_SOURCE, (
+            f"missing native High Jump grant guard: {guard}"
+        )
+
+
 def assert_integration() -> None:
     guards = (
-        'VERSION = "v0.14.0"',
+        'VERSION = "v0.15.3"',
         "branchActionAbilities = true",
         "branchLimits = true",
         "comboGuide = true",
@@ -330,6 +427,7 @@ def main() -> None:
     assert_aerial_is_independent()
     assert_native_limits()
     assert_guard_counter()
+    assert_native_second_jump()
     assert_integration()
     print(
         "PASS: 13-node ground map; 8 ground Actions + 5 native Limits; "

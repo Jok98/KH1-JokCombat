@@ -1,8 +1,8 @@
 LUAGUI_NAME = "JokCombat Combat Prototype"
 LUAGUI_AUTH = "Jok; Critical Mix reference by Xendra / KSX"
-LUAGUI_DESC = "Native Cross combo, Pirate-style Y Action/Limit families, configurable loadout and universal defense."
+LUAGUI_DESC = "Native Cross combo, Pirate-style Y Action/Limit families, one-cycle double jump, configurable loadout and universal defense."
 
--- JokCombat v0.14.0 prototype for the current Steam Global executable.
+-- JokCombat v0.15.3 prototype for the current Steam Global executable.
 -- Critical Mix was used as an authorized technical reference. This script is
 -- intentionally limited to combat/input state and does not persist changes to
 -- story flags, rewards, inventory, AP, levels, worlds, chests, or synthesis.
@@ -49,6 +49,18 @@ local CONFIG = {
     -- Triangle remains completely native and never arms a delayed finisher.
     triangleGroundFinisher = false,
     groundToAirJumpBranch = true,
+    -- A real ground jump arms one additional Kinetic Step jump. The second
+    -- press may cancel any ordinary airborne action, then restarts the aerial
+    -- combo from its first hit. Landing is the only normal way to refill it.
+    -- This is the authorized Critical Mix Multi Jump route: only byte zero of
+    -- the eight air-action entries is borrowed, then a real Attack command
+    -- enters animation 0x0F and a bounded vertical lift reproduces its jump.
+    secondJump = true,
+    secondJumpArmFrames = 45,
+    secondJumpRouteFrames = 60,
+    secondJumpLiftAmount = 30.0,
+    secondJumpLiftEndTime = 25.0,
+    secondJumpSpeedDivisor = 1.1,
     defensiveCancels = true,
     universalGuardCancel = true,
     universalDodgeCancel = true,
@@ -107,7 +119,7 @@ local CONFIG = {
 
 local EXPECTED_GAME_ID = 0xAF71841E
 local FINGERPRINT = 0x7265737563697065 -- "epicures", little endian
-local VERSION = "v0.14.0"
+local VERSION = "v0.15.3"
 
 local ADDRESS = {
     fingerprint = 0x3B2271,
@@ -165,6 +177,9 @@ local ADDRESS = {
     reactionWriter = 0x294304,
     reactionWriter2 = 0x29492E,
     world = 0x234045C,
+    -- Read-only Steam Global port of Critical Mix's global game-speed float.
+    -- Live validation on the supported executable returned exactly 1.0.
+    gameSpeed = 0x233FBCC,
     partyMember1 = 0x2DE97DF,
     partyMember2 = 0x2DE97E0,
     battleSlotBase = 0x2D50000,
@@ -253,11 +268,13 @@ local ADDRESS = {
 
 local PLAYER = {
     actionControl = 0x000,
+    verticalPosition = 0x014,
     slotReference = 0x06C,
     airborneState = 0x070,
     animationId = 0x164,
     secondaryAnimationId = 0x168,
     animationTime = 0x16C,
+    animationSpeed = 0x284,
 }
 
 local BUTTON = {
@@ -1804,6 +1821,13 @@ local function updateGroundActionRoute(player)
 end
 
 local function restoreAirActionRoute()
+    -- Kinetic Step borrows only the animation byte of this same table. Restore
+    -- its owned hybrid first; the generic known-record check deliberately
+    -- refuses otherwise unknown 0x0F/0x09 heads.
+    if JokCombatAirJump ~= nil
+        and JokCombatAirJump.restoreRoutes ~= nil then
+        JokCombatAirJump.restoreRoutes("aerial route restore", true)
+    end
     for _, entry in ipairs(AIR_ACTION_ROUTE) do
         if routeEntryHasKnownRecord(entry)
             and not actionRecordMatches(entry.address, entry.record) then
@@ -1960,6 +1984,10 @@ local function updateActionRoutes(player)
 end
 
 local function restoreAllPatches()
+    if JokCombatAirJump ~= nil
+        and JokCombatAirJump.restoreRoutes ~= nil then
+        JokCombatAirJump.restoreRoutes("patch restore", true)
+    end
     if JokCombatNativeLimit ~= nil
         and JokCombatNativeLimit.restore ~= nil then
         JokCombatNativeLimit.restore("patch restore", true)
@@ -2866,6 +2894,392 @@ local function cancelPlayer(player, label)
     log(string.format(
         "%s cancel: anim=0x%02X secondary=0x%02X time=%.2f",
         label, player.animation, player.secondary, player.time))
+end
+
+-- KH1FM has one native High Jump ability, but no learnable Double Jump. The
+-- authorized Critical Mix Multi Jump does not use Circle's state dispatcher:
+-- it transiently replaces only the animation byte of every aerial action entry
+-- with Kinetic Step 0x0F (FlyingCombo1 uses its native 0x09 recovery entry),
+-- cancels the current action and sends one real Attack command. During the
+-- first 25 animation-time units it applies the same bounded vertical lift as
+-- Critical Mix. JokCombat adds strict ownership, full-record validation and a
+-- single charge that is armed by a real first jump and restored only on land.
+JokCombatAirJump = {
+    enabled = false,
+    available = false,
+    consumed = false,
+    wasAirborne = false,
+    releaseRequired = false,
+    groundRequestFrames = 0,
+    routeFrames = 0,
+    requestAge = 0,
+    routeOwned = false,
+    active = false,
+    playerPointer = nil,
+    sourceAnimation = nil,
+    sourceTime = 0.0,
+    sourceAirborneState = 0,
+    routeFaultLogged = false,
+    liftFaultLogged = false,
+}
+
+function JokCombatAirJump.routeAnimation(entry)
+    if entry.name == "flyingCombo1" then return 0x09 end
+    return 0x0F
+end
+
+function JokCombatAirJump.entryMatchesOwnedRoute(entry)
+    if ReadByte(entry.address) ~= JokCombatAirJump.routeAnimation(entry) then
+        return false
+    end
+    for offset = 1, #entry.record - 1 do
+        if ReadByte(entry.address + offset) ~= entry.record[offset + 1] then
+            return false
+        end
+    end
+    return true
+end
+
+function JokCombatAirJump.restoreRoutes(reason, quiet)
+    local restored = false
+    local unexpected = false
+    for _, entry in ipairs(AIR_ACTION_ROUTE) do
+        local desired = JokCombatAirJump.routeAnimation(entry)
+        if JokCombatAirJump.entryMatchesOwnedRoute(entry) then
+            writeActionRecord(entry.address, entry.record)
+            restored = true
+        elseif ReadByte(entry.address) == desired then
+            -- The head looks like our route but its remaining 19 bytes do not.
+            -- Never overwrite a table another mod changed independently.
+            unexpected = true
+        end
+    end
+    JokCombatAirJump.routeOwned = false
+    JokCombatAirJump.routeFrames = 0
+    JokCombatAirJump.requestAge = 0
+
+    if unexpected then
+        JokCombatAirJump.enabled = false
+        if not JokCombatAirJump.routeFaultLogged then
+            log("[air-jump] an owned-looking 0x0F/0x09 route has foreign "
+                .. "record bytes; second jump disabled without overwriting it.")
+            JokCombatAirJump.routeFaultLogged = true
+        end
+        return false
+    end
+    if restored and reason ~= nil and not quiet then
+        log("[air-jump] Kinetic Step air entries restored: " .. reason .. ".")
+    end
+    return true
+end
+
+function JokCombatAirJump.recordsCanonical()
+    for _, entry in ipairs(AIR_ACTION_ROUTE) do
+        if not actionRecordMatches(entry.address, entry.record) then
+            return false, entry
+        end
+    end
+    return true, nil
+end
+
+function JokCombatAirJump.initialize(airRouteReady)
+    JokCombatAirJump.enabled = false
+    JokCombatAirJump.available = false
+    JokCombatAirJump.consumed = false
+    JokCombatAirJump.wasAirborne = false
+    JokCombatAirJump.releaseRequired = false
+    JokCombatAirJump.groundRequestFrames = 0
+    JokCombatAirJump.routeFrames = 0
+    JokCombatAirJump.requestAge = 0
+    JokCombatAirJump.routeOwned = false
+    JokCombatAirJump.active = false
+    JokCombatAirJump.playerPointer = nil
+    JokCombatAirJump.sourceAnimation = nil
+    JokCombatAirJump.sourceTime = 0.0
+    JokCombatAirJump.sourceAirborneState = 0
+    JokCombatAirJump.routeFaultLogged = false
+    JokCombatAirJump.liftFaultLogged = false
+
+    if not JokCombatAirJump.restoreRoutes("reload recovery", true) then
+        return false
+    end
+    local canonical, changedEntry = JokCombatAirJump.recordsCanonical()
+    if airRouteReady ~= true or not canonical then
+        log("[air-jump] canonical aerial records unavailable"
+            .. (changedEntry ~= nil and " at " .. changedEntry.name or "")
+            .. "; second jump disabled.")
+        return false
+    end
+    local gameSpeed = ReadFloat(ADDRESS.gameSpeed)
+    if gameSpeed ~= gameSpeed or gameSpeed < 0.05 or gameSpeed > 4.0 then
+        log(string.format(
+            "[air-jump] game-speed signature invalid (%.3f); disabled.",
+            gameSpeed))
+        return false
+    end
+    JokCombatAirJump.enabled = CONFIG.secondJump == true
+    return JokCombatAirJump.enabled
+end
+
+function JokCombatAirJump.reset(reason, quiet, clearPlayer)
+    local hadCycle = JokCombatAirJump.available
+        or JokCombatAirJump.consumed
+        or JokCombatAirJump.groundRequestFrames > 0
+        or JokCombatAirJump.routeOwned
+        or JokCombatAirJump.active
+    local ownedCommand = JokCombatAirJump.routeOwned
+    JokCombatAirJump.restoreRoutes(reason, true)
+    if ownedCommand then clearSyntheticAttackCommand(false) end
+    JokCombatAirJump.available = false
+    JokCombatAirJump.consumed = false
+    JokCombatAirJump.wasAirborne = false
+    JokCombatAirJump.releaseRequired = false
+    JokCombatAirJump.groundRequestFrames = 0
+    JokCombatAirJump.requestAge = 0
+    JokCombatAirJump.active = false
+    JokCombatAirJump.sourceAnimation = nil
+    JokCombatAirJump.sourceTime = 0.0
+    JokCombatAirJump.sourceAirborneState = 0
+    if clearPlayer then JokCombatAirJump.playerPointer = nil end
+    if hadCycle and reason ~= nil and not quiet then
+        log("[air-jump] cycle reset: " .. reason .. ".")
+    end
+end
+
+function JokCombatAirJump.noteGroundJump(player)
+    if not JokCombatAirJump.enabled or player.airborne then return end
+    JokCombatAirJump.playerPointer = player.pointer
+    -- LuaBackend may observe the ground press only after KH1 has already set
+    -- raw70=1. Requiring a release prevents that same physical edge from being
+    -- consumed immediately as the newly armed second jump.
+    JokCombatAirJump.releaseRequired = true
+    JokCombatAirJump.groundRequestFrames = CONFIG.secondJumpArmFrames
+end
+
+function JokCombatAirJump.boost(player)
+    if not JokCombatAirJump.active or not player.airborne
+        or player.animation ~= 0x0F
+        or player.time > CONFIG.secondJumpLiftEndTime
+        or player.airborneState == 0x0F
+        or player.airborneState == 0x10
+        or ReadByte(ADDRESS.world) == 0x09 then
+        return false
+    end
+
+    local position = ReadFloat(
+        player.pointer + PLAYER.verticalPosition, true)
+    local gameSpeed = ReadFloat(ADDRESS.gameSpeed)
+    local animationSpeed = ReadFloat(
+        player.pointer + PLAYER.animationSpeed, true)
+    local valid = position == position and math.abs(position) < 1000000.0
+        and gameSpeed == gameSpeed and gameSpeed >= 0.05 and gameSpeed <= 4.0
+        and animationSpeed == animationSpeed
+        and animationSpeed >= 0.05 and animationSpeed <= 4.0
+    if not valid then
+        if not JokCombatAirJump.liftFaultLogged then
+            log("[air-jump] invalid position/speed sample; lift suppressed.")
+            JokCombatAirJump.liftFaultLogged = true
+        end
+        return false
+    end
+
+    local lift = CONFIG.secondJumpLiftAmount
+        * (gameSpeed / CONFIG.secondJumpSpeedDivisor * animationSpeed)
+    WriteFloat(player.pointer + PLAYER.verticalPosition,
+        position - lift, true)
+    return true
+end
+
+function JokCombatAirJump.observe(player, buttons)
+    if not JokCombatAirJump.enabled then return end
+    if JokCombatAirJump.playerPointer ~= nil
+        and JokCombatAirJump.playerPointer ~= player.pointer then
+        JokCombatAirJump.reset("player object changed", true, true)
+    end
+    JokCombatAirJump.playerPointer = player.pointer
+
+    if JokCombatAirJump.releaseRequired
+        and (buttons & BUTTON.CIRCLE) == 0 then
+        JokCombatAirJump.releaseRequired = false
+        log("[air-jump] first-jump B released; second-jump input unlocked.")
+    end
+
+    if player.airborneState >= 0x20 or ReadByte(ADDRESS.world) == 0x09 then
+        JokCombatAirJump.reset("special airborne state", true, false)
+        return
+    end
+
+    if JokCombatAirJump.routeOwned then
+        JokCombatAirJump.requestAge = JokCombatAirJump.requestAge + 1
+        if player.animation == 0x0F then
+            JokCombatAirJump.active = true
+            JokCombatAirJump.restoreRoutes("Kinetic Step accepted", true)
+            clearSyntheticAttackCommand(false)
+            WriteByte(ADDRESS.comboPosition, 1)
+            log(string.format(
+                "[air-jump] Kinetic Step accepted: raw70=%d anim=0x0F "
+                    .. "time=%.2f; aerial combo reset to hit 1.",
+                player.airborneState, player.time))
+        else
+            -- Preserve one complete high frame, then explicitly lower the
+            -- synthetic command. The route stays armed until acceptance or
+            -- timeout, but no delayed repeating Attack can leak afterward.
+            if JokCombatAirJump.requestAge >= 1
+                and syntheticAttackCommandHigh then
+                lowerSyntheticAttackCommand()
+            end
+            JokCombatAirJump.routeFrames =
+                math.max(0, JokCombatAirJump.routeFrames - 1)
+            if JokCombatAirJump.routeFrames == 0 then
+                JokCombatAirJump.restoreRoutes("Kinetic Step timeout", true)
+                clearSyntheticAttackCommand(false)
+                log("[air-jump] WARNING: Kinetic Step 0x0F was not observed; "
+                    .. "the charge remains consumed until landing.")
+            end
+        end
+    end
+
+    if JokCombatAirJump.active then
+        if player.animation == 0x0F then
+            JokCombatAirJump.boost(player)
+        else
+            JokCombatAirJump.active = false
+        end
+    end
+
+    if not player.airborne then
+        local completedCycle = JokCombatAirJump.wasAirborne
+            and (JokCombatAirJump.available or JokCombatAirJump.consumed)
+        JokCombatAirJump.restoreRoutes("landing", true)
+        JokCombatAirJump.available = false
+        JokCombatAirJump.consumed = false
+        JokCombatAirJump.wasAirborne = false
+        JokCombatAirJump.releaseRequired = false
+        JokCombatAirJump.requestAge = 0
+        JokCombatAirJump.active = false
+        JokCombatAirJump.sourceAnimation = nil
+        if completedCycle then
+            log("[air-jump] landing confirmed; second jump recharges "
+                .. "after the next first jump.")
+        end
+        JokCombatAirJump.groundRequestFrames = math.max(
+            0, JokCombatAirJump.groundRequestFrames - 1)
+        return
+    end
+
+    if not JokCombatAirJump.wasAirborne
+        and not JokCombatAirJump.consumed then
+        local circleEdge = (buttons & BUTTON.CIRCLE) ~= 0
+            and (lastButtons & BUTTON.CIRCLE) == 0
+        local unmodified = (buttons
+            & (BUTTON.L1 | BUTTON.R1 | BUTTON.L2 | BUTTON.R2)) == 0
+        local observedJumpEntry = circleEdge and unmodified
+            and player.animation == 0x04
+        if JokCombatAirJump.groundRequestFrames > 0
+            or observedJumpEntry then
+            JokCombatAirJump.available = true
+            JokCombatAirJump.releaseRequired =
+                JokCombatAirJump.releaseRequired
+                or (buttons & BUTTON.CIRCLE) ~= 0
+            log("[air-jump] first native jump confirmed; second jump armed.")
+        end
+        JokCombatAirJump.groundRequestFrames = 0
+    end
+    JokCombatAirJump.wasAirborne = true
+end
+
+function JokCombatAirJump.canBegin(player, report)
+    if not JokCombatAirJump.enabled then return false end
+    if JokCombatAirJump.releaseRequired then
+        if report then
+            log("[air-jump] B ignored: release the first-jump input before "
+                .. "requesting the second jump.")
+        end
+        return false
+    end
+    if JokCombatAirJump.consumed or not JokCombatAirJump.available then
+        if report then
+            log("[air-jump] B ignored: second jump is not charged.")
+        end
+        return false
+    end
+    if not player.airborne or player.airborneState >= 0x20
+        or player.animation == 0x0D or player.animation == 0x0E
+        or player.animation == 0x0F or ReadByte(ADDRESS.world) == 0x09 then
+        if report then
+            log(string.format(
+                "[air-jump] B ignored in raw70=%d anim=0x%02X context.",
+                player.airborneState, player.animation))
+        end
+        return false
+    end
+    if ReadByte(ADDRESS.commandMenuSlot) ~= 0 then
+        if report then
+            log("[air-jump] B ignored while a Reaction command owns the menu.")
+        end
+        return false
+    end
+    return true
+end
+
+function JokCombatAirJump.ownsCircle(buttons)
+    if not JokCombatAirJump.enabled then return false end
+    if (buttons & (BUTTON.L1 | BUTTON.R1 | BUTTON.L2 | BUTTON.R2)) ~= 0 then
+        return false
+    end
+    return (JokCombatAirJump.available
+            and not JokCombatAirJump.releaseRequired)
+        or JokCombatAirJump.routeOwned or JokCombatAirJump.active
+end
+
+function JokCombatAirJump.begin(player)
+    if not JokCombatAirJump.canBegin(player, false) then return false end
+
+    restoreActionRoutes()
+    local canonical, changedEntry = JokCombatAirJump.recordsCanonical()
+    if not canonical then
+        log("[air-jump] request rejected: aerial route changed at "
+            .. changedEntry.name .. ".")
+        return false
+    end
+
+    for _, entry in ipairs(AIR_ACTION_ROUTE) do
+        WriteByte(entry.address, JokCombatAirJump.routeAnimation(entry))
+    end
+    for _, entry in ipairs(AIR_ACTION_ROUTE) do
+        if not JokCombatAirJump.entryMatchesOwnedRoute(entry) then
+            JokCombatAirJump.restoreRoutes("Kinetic Step write failure", true)
+            JokCombatAirJump.enabled = false
+            log("[air-jump] Kinetic Step route write failed at "
+                .. entry.name .. "; second jump disabled.")
+            return false
+        end
+    end
+
+    clearSyntheticAttackCommand(true)
+    JokCombatAirJump.routeOwned = true
+    JokCombatAirJump.routeFrames = CONFIG.secondJumpRouteFrames
+    JokCombatAirJump.requestAge = 0
+    JokCombatAirJump.sourceAnimation = player.animation
+    JokCombatAirJump.sourceTime = player.time
+    JokCombatAirJump.sourceAirborneState = player.airborneState
+    cancelPlayer(player, "second-jump")
+    WriteByte(ADDRESS.comboPosition, 1)
+    if not triggerAttackCommand() then
+        JokCombatAirJump.restoreRoutes("Attack trigger rejected", true)
+        clearSyntheticAttackCommand(false)
+        log("[air-jump] Kinetic Step request rejected by the Command Menu.")
+        return false
+    end
+
+    JokCombatAirJump.available = false
+    JokCombatAirJump.consumed = true
+    log(string.format(
+        "[air-jump] Kinetic Step requested from raw70=%d anim=0x%02X "
+            .. "time=%.2f; air route 0x0F + Attack pulse armed.",
+        JokCombatAirJump.sourceAirborneState,
+        player.animation, player.time))
+    return true
 end
 
 local function actionKind(action)
@@ -5190,6 +5604,14 @@ local function updateDefenseRouting(buttons, guardAvailable, dodgeActive,
         circleMap = 0xFE
         squareMap = 0xFE
     end
+    if JokCombatAirJump ~= nil
+        and JokCombatAirJump.ownsCircle ~= nil
+        and JokCombatAirJump.ownsCircle(buttons) then
+        -- Once the second-jump charge is ready, physical B belongs to the
+        -- Kinetic Step adapter. Suppress Glide/contextual Circle so the same
+        -- edge cannot both jump and enter a native airborne Circle action.
+        circleMap = 0xFE
+    end
     if dodgeActive and squareHeld and not anyDodgeModifierHeld then
         -- Once DC has begun, physical Square must not feed the shared defense
         -- action again. Guard remains available through its Circle mapping.
@@ -5368,9 +5790,14 @@ function _OnInit()
         0xFF, { 0xFF, 0x05, 0xFE }) and valid
     if not valid then return end
 
+    -- Recover a stale Kinetic Step byte-only route before the generic aerial
+    -- normalizer sees its otherwise unknown 0x0F/0x09 heads.
+    JokCombatAirJump.restoreRoutes("reload recovery", true)
+
     HUD.recoverStaleNativeRows()
     local groundRouteValid = normalizeGroundActionRoute()
     local airRouteValid = normalizeAirActionRoute()
+    JokCombatAirJump.initialize(airRouteValid)
     local validActionRecordCount = validateCanonicalActionRecords()
     local branchValid, branchNodeCount, branchActionCount =
         JokCombatBranch.initialize()
@@ -5421,6 +5848,10 @@ function _OnInit()
     log("Action Ability context ready: Hurricane Blast is callable on ground "
         .. "and in air; airborne family is native CE -> Hurricane Blast -> "
         .. "Aerial Sweep terminal, with fake-ground disabled.")
+    log("Kinetic Step second-jump adapter "
+        .. (JokCombatAirJump.enabled and "ready" or "disabled")
+        .. ": one charge after a real first jump; B routes animation 0x0F, "
+        .. "applies the bounded Critical Mix lift and restarts air hit 1.")
     log("ground-air Ultimate ready: AAAY Slapshot -> B real jump -> "
         .. "Y/Y/Y aerial family -> natural landing -> Y Blitz -> "
         .. "Y Strike Raid.")
@@ -5460,6 +5891,7 @@ function _OnFrame()
 
     local player = readPlayer()
     if player == nil then
+        JokCombatAirJump.reset("player unavailable", true, true)
         HUD.finishDirectEdit("player unavailable", 0)
         HUD.controlChordHeld = false
         HUD.controlChordUsed = false
@@ -5481,6 +5913,7 @@ function _OnFrame()
     local dpad = ReadByte(ADDRESS.dpadButtons)
     JokCombatNativeLimit.update(player, buttons)
     local nativeLimitActive = JokCombatNativeLimit.activeState(player)
+    JokCombatAirJump.observe(player, buttons)
     JokCombatGuardCounter.update(player, buttons)
     local controlDpadOwned, controlConsumed =
         HUD.updateOverlayControls(buttons, dpad)
@@ -5522,6 +5955,7 @@ function _OnFrame()
         restoreNativeFinisherSelection()
         JokCombatBranch.reset("native Limit owns input", true)
         JokCombatGuardCounter.reset("native Limit owns input", true)
+        JokCombatAirJump.reset("native Limit owns input", true, false)
         HUD.finishDirectEdit("native Limit owns input", dpad)
         if HUD.overlayGroup ~= nil then HUD.hideOwned() end
         forceCircleFrames = 0
@@ -5550,6 +5984,7 @@ function _OnFrame()
         clearTransitionCheck()
         clearDeferredAttackCommand()
         restoreActionRoutes()
+        JokCombatAirJump.restoreRoutes("loadout editor", true)
         JokCombatBranch.reset("loadout editor opened", true)
         JokCombatGuardCounter.reset("loadout editor opened", true)
         restoreNativeFinisherSelection()
@@ -5612,6 +6047,11 @@ function _OnFrame()
         or (groundChainFrames > 0 and not isAttackContext(player)
             and player.control == 0x03 and player.animation <= 0x07)
 
+    if circlePressed and not player.airborne
+        and not l2Held and not r2Held and not nativeShortcutHeld then
+        JokCombatAirJump.noteGroundJump(player)
+    end
+
     -- Guard keeps first priority and can break any current action, including a
     -- Dodge Roll; Dodge itself cannot restart DC once the roll is active.
     if CONFIG.defensiveCancels and CONFIG.guardOnL2Circle and guardPressed
@@ -5627,8 +6067,23 @@ function _OnFrame()
         clearDeferredAttackCommand()
         restoreActionRoutes()
         actionConsumed = true
-    elseif circlePressed and not l2Held and not r2Held then
-        if JokCombatBranch.ultimateLauncherActive(player) then
+    elseif circlePressed and not l2Held and not r2Held
+        and not nativeShortcutHeld then
+        if player.airborne then
+            -- The second jump is the only universal offensive jump cancel. It
+            -- closes the current Pirate family first, then Kinetic Step owns
+            -- one byte-only aerial route and one synthetic Attack edge.
+            actionConsumed = true
+            if JokCombatAirJump.canBegin(player, true) then
+                JokCombatBranch.reset("second jump")
+                JokCombatGuardCounter.reset("second jump", true)
+                clearComboIntent()
+                clearTransitionCheck()
+                clearDeferredAttackCommand()
+                restoreActionRoutes()
+                JokCombatAirJump.begin(player)
+            end
+        elseif JokCombatBranch.ultimateLauncherActive(player) then
             -- Slapshot is the only authored launcher gateway. Its B follow-up
             -- is still KH1's real jump; JokCombat merely opens the late cancel
             -- and remembers that the aerial family belongs to C4.
