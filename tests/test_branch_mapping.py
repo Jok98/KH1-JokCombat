@@ -265,7 +265,7 @@ def assert_native_second_jump() -> None:
         "secondJumpLiftAmount = 30.0",
         "secondJumpLiftEndTime = 25.0",
         "secondJumpSpeedDivisor = 1.1",
-        "secondJumpFallBrakeFactor = 0.45",
+        "airFallBrakeFactor = 0.45",
         "gameSpeed = 0x233FBCC",
         "verticalPosition = 0x014",
         "animationSpeed = 0x284",
@@ -285,10 +285,11 @@ def assert_native_second_jump() -> None:
         "WriteByte(entry.address, JokCombatAirJump.routeAnimation(entry))",
         "WriteFloat(player.pointer + PLAYER.verticalPosition,",
         "boostedPosition, true)",
-        "rawDelta * CONFIG.secondJumpFallBrakeFactor",
+        "rawDelta * CONFIG.airFallBrakeFactor",
         "if player.animation ~= 0x06 or rawDelta <= 0.0 then",
         "JokCombatAirJump.brakeFall(player)",
-        "post-jump fall brake: factor=%.2f",
+        "free-fall brake: factor=%.2f",
+        "native free-fall brake ready: first/second Fall 0x06",
         "if player.animation == 0x0F then",
         "and JokCombatAirJump.ownsCircle(buttons) then",
         "if not triggerAttackCommand() then",
@@ -309,7 +310,7 @@ def assert_native_second_jump() -> None:
         assert guard in SOURCE, f"missing native second-jump guard: {guard}"
 
     start = SOURCE.index("JokCombatAirJump = {")
-    end = SOURCE.index("local function actionKind", start)
+    end = SOURCE.index("JokCombatAirAttackBrake = {", start)
     adapter = SOURCE[start:end]
     assert adapter.count("WriteFloat(") == 2
     assert "PLAYER.animationId" not in adapter
@@ -317,6 +318,21 @@ def assert_native_second_jump() -> None:
     assert "WriteLong(ADDRESS.circleHandler" not in adapter
     assert "circleHandlerAirEntry" not in SOURCE
     assert "circleHandlerFallEntry" not in SOURCE
+
+    brake_start = adapter.index("function JokCombatAirJump.brakeFall")
+    brake_end = adapter.index("function JokCombatAirJump.observe", brake_start)
+    brake_source = adapter[brake_start:brake_end]
+    assert "JokCombatAirJump.consumed" not in brake_source
+
+    first_jump_start = adapter.index(
+        "if not JokCombatAirJump.wasAirborne"
+    )
+    first_jump_end = adapter.index(
+        "JokCombatAirJump.wasAirborne = true", first_jump_start
+    )
+    first_jump_source = adapter[first_jump_start:first_jump_end]
+    assert "JokCombatAirJump.fallBrakeArmed = true" in first_jump_source
+    assert "JokCombatAirJump.fallBrakeSamples = 0" in first_jump_source
 
     # Model the transient route set: all eight canonical air entries must be
     # covered, with 0x09 reserved exclusively for FlyingCombo1 and 0x0F used
@@ -357,9 +373,39 @@ def assert_native_second_jump() -> None:
         )
 
 
+def assert_air_attack_descent_brake() -> None:
+    guards = (
+        "airAttackFallBrake = true",
+        "airAttackFallBrakeFactor = 0.25",
+        "JokCombatAirAttackBrake = {",
+        "function JokCombatAirAttackBrake.ownsAnimation",
+        "animation == 0xCC or animation == 0xCD or animation == 0xCE",
+        "function JokCombatAirAttackBrake.initialize",
+        "function JokCombatAirAttackBrake.reset",
+        "function JokCombatAirAttackBrake.disableCycle",
+        "function JokCombatAirAttackBrake.observe",
+        "rawDelta * CONFIG.airAttackFallBrakeFactor",
+        "[air-attack] descent brake: factor=%.2f",
+        "JokCombatAirAttackBrake.observe(player, nativeLimitActive)",
+        'JokCombatAirAttackBrake.reset("player unavailable"',
+        "CC/CD/CE downward delta x0.25",
+    )
+    for guard in guards:
+        assert guard in SOURCE, f"missing air-attack descent guard: {guard}"
+
+    start = SOURCE.index("JokCombatAirAttackBrake = {")
+    end = SOURCE.index("local function actionKind", start)
+    controller = SOURCE[start:end]
+    assert controller.count("WriteFloat(") == 1
+    assert "animation == 0xD1" not in controller
+    assert "animation == 0xD6" not in controller
+    assert "WriteInt(player.pointer + PLAYER.airborneState" not in controller
+    assert "PLAYER.animationSpeed" not in controller
+
+
 def assert_integration() -> None:
     guards = (
-        'VERSION = "v0.15.5"',
+        'VERSION = "v0.16.1"',
         "branchActionAbilities = true",
         "branchLimits = true",
         "comboGuide = true",
@@ -434,10 +480,12 @@ def main() -> None:
     assert_native_limits()
     assert_guard_counter()
     assert_native_second_jump()
+    assert_air_attack_descent_brake()
     assert_integration()
     print(
         "PASS: 13-node ground map; 8 ground Actions + 5 native Limits; "
-        "C4 ground-air-ground Ultimate; Counterattack gated by successful Guard"
+        "C4 ground-air-ground Ultimate; native aerial descent brake; "
+        "Counterattack gated by successful Guard"
     )
 
 

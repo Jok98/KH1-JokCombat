@@ -332,6 +332,21 @@ descritto sotto.
 > post-Kinetic Step passa da `0.55` a `0.45`. La discesa risulta quindi ancora
 > piu' controllata, mantenendo invariati ambito `0x06`, attacchi aerei e rilascio
 > automatico su Landing.
+>
+> **v0.16.0 - permanenza durante gli attacchi aerei:** durante i soli attacchi
+> normali `CC`, `CD` e `CE`, la componente discendente di `player+0x14` viene
+> ridotta al 25%. Qualsiasi movimento verso l'alto rimane nativo. Hurricane
+> Blast `D1` e Aerial Sweep `D6` sono escluse intenzionalmente, perche' la
+> traiettoria verticale fa parte dell'identita' delle due Action Ability. Il
+> freno viene rilasciato su Landing, Limit, stato aereo speciale o cambio del
+> player object; non rende quindi persistente alcuna quota.
+>
+> **v0.16.1 - caduta uniforme fra i due salti:** il log live della v0.16.0 ha
+> confermato `CC/CD/CE` a `20.00 -> 5.00` e la caduta post-Kinetic Step a
+> `20.00 -> 9.00`. Lo stesso fattore `0.45` viene ora armato dal primo salto e
+> resta valido per ogni `0x06` fino al Landing. Kinetic Step azzera soltanto il
+> riferimento di quota: non aggiunge un secondo moltiplicatore, quindi dopo il
+> secondo salto la caduta resta al 45% e non scende al 20.25%.
 
 La repository contiene tre probe read-only e il primo prototipo combat:
 
@@ -343,7 +358,7 @@ La repository contiene tre probe read-only e il primo prototipo combat:
   faccia e valida gli indirizzi Steam portati prima che il prototipo scriva;
 - `JokCombat_CommandMenuProbe.lua`: confronta in sola lettura controller,
   transizioni e strutture delle quattro righe native del Command Menu;
-- `JokCombat_CombatPrototype.lua`: prototipo v0.15.5 con combo normali delegate
+- `JokCombat_CombatPrototype.lua`: prototipo v0.16.1 con combo normali delegate
   a KH1 e un bridge post-finisher per i cicli infiniti terra/aria, quattro slot
   R2 configurabili, otto Action Ability e cinque Limit nativi nelle famiglie
   Pirate terrestri, due Action aeree separate e Counterattack contestuale,
@@ -468,8 +483,8 @@ pacchetto Critical Mix sono conservati, ma non caricati, nelle directory
 `C:\Users\<utente>\Documents\KH_mod\reference\CriticalMix`. Backup, log e
 copie runtime restano locali e non fanno parte del repository.
 
-Per verificare la v0.15.5, premi `F1` nella console LuaBackend. Il log iniziale
-deve mostrare `v0.15.5`, `Native Abilities v0.4.0 ready`,
+Per verificare la v0.16.1, premi `F1` nella console LuaBackend. Il log iniziale
+deve mostrare `v0.16.1`, `Native Abilities v0.4.0 ready`,
 `ground action route ready`, `aerial action route ready`,
 `complete action records ready: 11/11`
 `native Command Menu overlay + Combo Guide ready` e
@@ -517,7 +532,13 @@ quest'ordine, prima senza bersaglio e poi contro un nemico:
   `anim=0x0F`, Sora deve guadagnare quota e una nuova combo aerea deve ripartire
   dal primo colpo. Un terzo `B` non deve creare un altro Kinetic Step prima
   dell'atterraggio. Se Sora torna alla caduta `0x06`, il log di Landing deve
-  includere `post-jump fall brake: factor=0.45` con almeno un frame corretto;
+  includere `free-fall brake: factor=0.45` con almeno un frame corretto. La
+  stessa riga deve comparire anche dopo un primo salto lasciato terminare senza
+  usare Kinetic Step;
+- durante una combo aerea `A`, `A`, `A`, la discesa di `CC/CD/CE` deve essere
+  sensibilmente ridotta. Al Landing il log deve includere
+  `[air-attack] descent brake: factor=0.25`; Hurricane Blast e Aerial Sweep
+  devono invece mantenere la traiettoria verticale precedente;
 - Guard riuscita `L2+Cerchio`, poi `A` senza modificatori: Counterattack.
 
 Ogni passaggio Action valido registra `[branch] <sequenza> requested` e poi
