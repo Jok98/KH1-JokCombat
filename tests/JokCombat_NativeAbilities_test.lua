@@ -52,8 +52,9 @@ memory[SORA_MAX_AP] = 3
 memory[GROUND_MAX] = 7
 memory[AIR_MAX] = 5
 
--- Representative contiguous early-game list. The three existing passive
--- entries deliberately start disabled to exercise the 0x80 migration too.
+-- Representative contiguous early-game list. The three existing combo
+-- passives deliberately start disabled to exercise the 0x80 migration too;
+-- High Jump is absent so the native grant path must append it.
 local initialAbilities = {
     0xC0, 0xB9, 0x05, 0x96, 0xB8, 0x0A, 0x8B,
     0x86, 0x87, 0xC1,
@@ -105,23 +106,24 @@ for _, message in ipairs(logs) do
 end
 
 assert(ReadByte(SORA_MAX_AP) == 99, "Sora AP max was not raised to 99")
+assertExactActive(0x01, 1, "High Jump")
 assertExactActive(0x06, 4, "Combo Plus")
 assertExactActive(0x07, 2, "Air Combo Plus")
 assertExactActive(0x41, 1, "Combo Master")
-assert(ReadByte(ABILITY_BASE + 14) == 0,
-    "ability list did not terminate after the granted passives")
+assert(ReadByte(ABILITY_BASE + 15) == 0,
+    "ability list did not terminate after High Jump and the granted passives")
 
 -- Simulate a later vanilla reward appending a fifth Combo Plus immediately
 -- before another learned ability. Reconciliation must remove only the surplus
 -- copy, shift the following entry left and preserve a contiguous terminator.
-memory[ABILITY_BASE + 14] = 0x06
-memory[ABILITY_BASE + 15] = 0x3E
+memory[ABILITY_BASE + 15] = 0x06
+memory[ABILITY_BASE + 16] = 0x3E
 assert(ensureNativePassives(), "surplus reconciliation failed")
 
 assertExactActive(0x06, 4, "Combo Plus after surplus reward")
-assert(ReadByte(ABILITY_BASE + 14) == 0x3E,
+assert(ReadByte(ABILITY_BASE + 15) == 0x3E,
     "ability-list compaction did not preserve the following entry")
-assert(ReadByte(ABILITY_BASE + 15) == 0,
+assert(ReadByte(ABILITY_BASE + 16) == 0,
     "ability-list compaction did not restore the terminator")
 
 -- Simulate the ability menu disabling an existing Air Combo Plus.
@@ -131,5 +133,5 @@ assert(ensureNativePassives(), "Air Combo Plus re-equip failed")
 assertExactActive(0x07, 2, "Air Combo Plus after menu disable")
 
 print(string.format(
-    "PASS: exact native counts 4/2/1, surplus compaction and re-equip (%d logs)",
+    "PASS: High Jump + exact native counts 4/2/1, surplus compaction and re-equip (%d logs)",
     #logs))

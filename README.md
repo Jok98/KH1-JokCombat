@@ -1,9 +1,10 @@
 # KH1 JokCombat
 
-Mod combat-only sperimentale per **KINGDOM HEARTS FINAL MIX PC**. Il progetto
-mantiene storia, reward, chest, synthesis, boss e world flags vanilla. La sola
-eccezione di progressione intenzionale e' il bootstrap nativo di Combo Plus,
-Air Combo Plus e Combo Master descritto sotto.
+Mod combat-oriented sperimentale per **KINGDOM HEARTS FINAL MIX PC**. Il
+progetto mantiene storia, reward fissi, chest, synthesis, boss e world flags
+vanilla. Le sole eccezioni intenzionali sono il bootstrap nativo di High Jump,
+Combo Plus, Air Combo Plus e Combo Master e il moltiplicatore globale dei drop
+descritto sotto.
 
 ## Stato attuale
 
@@ -291,6 +292,61 @@ Air Combo Plus e Combo Master descritto sotto.
 > diverso da zero impedisce ora l'apertura della famiglia Strong nello stesso
 > frame di Triangolo. Salva, Esamina e Parla restano quindi native e il primo
 > Cross di conferma non viene piu soppresso da una route Vortex in attesa.
+>
+> **v0.14.0 — ruoli distinti e ciclo terra-aria-terra:** Strong resta burst,
+> C2 diventa una famiglia corta di inseguimento, C3 conserva il controllo area,
+> C4 diventa la Ultimate contestuale e C5 resta esecuzione singolo bersaglio.
+> La Ultimate usa `AAAY` Slapshot, `B` per un vero jump-cancel, quindi
+> Aerial Finisher -> Hurricane Blast -> Aerial Sweep. Solo dopo l'atterraggio
+> naturale riprende su `Y` con Blitz e termina su `Y` con Strike Raid. Non
+> scrive quota, stick o stato airborne.
+>
+> **v0.15.0 - High Jump:** KH1FM possiede una sola abilita' High Jump, che viene
+> ora appresa ed equipaggiata al suo livello nativo pieno. Un vero primo salto
+> arma inoltre una sola carica runtime per il secondo salto.
+>
+> **Ricerca v0.15.1-v0.15.2 ritirata:** i test hanno dimostrato che inoltrare il
+> gestore Circle del salto terrestre negli stati aerei puo' mostrare `0x04`, ma
+> non ricrea l'impulso fisico: KH1 torna subito a Fall. I puntatori dispatcher e
+> il bridge `raw70=0` di questi due tentativi sono stati rimossi integralmente.
+>
+> **v0.15.3 - Multi Jump Kinetic Step:** viene portata l'architettura esatta del
+> riferimento Critical Mix autorizzato. Per la sola richiesta posseduta cambia
+> il byte animazione delle otto entry aeree (`0x0F`, con `0x09` per Flying),
+> cancella l'azione e invia un vero comando Attack. Durante i primi 25 unita' di
+> tempo di Kinetic Step applica il lift Critical Mix a `player+0x14`, scalato con
+> `gameSpeed` e `player+0x284`; poi ripristina condizionalmente tutti i record.
+> Non scrive `raw70`, velocita' o puntatori dispatcher. La carica resta singola,
+> si sblocca soltanto dopo il rilascio del primo `B` e torna all'atterraggio.
+>
+> **v0.15.4 - caduta Kinetic Step controllata:** il test live ha mostrato che
+> `0x0F` passa quasi subito alla caduta `0x06`, conservando un delta verso il
+> terreno troppo aggressivo. Senza inventare un offset di velocita', JokCombat
+> riduce al 55% soltanto il delta positivo di `player+0x14` durante quella
+> caduta vanilla successiva al secondo salto. Il freno resta attivo fino a
+> Landing, ma si sospende durante qualsiasi attacco aereo: Hurricane Blast,
+> Aerial Sweep e le combo conservano quindi il movimento nativo. All'atterraggio
+> il log riporta numero di frame e massimo delta grezzo/corretto per il tuning.
+>
+> **v0.15.5 - tuning caduta:** dopo il primo collaudo il fattore del freno
+> post-Kinetic Step passa da `0.55` a `0.45`. La discesa risulta quindi ancora
+> piu' controllata, mantenendo invariati ambito `0x06`, attacchi aerei e rilascio
+> automatico su Landing.
+>
+> **v0.16.0 - permanenza durante gli attacchi aerei:** durante i soli attacchi
+> normali `CC`, `CD` e `CE`, la componente discendente di `player+0x14` viene
+> ridotta al 25%. Qualsiasi movimento verso l'alto rimane nativo. Hurricane
+> Blast `D1` e Aerial Sweep `D6` sono escluse intenzionalmente, perche' la
+> traiettoria verticale fa parte dell'identita' delle due Action Ability. Il
+> freno viene rilasciato su Landing, Limit, stato aereo speciale o cambio del
+> player object; non rende quindi persistente alcuna quota.
+>
+> **v0.16.1 - caduta uniforme fra i due salti:** il log live della v0.16.0 ha
+> confermato `CC/CD/CE` a `20.00 -> 5.00` e la caduta post-Kinetic Step a
+> `20.00 -> 9.00`. Lo stesso fattore `0.45` viene ora armato dal primo salto e
+> resta valido per ogni `0x06` fino al Landing. Kinetic Step azzera soltanto il
+> riferimento di quota: non aggiunge un secondo moltiplicatore, quindi dopo il
+> secondo salto la caduta resta al 45% e non scende al 20.25%.
 
 La repository contiene tre probe read-only e il primo prototipo combat:
 
@@ -302,15 +358,17 @@ La repository contiene tre probe read-only e il primo prototipo combat:
   faccia e valida gli indirizzi Steam portati prima che il prototipo scriva;
 - `JokCombat_CommandMenuProbe.lua`: confronta in sola lettura controller,
   transizioni e strutture delle quattro righe native del Command Menu;
-- `JokCombat_CombatPrototype.lua`: prototipo v0.13.3 con combo normali delegate
+- `JokCombat_CombatPrototype.lua`: prototipo v0.16.1 con combo normali delegate
   a KH1 e un bridge post-finisher per i cicli infiniti terra/aria, quattro slot
   R2 configurabili, otto Action Ability e cinque Limit nativi nelle famiglie
   Pirate terrestri, due Action aeree separate e Counterattack contestuale,
-  jump-cancel terra -> aria, Guard universale su L2 + Cerchio e Dodge Roll
-  fisso su Quadrato;
+  jump-cancel terra -> aria, Kinetic Step a carica singola, Guard
+  universale su L2 + Cerchio e Dodge Roll fisso su Quadrato;
 - `JokCombat_NativeAbilities.lua`: imposta 99 AP massimi e assegna tramite la
-  lista abilita' nativa le quantita' massime vanilla richieste: quattro Combo
-  Plus, due Air Combo Plus e un Combo Master, tutte equipaggiate;
+  lista abilita' nativa High Jump e le quantita' massime vanilla richieste:
+  quattro Combo Plus, due Air Combo Plus e un Combo Master, tutte equipaggiate;
+- `JokCombat_DropRate.lua`: imposta a `2.0x` sia il moltiplicatore degli item
+  sia quello dei prize, con firma Steam verificata e ripristino condizionale;
 - `docs/JokCombat_BranchCombo_Mapping.md`: mappa Pirate terrestre di 13 nodi,
   con otto Action Ability e cinque Limit nativi, famiglia aerea separata,
   Counterattack contestuale e nessuna magia combo, Chain Attack o Summon;
@@ -320,17 +378,19 @@ La repository contiene tre probe read-only e il primo prototipo combat:
   due script Critical Mix e architettura minima proposta.
 
 Il prototipo combat e' stato attivato dopo la conferma live della probe input.
-Perfect Guard, launcher del nemico e aerial chase non sono ancora implementati.
+Perfect Guard e launcher fisico del nemico non sono ancora implementati. C4
+offre invece un aerial chase tramite il salto nativo, senza simulare la quota.
 Counterattack usa invece una finestra breve aperta esclusivamente dal segnale
 reale di una Guard riuscita.
 
 Il loadout Action Ability resta runtime-only e non inserisce le undici mosse
 nel salvataggio. Guard e Dodge Roll restano comandi fissi; magie e Limit non
 compaiono nell'editor. I cinque Limit sono accessibili soltanto dalle combo
-Pirate e non vengono aggiunti alla lista abilità. Le tre passive costituiscono una
-scelta strutturale del moveset e vengono apprese/equipaggiate nativamente.
+Pirate e non vengono aggiunti alla lista abilità. High Jump e le tre famiglie
+passive costituiscono una scelta strutturale del moveset e vengono
+apprese/equipaggiate nativamente.
 
-## Passive combo native
+## Abilita' native di movimento e combo
 
 `JokCombat_NativeAbilities.lua` adatta il percorso `learn_ability` del
 riferimento Critical Mix autorizzato alla build Steam verificata. Nel blocco
@@ -341,19 +401,21 @@ bit alto indica che l'abilita' e' appresa ma disattivata; la forma con il solo
 ID base e' quella equipaggiata. Il primo `0x00` e' lo slot in cui KH1 aggiunge
 la prossima abilita'. JokCombat assegna ed equipaggia quantità esatte di:
 
+- un `0x01` High Jump (`0x81` quando disattivata); KH1FM non usa i livelli
+  multipli di KH2, quindi questa singola voce e' il potenziamento nativo pieno;
 - quattro `0x06` Combo Plus (`0x86` quando disattivata);
 - due `0x07` Air Combo Plus (`0x87` quando disattivata);
 - un `0x41` Combo Master (`0xC1` quando disattivata).
 
 Le copie già apprese con il bit alto vengono equipaggiate nello stesso slot;
 quelle mancanti vengono inserite nel primo slot libero. Se un futuro premio
-vanilla aggiunge una quinta Combo Plus o una terza Air Combo Plus, la v0.3.0
+vanilla aggiunge una quinta Combo Plus o una terza Air Combo Plus, la v0.4.0
 rimuove la copia più recente e ricompatta i 48 byte, preservando ordine e primo
 terminatore `0x00`. In questo modo la progressione non può superare i massimi
 naturali dopo il bootstrap anticipato.
 
-Il modulo porta inoltre gli AP massimi di Sora a `99`: in questo modo le tre
-passive e le future Action Ability possono essere realmente equipaggiate dal
+Il modulo porta inoltre gli AP massimi di Sora a `99`: in questo modo High Jump,
+le passive e le future Action Ability possono essere realmente equipaggiate dal
 motore nativo anche all'inizio della partita, senza dipendere dagli AP ancora
 non ottenuti dalla progressione vanilla.
 
@@ -370,15 +432,33 @@ quindi convertite in-place in `0x06/0x07/0x41`, senza aggiungere duplicati.
 La v0.3.0 estende il grant alle quantità massime `4/2/1`. Le sette passive
 costano complessivamente 9 AP; gli AP residui dipendono dalle altre abilità già
 equipaggiate e non sono quindi un controllo affidabile del numero di copie.
+La v0.4.0 aggiunge l'unica voce High Jump di KH1FM senza alterare i massimi
+combo; il secondo salto resta invece una carica runtime del prototipo combat.
 Il test live ha verificato `groundMax=7` e `airMax=5`: a terra KH1 sceglie
 contestualmente `C8`, `C9` o `CA` nelle posizioni `1..6` e `CB` chiude alla 7;
 in aria le posizioni `1..4` hanno mostrato `CC/CD` e `CE` chiude alla 5. Poiché
 lo stesso ID può comparire in posizioni diverse, il controller Pirate usa
 `comboPosition` per scegliere C2/C3/C4/C5 e l'animazione soltanto per il timing.
 
-Questa assegnazione e' intenzionalmente persistente: dopo un salvataggio le tre
-abilita' fanno parte della partita. Prima del primo test e' stata creata una
+Questa assegnazione e' intenzionalmente persistente: dopo un salvataggio High
+Jump e le passive fanno parte della partita. Prima del primo test e' stata creata una
 copia locale di `KHFM_WW.png` sotto `KH_mod/backups/saves`.
+
+## Drop rate globale al 200%
+
+`JokCombat_DropRate.lua` porta a `2.0x` entrambi i moltiplicatori nativi: drop
+degli item e drop dei prize. Gli operandi Steam Global `0x2A63E4` e
+`0x2A63EE` sono stati verificati in sola lettura sul processo supportato: prima
+della patch valevano entrambi `1.0`. Il modulo controlla inoltre la firma delle
+due istruzioni, scrive una sola volta all'inizializzazione e ripristina i valori
+precedenti all'uscita soltanto se nessun altro script li ha cambiati. Non scrive
+nel salvataggio.
+
+Non e' esatto dire che Critical Mix sia sempre configurato al 200%: il suo
+`CMix_StatHandler.lua` usa una base del 100%, 150% o 200% secondo la difficolta'
+selezionata e applica poi bonus separati di Three Wishes e Lady Luck.
+JokCombat sceglie invece intenzionalmente un valore base fisso del 200%,
+indipendente dalla difficolta'.
 
 ## Directory runtime prevista
 
@@ -396,29 +476,29 @@ scripts = [{ path = "C:\\Users\\<utente>\\Documents\\KH_mod\\scripts\\kh1", rela
 ```
 
 La directory runtime contiene `JokCombat_StateProbe.lua`,
-`JokCombat_CombatPrototype.lua` e `JokCombat_NativeAbilities.lua`. La Input
-Probe validata e i 40 script del
+`JokCombat_CombatPrototype.lua`, `JokCombat_NativeAbilities.lua` e
+`JokCombat_DropRate.lua`. La Input Probe validata e i 40 script del
 pacchetto Critical Mix sono conservati, ma non caricati, nelle directory
 `reference` sotto
 `C:\Users\<utente>\Documents\KH_mod\reference\CriticalMix`. Backup, log e
 copie runtime restano locali e non fanno parte del repository.
 
-Per verificare la v0.13.3, premi `F1` nella console LuaBackend. Il log iniziale
-deve mostrare `v0.13.3`, `Native Abilities v0.3.0 ready`,
+Per verificare la v0.16.1, premi `F1` nella console LuaBackend. Il log iniziale
+deve mostrare `v0.16.1`, `Native Abilities v0.4.0 ready`,
 `ground action route ready`, `aerial action route ready`,
 `complete action records ready: 11/11`
 `native Command Menu overlay + Combo Guide ready` e
 `native Ripple Drive/Stun Impact/Gravity Break/Zantetsuken selectors ready`.
-Deve inoltre comparire
+Deve inoltre comparire `Drop Rate v0.1.0 active` e
 `Pirate Y map ready: 13 ground nodes, 8 ground Action routes + five native
 Limits; two aerial Actions and Counterattack remain contextual`,
 `native Limit combos ready: 5/5`, `successful-Guard Counterattack detector
-ready` e `legacy combo-magic recovery ready` e
-`Combo Guide ready`. Dopo una `A`, il Command Menu deve mostrare
-`[Y] Sliding Dash`, `[Y][Y] Blitz` e `[Y][Y][Y] Sonic Blade`; dopo due `A`
+ready` e `legacy combo-magic recovery ready`, oltre a
+`family roles ready` e `ground-air Ultimate ready`. Dopo una `A`, il Command
+Menu deve mostrare `[Y] Sliding Dash` e `[Y][Y] Sonic Blade`; dopo due `A`
 deve mostrare Stun Impact, Ripple Drive e, con Donald e Goofy, Trinity Limit.
-Dopo Sliding Dash, la Guide deve aggiornarsi a `[Y] Blitz` e
-`[Y][Y] Sonic Blade`, senza proporre una Action Ability offensiva su `[A]`.
+Dopo Sliding Dash, la Guide deve aggiornarsi a `[Y] Sonic Blade`, senza
+proporre una Action Ability offensiva su `[A]`.
 Nessuna sequenza deve più registrare `[magic]` o modificare lo slot Shortcut.
 Solo il costo del Limit combo attivo può essere zero durante la sua finestra
 posseduta e per la durata della sequenza nativa; per Trinity vengono invece
@@ -437,13 +517,28 @@ successivo deve cadere nella coda visibile della mossa precedente. Verifica in
 quest'ordine, prima senza bersaglio e poi contro un nemico:
 
 - `YYY`: Vortex -> Gravity Break -> Ragnarok;
-- `AYYY`: attacco nativo -> Sliding Dash -> Blitz -> Sonic Blade;
+- `AYY`: attacco nativo -> Sliding Dash -> Sonic Blade;
 - `AAYYY`: due attacchi nativi -> Stun Impact -> Ripple Drive -> Trinity Limit,
   soltanto a terra con Donald + Goofy nel party.
-- `AAAYY`: tre attacchi nativi -> Slapshot -> Strike Raid;
+- Ultimate C4: `AAAY` -> Slapshot, poi `B` -> salto reale, quindi `YYY` ->
+  Aerial Finisher -> Hurricane Blast -> Aerial Sweep; dopo l'atterraggio
+  naturale `YY` -> Blitz -> Strike Raid;
 - `AAAAYY`: quattro attacchi nativi -> Zantetsuken -> Ars Arcanum;
 - combo aerea dopo qualunque colpo intermedio: Aerial Finisher `CE` ->
   Hurricane Blast -> Aerial Sweep;
+- secondo salto: `B`, una o piu' `A` in aria, poi `B`; il log deve mostrare
+  `first native jump confirmed`, `first-jump B released`, `Kinetic Step
+  requested` e `Kinetic Step accepted`. Lo State Probe deve osservare
+  `anim=0x0F`, Sora deve guadagnare quota e una nuova combo aerea deve ripartire
+  dal primo colpo. Un terzo `B` non deve creare un altro Kinetic Step prima
+  dell'atterraggio. Se Sora torna alla caduta `0x06`, il log di Landing deve
+  includere `free-fall brake: factor=0.45` con almeno un frame corretto. La
+  stessa riga deve comparire anche dopo un primo salto lasciato terminare senza
+  usare Kinetic Step;
+- durante una combo aerea `A`, `A`, `A`, la discesa di `CC/CD/CE` deve essere
+  sensibilmente ridotta. Al Landing il log deve includere
+  `[air-attack] descent brake: factor=0.25`; Hurricane Blast e Aerial Sweep
+  devono invece mantenere la traiettoria verticale precedente;
 - Guard riuscita `L2+Cerchio`, poi `A` senza modificatori: Counterattack.
 
 Ogni passaggio Action valido registra `[branch] <sequenza> requested` e poi
@@ -544,7 +639,8 @@ non devono comparire nella Combo Guide aerea. Gli stessi slot restano invariati
 a terra.
 Durante `DC`, Quadrato senza modificatori deve produrre
 `Dodge input ignored`; `L2 + Cerchio` deve dare Guard; Cerchio senza
-modificatori deve saltare e Triangolo senza modificatori deve restare vanilla.
+modificatori deve saltare a terra e consumare l'unico secondo salto in aria;
+Triangolo senza modificatori deve restare vanilla.
 `F2` mostra o nasconde la console.
 
 Il ramo Dodge viene armato prima del primo frame di Quadrato, mentre L2
@@ -606,8 +702,9 @@ essere caricati sulla Steam senza un porting e una validazione specifici.
 ## Criterio per il prossimo passo
 
 Le finestre iniziali sono intenzionalmente conservative e configurabili. La
-prima transizione terra -> aria e' un jump-cancel, non ancora un
-launcher/aerial chase. Per il primo test Guard e Dodge vengono resi disponibili
+transizione C4 terra -> aria resta un jump-cancel nativo: Slapshot ne apre la
+finestra e la state machine conserva soltanto il contesto Ultimate fino alla
+chiusura dopo l'atterraggio. Per il primo test Guard e Dodge vengono resi disponibili
 solo in RAM anche prima dello sblocco vanilla; il save non viene modificato.
 La v0.2.10 ha confermato la transizione diretta a `0xD8`, senza uno stato `0xC8`
 intermedio e senza pulse sintetici, quando L2 viene tenuto prima di Croce. La
