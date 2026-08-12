@@ -6,6 +6,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = (ROOT / "JokCombat_DropRate.lua").read_text(encoding="utf-8")
 README = (ROOT / "README.md").read_text(encoding="utf-8")
+TECHNICAL_DESIGN = (
+    ROOT / "docs" / "TECHNICAL_DESIGN.md"
+).read_text(encoding="utf-8")
 
 
 def test_fixed_multiplier_and_validated_steam_operands() -> None:
@@ -27,9 +30,11 @@ def test_patch_is_bounded_and_reversible() -> None:
 
 
 def test_documentation_distinguishes_jokcombat_from_critical_mix() -> None:
-    assert "Drop rate globale al 200%" in README
-    assert "100%, 150% o 200%" in README
+    assert "Fixed `200%` item and prize drop multipliers" in README
     assert "JokCombat_DropRate.lua" in README
+    assert "## 14. Drop-rate policy" in TECHNICAL_DESIGN
+    assert "difficulty-dependent base" in TECHNICAL_DESIGN
+    assert "This is a fixed JokCombat rule" in TECHNICAL_DESIGN
 
 
 def main() -> None:

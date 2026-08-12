@@ -1,8 +1,8 @@
-LUAGUI_NAME = "JokCombat Combat Prototype"
+LUAGUI_NAME = "JokCombat"
 LUAGUI_AUTH = "Jok; Critical Mix reference by Xendra / KSX"
 LUAGUI_DESC = "Native Cross combo, Pirate-style Y Action/Limit families, one-cycle double jump, configurable loadout and universal defense."
 
--- JokCombat v0.16.1 prototype for the current Steam Global executable.
+-- JokCombat v1.0.0 for the current Steam Global executable.
 -- Critical Mix was used as an authorized technical reference. This script is
 -- intentionally limited to combat/input state and does not persist changes to
 -- story flags, rewards, inventory, AP, levels, worlds, chests, or synthesis.
@@ -130,7 +130,7 @@ local CONFIG = {
 
 local EXPECTED_GAME_ID = 0xAF71841E
 local FINGERPRINT = 0x7265737563697065 -- "epicures", little endian
-local VERSION = "v0.16.1"
+local VERSION = "v1.0.0"
 
 local ADDRESS = {
     fingerprint = 0x3B2271,
@@ -4614,7 +4614,7 @@ function JokCombatGuardCounter.dispatch(player)
 end
 
 -- Pirate-style modifier-free X/T families. Keep this as one global table:
--- Lua 5.3 limits a chunk to 200 local variables and this prototype already
+-- Lua 5.3 limits a chunk to 200 local variables and this controller already
 -- carries the validated loadout, HUD and route state in the same chunk.
 -- Every named move ends in T. X before the first T chooses Strong/C2/C3/C4/C5;
 -- X after a named move returns to the vanilla physical string. Strong is
@@ -6005,12 +6005,12 @@ function _OnInit()
     airRouteSourceAnimation = nil
     airRouteSourceTime = 0.0
     if not CONFIG.enabled then
-        ConsolePrint("JokCombat Combat Prototype is disabled in CONFIG.")
+        ConsolePrint("JokCombat is disabled in CONFIG.")
         return
     end
     if GAME_ID ~= EXPECTED_GAME_ID or ENGINE_TYPE ~= "BACKEND"
         or ReadLong(ADDRESS.fingerprint) ~= FINGERPRINT then
-        ConsolePrint("JokCombat Combat Prototype - unsupported game/build; disabled.")
+        ConsolePrint("JokCombat - unsupported game/build; disabled.")
         return
     end
 
@@ -6096,8 +6096,8 @@ function _OnInit()
 
     canRun = true
     ConsolePrint(
-        "JokCombat Combat Prototype " .. VERSION
-        .. " initialized (Steam GL; combat-only; experimental).")
+        "JokCombat " .. VERSION
+        .. " initialized (Steam Global; release).")
     log("ground action route " .. (groundRouteValid and "ready." or
         "unavailable."))
     log("aerial action route " .. (airRouteValid and "ready." or

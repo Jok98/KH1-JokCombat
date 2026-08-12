@@ -1,0 +1,302 @@
+# JokCombat v1.0.0 Technical Design
+
+Status: release design for KH1 Final Mix, Steam Global.
+
+This document records the implementation choices behind JokCombat v1.0.0.
+It describes the current design rather than every experiment that preceded it.
+The complete experimental record remains available in
+`DEVELOPMENT_HISTORY.md`.
+
+## 1. Design goals
+
+JokCombat is designed around four principles:
+
+1. Preserve KH1's native combat machinery whenever it already produces the
+   correct animation, movement, targeting, VFX, hitbox, damage, and follow-up.
+2. Add decisions to the combo without turning the input sequence into a
+   password that produces nothing until its last button.
+3. Make ground, aerial, defensive, and movement systems feed one another while
+   retaining KH1's immediate feel.
+4. Fail closed on an unsupported executable or an unexpected memory layout.
+
+The project does not modify story progression, scripted rewards, chests,
+synthesis, inventory, world flags, bosses, or Summons. Magic remains native
+and is deliberately excluded from the combo dispatcher after the attempted
+combo-magic adapter proved unable to reproduce KH1's complete cast path.
+
+## 2. Release modules
+
+| File | Release role |
+|---|---|
+| `JokCombat_CombatPrototype.lua` | Main v1.0.0 combat, input, HUD, movement, Action, and Limit controller. The historical filename is retained to avoid breaking existing installations. |
+| `JokCombat_NativeAbilities.lua` | Persistent native grant of High Jump, four Combo Plus, two Air Combo Plus, Combo Master, and 99 maximum AP. |
+| `JokCombat_DropRate.lua` | Runtime-only 2.0x item and prize drop patch. |
+
+`JokCombat_StateProbe.lua`, `JokCombat_InputProbe.lua`, and
+`JokCombat_CommandMenuProbe.lua` are read-only development tools. They are not
+runtime dependencies and are not part of the normal release installation.
+
+The bundle is versioned as v1.0.0. Helper modules retain independent internal
+versions because their memory contracts and release cadence are separate from
+the main combat controller.
+
+## 3. Supported build and fail-closed checks
+
+All runtime addresses are validated for the current Steam Global executable.
+Each module checks the expected `GAME_ID`, LuaBackend engine type, and an
+executable fingerprint before enabling writes. Sensitive code patches also
+verify their complete expected instruction bytes.
+
+Dynamic player pointers are accepted only after range and state sanity checks.
+If a fingerprint, signature, pointer, action record, or owned value differs
+from the validated baseline, the relevant subsystem disables itself instead of
+attempting a best-effort write.
+
+The Epic Games Store executable and other regional builds use different
+addresses and are not supported by v1.0.0.
+
+## 4. Ownership boundaries
+
+The central architectural choice is to give each action to one owner:
+
+- KH1 owns ordinary `A` attacks, attack selection, Combo Master whiff attacks,
+  intermediate combo steps, target tracking, and normal finishers.
+- JokCombat owns the contextual `Y` family selection and temporarily routes
+  the selected complete native Action record.
+- KH1 owns native magic, Reaction Commands, menu confirmation, and every
+  internal follow-up after a Limit has begun.
+- JokCombat owns universal Guard/Dodge admission, the successful-Guard
+  Counterattack window, the R2 Action loadout, and the Kinetic Step request.
+- KH1 still executes the resulting Guard, Dodge, Counterattack, Action,
+  jump, and Limit through native records or dispatchers.
+
+This prevents two controllers from consuming the same physical press and
+avoids animation-only actions that lack their native VFX, damage, or movement.
+
+## 5. Native normal combo pipeline
+
+Earlier versions routed every attack and maintained an artificial input queue.
+That approach could skip middle attacks or replay a large backlog after the
+finisher. The release instead leaves every normal `A` press to KH1.
+
+The native ability module equips the exact intended maxima:
+
+- High Jump x1;
+- Combo Plus x4;
+- Air Combo Plus x2;
+- Combo Master x1.
+
+Combo Master is therefore responsible for starting and continuing attacks
+without a target. Ground and aerial combo length, contextual normal attacks,
+and finishers are calculated by KH1.
+
+Infinite ground and aerial strings use one narrow bridge: after KH1 reaches
+the completed phase of ground finisher `CB` or aerial finisher `CE`, a fresh
+`A` reopens the native string. Presses made during earlier recovery are not
+queued. This keeps the combo cyclic without recreating every normal attack in
+Lua.
+
+## 6. Contextual A/Y families
+
+The count of native `A` attacks before the first `Y` selects a family. Every
+accepted `Y` immediately performs the named move; the player never enters a
+silent password sequence. A subsequent `A` closes the special family and
+returns to native physical continuation.
+
+| Family | Prefix | Role | Route |
+|---|---|---|---|
+| Strong | `Y` | Burst | Vortex -> Gravity Break -> Ragnarok |
+| C2 | `A Y` | Pursuit | Sliding Dash -> Sonic Blade |
+| C3 | `A A Y` | Crowd control | Stun Impact -> Ripple Drive -> Trinity Limit |
+| C4 | `A A A Y` | Ground-air-ground Ultimate | Slapshot -> real jump -> aerial branch -> Blitz -> Strike Raid |
+| C5 | `A A A A Y` | Execution | Zantetsuken -> Ars Arcanum |
+
+The five families contain eight unique ground Action Abilities and all five
+native Limits without duplicate named moves. The full input map, airborne C4
+bridge, availability rules, and Combo Guide examples are maintained in
+`JokCombat_BranchCombo_Mapping.md`.
+
+Reaction Commands are inspected before opening a `Y` family. Save, Examine,
+Talk, and other native contextual commands therefore retain priority. Magic
+and Summons do not enter the branch state machine.
+
+## 7. Aerial family and ground-air cycle
+
+After any intermediate normal aerial `A`, the aerial `Y` family is:
+
+1. native Aerial Finisher `CE`;
+2. Hurricane Blast `D1`;
+3. Aerial Sweep `D6`.
+
+Only actions that KH1 can execute correctly while airborne are used. The
+retired fake-ground implementation could show an animation but could not
+reliably preserve VFX, hitboxes, damage, stick control, or altitude.
+
+C4 connects both combat planes. Slapshot opens a short buffered `B` window,
+then KH1 performs a real jump. The normal aerial family remains available,
+Aerial Sweep returns Sora toward the ground, and a natural landing opens Blitz
+followed by Strike Raid. No airborne flag or fake altitude is written to force
+the transition.
+
+## 8. Native Action Ability dispatch
+
+An Action Ability is routed by copying its complete validated 0x14-byte native
+action record into the relevant selection entries before the physical input is
+handled. Routing only the animation ID was rejected because moves such as Stun
+Impact, Ripple Drive, Gravity Break, and Zantetsuken then lost native effects,
+damage, or control flow.
+
+The release catalog contains the complete records and selectors for the eight
+ground branch Actions plus Hurricane Blast, Aerial Sweep, and Counterattack in
+their contextual roles. Unsupported ground-only records are never converted
+into airborne actions.
+
+## 9. Native Limit dispatch and MP policy
+
+The Action immediately before a Limit pre-arms one validated native Reaction
+Command. The final physical `Y` is then consumed by KH1's own Limit dispatcher,
+which owns targeting, movement, animation, VFX, damage, and follow-up inputs.
+
+Sonic Blade, Ars Arcanum, Strike Raid, and Ragnarok temporarily borrow a zero
+cost only for the selected combo route and active native Limit. Their original
+costs are journaled and restored conditionally on completion, cancel, timeout,
+fault, exit, or script reload. Launching the same Limit from KH1's menu keeps
+its vanilla cost.
+
+Trinity Limit is available only with Donald and Goofy present. Instead of
+inventing a shared cost record, JokCombat snapshots the party MP state and
+restores the native consumption for the combo invocation.
+
+Once KH1 exposes an active Limit state, JokCombat stops intercepting combat
+inputs until native recovery completes. This boundary prevents the orphaned
+Limit state that can otherwise leave Sora unable to move.
+
+## 10. Command Menu overlay and R2 loadout
+
+The HUD does not create an external overlay. It temporarily reuses the text
+tokens and selection behavior of KH1's Command Menu, showing at most four
+rows in the lower-left corner.
+
+Holding `R2` opens the only configurable Action group:
+
+- D-pad Up/Down moves through editable rows using KH1's native cursor pulse;
+- D-pad Left/Right cycles the available Action Abilities;
+- releasing `R2` saves the configuration once to
+  `JokCombat_ActionLoadout.cfg` beside the script.
+
+Guard remains fixed and cannot be replaced. The fourth visual row depends on
+KH1 naturally unlocking the Summon row; its bound R2 action remains executable
+before the row becomes visible.
+
+During a combo, the same Command Menu surface becomes a read-only Combo Guide
+that lists only the valid future `Y` actions. The native `A` continuation is
+implicit. Releasing `L1 + R1 + L2 + R2` without D-pad input toggles the overlay
+and Guide persistently.
+
+## 11. Defense and contextual Counterattack
+
+Universal Guard is fixed to `L2 + B` and may cancel other ordinary actions.
+Dodge Roll is fixed to `X`, may cancel ordinary actions, and cannot cancel
+itself. Native magic shortcut modifiers take priority, so `R1 + X` remains a
+magic input rather than a Dodge request.
+
+Counterattack is not an offensive combo node. A short `A` window opens only
+after all three native conditions are observed: JokCombat accepted Guard,
+Sora entered Guard animation `D4`, and KH1 reported a real Guard-connect
+event. A whiffed Guard never exposes Counterattack.
+
+## 12. Jump and descent model
+
+High Jump is a persistent native ability. Kinetic Step is a runtime-only
+second jump with one charge per airtime:
+
+1. a native first jump arms the charge;
+2. after the first `B` is released, a new airborne `B` may cancel an ordinary
+   aerial action;
+3. a bounded native air-action route enters the Kinetic Step animation and
+   applies its validated lift;
+4. landing is the only normal charge refill.
+
+The controller never creates a third jump and resets on player changes,
+special aerial states, Limits, faults, and reloads.
+
+Descent is tuned through downward transform deltas only:
+
+- vanilla free fall after either jump retains 45% of its downward delta;
+- ordinary aerial attacks `CC`, `CD`, and `CE` retain 25%;
+- upward movement is untouched;
+- Hurricane Blast and Aerial Sweep are excluded so their authored vertical
+  trajectories remain intact.
+
+The first- and second-jump fall profiles share one controller, preventing the
+factor from being multiplied twice after Kinetic Step.
+
+## 13. Persistent and runtime state
+
+| Change | Persistence |
+|---|---|
+| 99 maximum AP | Saved by KH1 after a normal save |
+| High Jump and exact 4/2/1 combo passive counts | Saved by KH1 after a normal save |
+| R2 Action Ability assignments | Local `JokCombat_ActionLoadout.cfg` |
+| Branch state, Action routes, Limit selectors, second jump, descent tuning | Process only |
+| 2.0x item/prize drop multipliers | Process only |
+
+The native ability writer preserves the contiguous 48-byte KH1 ability list,
+equips an existing disabled copy in place, inserts only missing copies, and
+removes later vanilla surplus beyond the configured maxima. Because those
+changes can persist, the installation instructions require a save backup.
+
+## 14. Drop-rate policy
+
+`JokCombat_DropRate.lua` sets both native Steam operands to 2.0x after checking
+their surrounding instruction signatures. It writes once at initialization,
+does not edit the save, and restores the original values on exit only if they
+are still owned by JokCombat.
+
+This is a fixed JokCombat rule. It is not a claim that Critical Mix always uses
+200%: that project selects a difficulty-dependent base and applies separate
+weapon modifiers.
+
+## 15. Recovery and coexistence policy
+
+Every temporary patch keeps its original value and restores only memory that
+still contains the exact value written by JokCombat. If another script changes
+an owned field, JokCombat logs the conflict and leaves the external value
+untouched.
+
+Reload handlers normalize known legacy journals from earlier JokCombat builds
+before enabling the release controller. This recovery exists for migration;
+the retired combo-magic and fake-ground systems are not active code paths.
+
+Running another combat overhaul against the same input, action, command,
+ability, or Reaction structures is unsupported even with conditional restore.
+
+## 16. Known v1.0.0 limits
+
+- Steam Global is the only validated executable.
+- Summons and combo magic are intentionally excluded.
+- Perfect Guard and a dedicated enemy launcher are not implemented.
+- The fourth Command Menu row is naturally gated by KH1's Summon unlock.
+- The project uses fixed executable addresses and therefore requires a new
+  validation pass after any game executable update.
+
+## 17. Verification
+
+Static release checks are run with:
+
+```powershell
+python tests/test_branch_mapping.py
+python tests/test_drop_rate.py
+```
+
+The v1.0.0 gameplay baseline has also been tested live for native ground and
+aerial strings, all five branch families, all five Limits, the C4 Ultimate,
+R2 Actions, Guard/Dodge/Counterattack, Kinetic Step, both descent profiles, and
+the fixed drop multiplier.
+
+## 18. Attribution
+
+Critical Mix by Xendra/KSX was used with the authors' permission as a technical
+reference for selected KH1 structures and concepts. JokCombat's Steam Global
+ports, validation checks, state machines, recovery rules, and combat design
+were implemented and tested for this project.
