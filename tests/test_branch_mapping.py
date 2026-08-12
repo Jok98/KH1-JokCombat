@@ -405,7 +405,7 @@ def assert_air_attack_descent_brake() -> None:
 
 def assert_integration() -> None:
     guards = (
-        'VERSION = "v0.16.1"',
+        'VERSION = "v1.0.0"',
         "branchActionAbilities = true",
         "branchLimits = true",
         "comboGuide = true",

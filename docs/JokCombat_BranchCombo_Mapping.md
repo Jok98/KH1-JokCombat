@@ -1,6 +1,6 @@
 # JokCombat — mappa combo contestuale A / Y
 
-Stato: **v0.14.0 — RUOLI DISTINTI; ULTIMATE C4 TERRA-ARIA-TERRA; ACTION 8/8 + LIMIT NATIVI 5/5**
+Stato: **v1.0.0 — RUOLI DISTINTI; ULTIMATE C4 TERRA-ARIA-TERRA; ACTION 8/8 + LIMIT NATIVI 5/5**
 
 Ambito: KH1 Final Mix, Steam Global, Sora
 Input abbreviati: `A` = Croce, `Y` = Triangolo
