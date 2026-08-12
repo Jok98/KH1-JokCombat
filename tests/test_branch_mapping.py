@@ -265,6 +265,7 @@ def assert_native_second_jump() -> None:
         "secondJumpLiftAmount = 30.0",
         "secondJumpLiftEndTime = 25.0",
         "secondJumpSpeedDivisor = 1.1",
+        "secondJumpFallBrakeFactor = 0.45",
         "gameSpeed = 0x233FBCC",
         "verticalPosition = 0x014",
         "animationSpeed = 0x284",
@@ -275,6 +276,7 @@ def assert_native_second_jump() -> None:
         "function JokCombatAirJump.restoreRoutes",
         "function JokCombatAirJump.noteGroundJump",
         "function JokCombatAirJump.boost",
+        "function JokCombatAirJump.brakeFall",
         "function JokCombatAirJump.observe",
         "function JokCombatAirJump.canBegin",
         "function JokCombatAirJump.ownsCircle",
@@ -282,7 +284,11 @@ def assert_native_second_jump() -> None:
         'if entry.name == "flyingCombo1" then return 0x09 end',
         "WriteByte(entry.address, JokCombatAirJump.routeAnimation(entry))",
         "WriteFloat(player.pointer + PLAYER.verticalPosition,",
-        "position - lift, true)",
+        "boostedPosition, true)",
+        "rawDelta * CONFIG.secondJumpFallBrakeFactor",
+        "if player.animation ~= 0x06 or rawDelta <= 0.0 then",
+        "JokCombatAirJump.brakeFall(player)",
+        "post-jump fall brake: factor=%.2f",
         "if player.animation == 0x0F then",
         "and JokCombatAirJump.ownsCircle(buttons) then",
         "if not triggerAttackCommand() then",
@@ -305,7 +311,7 @@ def assert_native_second_jump() -> None:
     start = SOURCE.index("JokCombatAirJump = {")
     end = SOURCE.index("local function actionKind", start)
     adapter = SOURCE[start:end]
-    assert adapter.count("WriteFloat(") == 1
+    assert adapter.count("WriteFloat(") == 2
     assert "PLAYER.animationId" not in adapter
     assert "WriteInt(player.pointer + PLAYER.airborneState" not in adapter
     assert "WriteLong(ADDRESS.circleHandler" not in adapter
@@ -353,7 +359,7 @@ def assert_native_second_jump() -> None:
 
 def assert_integration() -> None:
     guards = (
-        'VERSION = "v0.15.3"',
+        'VERSION = "v0.15.5"',
         "branchActionAbilities = true",
         "branchLimits = true",
         "comboGuide = true",

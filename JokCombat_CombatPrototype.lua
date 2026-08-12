@@ -2,7 +2,7 @@ LUAGUI_NAME = "JokCombat Combat Prototype"
 LUAGUI_AUTH = "Jok; Critical Mix reference by Xendra / KSX"
 LUAGUI_DESC = "Native Cross combo, Pirate-style Y Action/Limit families, one-cycle double jump, configurable loadout and universal defense."
 
--- JokCombat v0.15.3 prototype for the current Steam Global executable.
+-- JokCombat v0.15.5 prototype for the current Steam Global executable.
 -- Critical Mix was used as an authorized technical reference. This script is
 -- intentionally limited to combat/input state and does not persist changes to
 -- story flags, rewards, inventory, AP, levels, worlds, chests, or synthesis.
@@ -61,6 +61,12 @@ local CONFIG = {
     secondJumpLiftAmount = 30.0,
     secondJumpLiftEndTime = 25.0,
     secondJumpSpeedDivisor = 1.1,
+    -- Kinetic Step changes altitude without exposing a validated vertical-
+    -- velocity field. Slow only the positive position delta of vanilla Fall
+    -- 0x06 after the second jump; aerial attacks retain their native motion.
+    -- The brake remains active until landing, so no stored fast fall is
+    -- released abruptly after a fixed timer.
+    secondJumpFallBrakeFactor = 0.45,
     defensiveCancels = true,
     universalGuardCancel = true,
     universalDodgeCancel = true,
@@ -119,7 +125,7 @@ local CONFIG = {
 
 local EXPECTED_GAME_ID = 0xAF71841E
 local FINGERPRINT = 0x7265737563697065 -- "epicures", little endian
-local VERSION = "v0.15.3"
+local VERSION = "v0.15.5"
 
 local ADDRESS = {
     fingerprint = 0x3B2271,
@@ -2921,6 +2927,12 @@ JokCombatAirJump = {
     sourceAirborneState = 0,
     routeFaultLogged = false,
     liftFaultLogged = false,
+    fallBrakeArmed = false,
+    lastVerticalPosition = nil,
+    fallBrakeSamples = 0,
+    fallBrakeRawMaximum = 0.0,
+    fallBrakeCorrectedMaximum = 0.0,
+    fallBrakeFaultLogged = false,
 }
 
 function JokCombatAirJump.routeAnimation(entry)
@@ -2999,6 +3011,12 @@ function JokCombatAirJump.initialize(airRouteReady)
     JokCombatAirJump.sourceAirborneState = 0
     JokCombatAirJump.routeFaultLogged = false
     JokCombatAirJump.liftFaultLogged = false
+    JokCombatAirJump.fallBrakeArmed = false
+    JokCombatAirJump.lastVerticalPosition = nil
+    JokCombatAirJump.fallBrakeSamples = 0
+    JokCombatAirJump.fallBrakeRawMaximum = 0.0
+    JokCombatAirJump.fallBrakeCorrectedMaximum = 0.0
+    JokCombatAirJump.fallBrakeFaultLogged = false
 
     if not JokCombatAirJump.restoreRoutes("reload recovery", true) then
         return false
@@ -3017,6 +3035,13 @@ function JokCombatAirJump.initialize(airRouteReady)
             gameSpeed))
         return false
     end
+    if CONFIG.secondJumpFallBrakeFactor <= 0.0
+        or CONFIG.secondJumpFallBrakeFactor > 1.0 then
+        log(string.format(
+            "[air-jump] fall-brake factor invalid (%.3f); disabled.",
+            CONFIG.secondJumpFallBrakeFactor))
+        return false
+    end
     JokCombatAirJump.enabled = CONFIG.secondJump == true
     return JokCombatAirJump.enabled
 end
@@ -3027,6 +3052,7 @@ function JokCombatAirJump.reset(reason, quiet, clearPlayer)
         or JokCombatAirJump.groundRequestFrames > 0
         or JokCombatAirJump.routeOwned
         or JokCombatAirJump.active
+        or JokCombatAirJump.fallBrakeArmed
     local ownedCommand = JokCombatAirJump.routeOwned
     JokCombatAirJump.restoreRoutes(reason, true)
     if ownedCommand then clearSyntheticAttackCommand(false) end
@@ -3040,6 +3066,11 @@ function JokCombatAirJump.reset(reason, quiet, clearPlayer)
     JokCombatAirJump.sourceAnimation = nil
     JokCombatAirJump.sourceTime = 0.0
     JokCombatAirJump.sourceAirborneState = 0
+    JokCombatAirJump.fallBrakeArmed = false
+    JokCombatAirJump.lastVerticalPosition = nil
+    JokCombatAirJump.fallBrakeSamples = 0
+    JokCombatAirJump.fallBrakeRawMaximum = 0.0
+    JokCombatAirJump.fallBrakeCorrectedMaximum = 0.0
     if clearPlayer then JokCombatAirJump.playerPointer = nil end
     if hadCycle and reason ~= nil and not quiet then
         log("[air-jump] cycle reset: " .. reason .. ".")
@@ -3085,8 +3116,83 @@ function JokCombatAirJump.boost(player)
 
     local lift = CONFIG.secondJumpLiftAmount
         * (gameSpeed / CONFIG.secondJumpSpeedDivisor * animationSpeed)
+    local boostedPosition = position - lift
     WriteFloat(player.pointer + PLAYER.verticalPosition,
-        position - lift, true)
+        boostedPosition, true)
+    JokCombatAirJump.lastVerticalPosition = boostedPosition
+    return true
+end
+
+function JokCombatAirJump.brakeFall(player)
+    if not JokCombatAirJump.fallBrakeArmed
+        or not JokCombatAirJump.consumed
+        or not player.airborne then
+        return false
+    end
+
+    local position = ReadFloat(
+        player.pointer + PLAYER.verticalPosition, true)
+    if position ~= position or math.abs(position) >= 1000000.0 then
+        if not JokCombatAirJump.fallBrakeFaultLogged then
+            log("[air-jump] invalid fall position; post-jump brake disabled "
+                .. "for this cycle.")
+            JokCombatAirJump.fallBrakeFaultLogged = true
+        end
+        JokCombatAirJump.fallBrakeArmed = false
+        JokCombatAirJump.lastVerticalPosition = nil
+        return false
+    end
+
+    local previous = JokCombatAirJump.lastVerticalPosition
+    if previous == nil then
+        JokCombatAirJump.lastVerticalPosition = position
+        return false
+    end
+
+    local rawDelta = position - previous
+    -- Up is negative on this transform. Therefore only a positive delta in
+    -- KH1's ordinary Fall animation is descent. Attack-driven movement such
+    -- as Hurricane Blast or Aerial Sweep is observed but never modified.
+    if player.animation ~= 0x06 or rawDelta <= 0.0 then
+        JokCombatAirJump.lastVerticalPosition = position
+        return false
+    end
+    if rawDelta > 1000.0 then
+        if not JokCombatAirJump.fallBrakeFaultLogged then
+            log(string.format(
+                "[air-jump] implausible fall delta %.2f; post-jump brake "
+                    .. "disabled for this cycle.", rawDelta))
+            JokCombatAirJump.fallBrakeFaultLogged = true
+        end
+        JokCombatAirJump.fallBrakeArmed = false
+        JokCombatAirJump.lastVerticalPosition = position
+        return false
+    end
+
+    local correctedDelta = rawDelta * CONFIG.secondJumpFallBrakeFactor
+    local correctedPosition = previous + correctedDelta
+    WriteFloat(player.pointer + PLAYER.verticalPosition,
+        correctedPosition, true)
+    local observed = ReadFloat(
+        player.pointer + PLAYER.verticalPosition, true)
+    if observed ~= observed
+        or math.abs(observed - correctedPosition) > 0.05 then
+        if not JokCombatAirJump.fallBrakeFaultLogged then
+            log("[air-jump] fall-brake write verification failed; disabled "
+                .. "for this cycle.")
+            JokCombatAirJump.fallBrakeFaultLogged = true
+        end
+        JokCombatAirJump.fallBrakeArmed = false
+        JokCombatAirJump.lastVerticalPosition = position
+        return false
+    end
+
+    JokCombatAirJump.lastVerticalPosition = observed
+    JokCombatAirJump.fallBrakeSamples = JokCombatAirJump.fallBrakeSamples + 1
+    JokCombatAirJump.fallBrakeRawMaximum = math.max(
+        JokCombatAirJump.fallBrakeRawMaximum, rawDelta)
+    JokCombatAirJump.fallBrakeCorrectedMaximum = math.max(
+        JokCombatAirJump.fallBrakeCorrectedMaximum, correctedDelta)
     return true
 end
 
@@ -3113,6 +3219,11 @@ function JokCombatAirJump.observe(player, buttons)
         JokCombatAirJump.requestAge = JokCombatAirJump.requestAge + 1
         if player.animation == 0x0F then
             JokCombatAirJump.active = true
+            JokCombatAirJump.fallBrakeArmed = true
+            JokCombatAirJump.lastVerticalPosition = nil
+            JokCombatAirJump.fallBrakeSamples = 0
+            JokCombatAirJump.fallBrakeRawMaximum = 0.0
+            JokCombatAirJump.fallBrakeCorrectedMaximum = 0.0
             JokCombatAirJump.restoreRoutes("Kinetic Step accepted", true)
             clearSyntheticAttackCommand(false)
             WriteByte(ADDRESS.comboPosition, 1)
@@ -3147,6 +3258,8 @@ function JokCombatAirJump.observe(player, buttons)
         end
     end
 
+    JokCombatAirJump.brakeFall(player)
+
     if not player.airborne then
         local completedCycle = JokCombatAirJump.wasAirborne
             and (JokCombatAirJump.available or JokCombatAirJump.consumed)
@@ -3158,6 +3271,20 @@ function JokCombatAirJump.observe(player, buttons)
         JokCombatAirJump.requestAge = 0
         JokCombatAirJump.active = false
         JokCombatAirJump.sourceAnimation = nil
+        if completedCycle and JokCombatAirJump.fallBrakeSamples > 0 then
+            log(string.format(
+                "[air-jump] post-jump fall brake: factor=%.2f frames=%d "
+                    .. "maxDelta=%.2f->%.2f.",
+                CONFIG.secondJumpFallBrakeFactor,
+                JokCombatAirJump.fallBrakeSamples,
+                JokCombatAirJump.fallBrakeRawMaximum,
+                JokCombatAirJump.fallBrakeCorrectedMaximum))
+        end
+        JokCombatAirJump.fallBrakeArmed = false
+        JokCombatAirJump.lastVerticalPosition = nil
+        JokCombatAirJump.fallBrakeSamples = 0
+        JokCombatAirJump.fallBrakeRawMaximum = 0.0
+        JokCombatAirJump.fallBrakeCorrectedMaximum = 0.0
         if completedCycle then
             log("[air-jump] landing confirmed; second jump recharges "
                 .. "after the next first jump.")
@@ -5851,7 +5978,8 @@ function _OnInit()
     log("Kinetic Step second-jump adapter "
         .. (JokCombatAirJump.enabled and "ready" or "disabled")
         .. ": one charge after a real first jump; B routes animation 0x0F, "
-        .. "applies the bounded Critical Mix lift and restarts air hit 1.")
+        .. "applies the bounded Critical Mix lift, brakes only vanilla Fall "
+        .. "0x06 and restarts air hit 1.")
     log("ground-air Ultimate ready: AAAY Slapshot -> B real jump -> "
         .. "Y/Y/Y aerial family -> natural landing -> Y Blitz -> "
         .. "Y Strike Raid.")

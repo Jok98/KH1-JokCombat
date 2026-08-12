@@ -318,6 +318,20 @@ descritto sotto.
 > `gameSpeed` e `player+0x284`; poi ripristina condizionalmente tutti i record.
 > Non scrive `raw70`, velocita' o puntatori dispatcher. La carica resta singola,
 > si sblocca soltanto dopo il rilascio del primo `B` e torna all'atterraggio.
+>
+> **v0.15.4 - caduta Kinetic Step controllata:** il test live ha mostrato che
+> `0x0F` passa quasi subito alla caduta `0x06`, conservando un delta verso il
+> terreno troppo aggressivo. Senza inventare un offset di velocita', JokCombat
+> riduce al 55% soltanto il delta positivo di `player+0x14` durante quella
+> caduta vanilla successiva al secondo salto. Il freno resta attivo fino a
+> Landing, ma si sospende durante qualsiasi attacco aereo: Hurricane Blast,
+> Aerial Sweep e le combo conservano quindi il movimento nativo. All'atterraggio
+> il log riporta numero di frame e massimo delta grezzo/corretto per il tuning.
+>
+> **v0.15.5 - tuning caduta:** dopo il primo collaudo il fattore del freno
+> post-Kinetic Step passa da `0.55` a `0.45`. La discesa risulta quindi ancora
+> piu' controllata, mantenendo invariati ambito `0x06`, attacchi aerei e rilascio
+> automatico su Landing.
 
 La repository contiene tre probe read-only e il primo prototipo combat:
 
@@ -329,7 +343,7 @@ La repository contiene tre probe read-only e il primo prototipo combat:
   faccia e valida gli indirizzi Steam portati prima che il prototipo scriva;
 - `JokCombat_CommandMenuProbe.lua`: confronta in sola lettura controller,
   transizioni e strutture delle quattro righe native del Command Menu;
-- `JokCombat_CombatPrototype.lua`: prototipo v0.15.3 con combo normali delegate
+- `JokCombat_CombatPrototype.lua`: prototipo v0.15.5 con combo normali delegate
   a KH1 e un bridge post-finisher per i cicli infiniti terra/aria, quattro slot
   R2 configurabili, otto Action Ability e cinque Limit nativi nelle famiglie
   Pirate terrestri, due Action aeree separate e Counterattack contestuale,
@@ -454,8 +468,8 @@ pacchetto Critical Mix sono conservati, ma non caricati, nelle directory
 `C:\Users\<utente>\Documents\KH_mod\reference\CriticalMix`. Backup, log e
 copie runtime restano locali e non fanno parte del repository.
 
-Per verificare la v0.15.3, premi `F1` nella console LuaBackend. Il log iniziale
-deve mostrare `v0.15.3`, `Native Abilities v0.4.0 ready`,
+Per verificare la v0.15.5, premi `F1` nella console LuaBackend. Il log iniziale
+deve mostrare `v0.15.5`, `Native Abilities v0.4.0 ready`,
 `ground action route ready`, `aerial action route ready`,
 `complete action records ready: 11/11`
 `native Command Menu overlay + Combo Guide ready` e
@@ -502,7 +516,8 @@ quest'ordine, prima senza bersaglio e poi contro un nemico:
   requested` e `Kinetic Step accepted`. Lo State Probe deve osservare
   `anim=0x0F`, Sora deve guadagnare quota e una nuova combo aerea deve ripartire
   dal primo colpo. Un terzo `B` non deve creare un altro Kinetic Step prima
-  dell'atterraggio;
+  dell'atterraggio. Se Sora torna alla caduta `0x06`, il log di Landing deve
+  includere `post-jump fall brake: factor=0.45` con almeno un frame corretto;
 - Guard riuscita `L2+Cerchio`, poi `A` senza modificatori: Counterattack.
 
 Ogni passaggio Action valido registra `[branch] <sequenza> requested` e poi
