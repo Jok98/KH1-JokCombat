@@ -121,3 +121,11 @@ borrowing, and drop-rate patch are runtime-only.
 Created by Jok. JokCombat is inspired by Critical Mix by Xendra/KSX. Critical
 Mix's scripts and combat concepts were studied while JokCombat was independently
 developed and validated for the Steam Global release.
+
+## License
+
+JokCombat's original source code and documentation are released under the
+[MIT License](LICENSE). KINGDOM HEARTS and its associated names, characters,
+and assets remain the property of their respective rights holders. Critical
+Mix is not included in this repository and is not covered by JokCombat's
+license.
