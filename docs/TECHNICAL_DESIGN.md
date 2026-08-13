@@ -20,9 +20,12 @@ JokCombat is designed around four principles:
 4. Fail closed on an unsupported executable or an unexpected memory layout.
 
 The project does not modify story progression, scripted rewards, chests,
-synthesis, inventory, world flags, bosses, or Summons. Magic remains native
-and is deliberately excluded from the combo dispatcher after the attempted
-combo-magic adapter proved unable to reproduce KH1's complete cast path.
+synthesis state, world flags, bosses, or Summons. Its only inventory mutation
+is the explicit native grant of one copy of each genuine Sora Keyblade except
+Ultima Weapon, plus Save the Queen for Donald and Save the King for Goofy.
+Magic remains native and is deliberately excluded from the combo dispatcher
+after the attempted combo-magic adapter proved unable to reproduce KH1's
+complete cast path.
 
 ## 2. Release modules
 
@@ -30,6 +33,7 @@ combo-magic adapter proved unable to reproduce KH1's complete cast path.
 |---|---|
 | `JokCombat_CombatPrototype.lua` | Main v1.0.0 combat, input, HUD, movement, Action, and Limit controller. The historical filename is retained to avoid breaking existing installations. |
 | `JokCombat_NativeAbilities.lua` | Persistent native grant of Shared High Jump, Glide, Superglide, four Combo Plus, two Air Combo Plus, Combo Master, and 99 maximum AP. |
+| `JokCombat_NativeKeyblades.lua` | Persistent native grant of the 17 genuine Sora Keyblades other than Ultima Weapon, plus Save the Queen and Save the King, with unique-count reconciliation. |
 | `JokCombat_DropRate.lua` | Runtime-only 2.0x item and prize drop patch. |
 
 `JokCombat_StateProbe.lua`, `JokCombat_InputProbe.lua`, and
@@ -257,6 +261,8 @@ factor from being multiplied twice after Kinetic Step.
 |---|---|
 | 99 maximum AP | Saved by KH1 after a normal save |
 | Shared High Jump, Glide, Superglide, and exact 4/2/1 combo passive counts | Saved by KH1 after a normal save |
+| One total copy of each genuine non-Ultima Keyblade | Saved by KH1 after a normal save |
+| Save the Queen and Save the King | Saved by KH1 after a normal save |
 | R2 Action Ability assignments | Local `JokCombat_ActionLoadout.cfg` |
 | Branch state, Action routes, Limit selectors, second jump, input ownership, descent tuning | Process only |
 | 2.0x item/prize drop multipliers | Process only |
@@ -268,6 +274,18 @@ missing entries, equips disabled personal copies in place, and removes later
 vanilla surplus beyond the configured maxima without discarding unrelated
 entries. Because those changes can persist, the installation instructions
 require a save backup.
+
+The Keyblade module follows KH1FM's native save layout: Sora's equipped weapon
+is stored in his Character record while the 0x100-byte inventory-count array
+starts at save offset `0x499`. For each of the 17 targets it keeps inventory
+stock at zero when that weapon is equipped and one otherwise. This prevents
+later vanilla rewards from creating duplicate unique weapons without changing
+their reward or story flags. Ultima Weapon (`0x64`), Dream Sword, Dream Shield,
+Dream Rod, Wooden Sword, and the equipped-weapon field are never written by the
+module. Ultima therefore remains tied to KH1's normal synthesis progression.
+The same ownership rule is applied to Save the Queen (`0x72`) using Donald's
+equipped-weapon record and Save the King (`0x82`) using Goofy's. No other ally
+weapon is granted or modified.
 
 ## 14. Drop-rate policy
 

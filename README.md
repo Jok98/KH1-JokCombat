@@ -22,11 +22,15 @@ an extended ground-to-air cycle, universal defense, and faster progression.
   after a successful Guard.
 - High Jump, a once-per-airtime Kinetic Step second jump, native Superglide on
   held airborne `X`, and reduced descent during free fall and aerial attacks.
+- All 17 genuine Keyblades except Ultima Weapon available through KH1's native
+  Equipment menu; Ultima remains obtainable only through normal synthesis.
+- Save the Queen for Donald and Save the King for Goofy available through
+  their native Equipment menus.
 - Fixed `200%` item and prize drop multipliers.
 
 Normal magic shortcuts, Reaction Commands, story progression, rewards,
-chests, synthesis, inventory, world flags, and Summons remain under vanilla
-KH1 control.
+chests, synthesis, world flags, and Summons remain under vanilla KH1 control.
+The Keyblade module modifies only Sora's owned unique-weapon counts.
 
 ## Controls
 
@@ -79,6 +83,7 @@ Other regional builds and the Epic Games Store executable are not supported.
    ```text
    JokCombat_CombatPrototype.lua
    JokCombat_NativeAbilities.lua
+   JokCombat_NativeKeyblades.lua
    JokCombat_DropRate.lua
    ```
 
@@ -92,8 +97,8 @@ Other regional builds and the Epic Games Store executable are not supported.
    ```
 
 5. Start KH1 or press `F1` in the LuaBackend console to reload all scripts.
-   A successful load reports `JokCombat v1.0.0`, Native Abilities, and the
-   `200%` Drop Rate module.
+   A successful load reports `JokCombat v1.0.0`, Native Abilities, Native
+   Keyblades, and the `200%` Drop Rate module.
 
 The three probe scripts in this repository are optional developer diagnostics
 and are not required for normal play.
@@ -103,10 +108,14 @@ and are not required for normal play.
 `JokCombat_NativeAbilities.lua` grants native High Jump, Glide, and Superglide
 through KH1's Shared ability list, equips four Combo Plus, two Air Combo Plus,
 and Combo Master in Sora's ability list, and sets Sora's maximum AP to `99`.
-These changes become part of the save after KH1 saves normally. The combat
-controller's ground-Dodge/air-Superglide ownership rule, Action Ability
-loadout, second jump, descent tuning, Limit cost borrowing, and drop-rate patch
-are runtime-only.
+`JokCombat_NativeKeyblades.lua` adds exactly one total copy of every genuine
+Sora Keyblade except Ultima Weapon. It does not grant the Dream weapons or
+Wooden Sword. The same module grants Save the Queen to Donald and Save the King
+to Goofy. It never writes Ultima's inventory record, synthesis state, or any
+currently equipped weapon. These changes become part of the save after KH1
+saves normally. The combat controller's ground-Dodge/air-Superglide ownership
+rule, Action Ability loadout, second jump, descent tuning, Limit cost borrowing,
+and drop-rate patch are runtime-only.
 
 ## Compatibility and known limits
 
