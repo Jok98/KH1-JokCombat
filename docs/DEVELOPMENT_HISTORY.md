@@ -161,7 +161,7 @@ globale dei drop descritto sotto.
 > rilascia il finisher per un frame e pulsa Attack senza modificare alcun record
 > azione. Il dispatcher nativo sceglie quindi la nuova apertura terra/aria.
 >
-> **Candidato v0.9.0 — combo Pirate A/Y:** la stringa di sole `A` resta
+> **Candidato v0.9.0 — combo Musou A/Y:** la stringa di sole `A` resta
 > completamente nativa, comprese Combo Plus, Air Combo Plus, Combo Master e
 > finisher. `Y` è invece l'unico tasto capace di eseguire una mossa nominata.
 > Le undici Action Ability sono distribuite senza duplicati nelle famiglie
@@ -233,7 +233,7 @@ globale dei drop descritto sotto.
 > **Fix v0.9.9 — shortcut Action solo R2:** il loadout diretto espone soltanto
 > `R2 + Y/X/A/B`. `L2` non apre più un gruppo Action e `L2+R2` non esegue più
 > Action Ability; `L2 + Cerchio` resta riservato esclusivamente a Guard. La mappa
-> Pirate continua comunque a contenere tutte le undici Action Ability.
+> Musou continua comunque a contenere tutte le undici Action Ability.
 >
 > **Fix v0.10.3 — chiusura discendente della combo aerea:** dopo qualunque colpo
 > intermedio aereo, `Y` esegue Hurricane Blast e il successivo `Y` chiude con
@@ -252,7 +252,7 @@ globale dei drop descritto sotto.
 > successivo `Y` chiude con Aerial Sweep. La combo normale su `A` resta invariata.
 >
 > **Cleanup v0.10.6 — magia rimossa dalle combo:** i sette rami reverse magici
-> e Chain Attack non appartengono più alla mappa Pirate. I test live hanno
+> e Chain Attack non appartengono più alla mappa Musou. I test live hanno
 > confermato che il remap di `Y` non entrava nel dispatcher Shortcut nativo. Le
 > magie da menu e `R1` restano vanilla; sopravvive soltanto il recupero
 > condizionale di un eventuale journal lasciato dalle versioni precedenti.
@@ -366,7 +366,7 @@ La repository contiene tre probe read-only e il primo prototipo combat:
 - `JokCombat_CombatPrototype.lua`: prototipo v0.16.1 con combo normali delegate
   a KH1 e un bridge post-finisher per i cicli infiniti terra/aria, quattro slot
   R2 configurabili, otto Action Ability e cinque Limit nativi nelle famiglie
-  Pirate terrestri, due Action aeree separate e Counterattack contestuale,
+  Musou terrestri, due Action aeree separate e Counterattack contestuale,
   jump-cancel terra -> aria, Kinetic Step a carica singola, Guard universale su
   L2 + Cerchio, Dodge Roll terrestre e Superglide nativo aereo su Quadrato;
 - `JokCombat_NativeAbilities.lua`: imposta 99 AP massimi, assegna High Jump,
@@ -375,7 +375,7 @@ La repository contiene tre probe read-only e il primo prototipo combat:
   due Air Combo Plus e un Combo Master, tutte equipaggiate;
 - `JokCombat_DropRate.lua`: imposta a `2.0x` sia il moltiplicatore degli item
   sia quello dei prize, con firma Steam verificata e ripristino condizionale;
-- `docs/JokCombat_BranchCombo_Mapping.md`: mappa Pirate terrestre di 13 nodi,
+- `docs/JokCombat_BranchCombo_Mapping.md`: mappa Musou terrestre di 13 nodi,
   con otto Action Ability e cinque Limit nativi, famiglia aerea separata,
   Counterattack contestuale e nessuna magia combo, Chain Attack o Summon;
 - `docs/JokCombat_BranchCombo_Mapping_Draft.md`: archivio delle proposte
@@ -393,7 +393,7 @@ Il loadout Action Ability resta runtime-only e non inserisce le undici mosse
 nel salvataggio. Guard e Dodge Roll terrestre restano comandi fissi; Quadrato
 in aria rimane invece nativo per Superglide. Magie e Limit non compaiono
 nell'editor. I cinque Limit sono accessibili soltanto dalle combo
-Pirate e non vengono aggiunti alla lista abilità. High Jump, Glide, Superglide
+Musou e non vengono aggiunti alla lista abilità. High Jump, Glide, Superglide
 e le tre famiglie passive costituiscono una scelta strutturale del moveset e
 vengono apprese/equipaggiate nativamente.
 
@@ -459,7 +459,7 @@ JokCombat forza Dodge Roll su Quadrato soltanto a terra.
 Il test live ha verificato `groundMax=7` e `airMax=5`: a terra KH1 sceglie
 contestualmente `C8`, `C9` o `CA` nelle posizioni `1..6` e `CB` chiude alla 7;
 in aria le posizioni `1..4` hanno mostrato `CC/CD` e `CE` chiude alla 5. Poiché
-lo stesso ID può comparire in posizioni diverse, il controller Pirate usa
+lo stesso ID può comparire in posizioni diverse, il controller Musou usa
 `comboPosition` per scegliere C2/C3/C4/C5 e l'animazione soltanto per il timing.
 
 Questa assegnazione e' intenzionalmente persistente: dopo un salvataggio High
@@ -513,7 +513,7 @@ deve mostrare `v0.16.1`, `Native Abilities v0.4.0 ready`,
 `native Command Menu overlay + Combo Guide ready` e
 `native Ripple Drive/Stun Impact/Gravity Break/Zantetsuken selectors ready`.
 Deve inoltre comparire `Drop Rate v0.1.0 active` e
-`Pirate Y map ready: 13 ground nodes, 8 ground Action routes + five native
+`Musou Y map ready: 13 ground nodes, 8 ground Action routes + five native
 Limits; two aerial Actions and Counterattack remain contextual`,
 `native Limit combos ready: 5/5`, `successful-Guard Counterattack detector
 ready` e `legacy combo-magic recovery ready`, oltre a
@@ -535,7 +535,7 @@ intermedi non devono piu' apparire `normal route armed` o
 registra `infinite combo restart requested natively` e poi una transizione
 `restart` scelta dal dispatcher KH1.
 
-Il primo collaudo delle famiglie Pirate va eseguito senza spammare: ogni input
+Il primo collaudo delle famiglie Musou va eseguito senza spammare: ogni input
 successivo deve cadere nella coda visibile della mossa precedente. Verifica in
 quest'ordine, prima senza bersaglio e poi contro un nemico:
 
@@ -616,7 +616,7 @@ lo stato on/off del riepilogo. Il precedente editor nei box di notifica e' stato
 rimosso.
 
 I quattro default R2 sono tutti differenti; le altre Action Ability rimangono
-disponibili nella mappa Pirate:
+disponibili nella mappa Musou:
 
 | Slot | Action Ability |
 | --- | --- |

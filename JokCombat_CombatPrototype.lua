@@ -1,12 +1,12 @@
 LUAGUI_NAME = "JokCombat"
 LUAGUI_AUTH = "Jok; Critical Mix reference by Xendra / KSX"
-LUAGUI_DESC = "Native Cross combo, Pirate-style Y Action/Limit families, one-cycle double jump, configurable loadout and universal defense."
+LUAGUI_DESC = "Native Cross combo, Musou-style Y Action/Limit families, one-cycle double jump, configurable loadout and universal defense."
 
 -- JokCombat v1.0.0 for the current Steam Global executable.
 -- Critical Mix was used as an authorized technical reference. This script is
 -- intentionally limited to combat/input state and does not persist changes to
 -- story flags, rewards, inventory, AP, levels, worlds, chests, or synthesis.
--- All five Pirate combo Limits are exposed through KH1's native Reaction/Limit
+-- All five Musou combo Limits are exposed through KH1's native Reaction/Limit
 -- dispatcher. Their MP state and dispatcher bytes are borrowed only while the
 -- selected combo Limit is owned, then restored conditionally before normal
 -- play resumes.
@@ -28,7 +28,7 @@ local CONFIG = {
     normalAttackSpeedup = true,
     normalAttackSpeedMultiplier = 1.15,
 
-    -- Modifier-free Triangle selects the Pirate-style Strong/C2/C3/C4/C5
+    -- Modifier-free Triangle selects the Musou-style Strong/C2/C3/C4/C5
     -- family. Eight ground Action Abilities and all five native Limits form
     -- five standard role-specific branches; Cross after a named move closes
     -- the family and remains a physical continuation. C4 is now an ordinary
@@ -46,7 +46,7 @@ local CONFIG = {
     -- short arbitration and remains available as a native confirmation.
     neutralTriangleGraceFrames = 2,
     -- While KH1 owns a normal Cross string, reuse the native Command Menu as
-    -- a read-only guide for the current Pirate-style family. Named Action
+    -- a read-only guide for the current Musou-style family. Named Action
     -- Abilities are dispatched only by Triangle/Y; Cross/A always remains a
     -- physical continuation. The existing overlay master toggle controls it.
     comboGuide = true,
@@ -4878,7 +4878,7 @@ function JokCombatNativeLimit.update(player, buttons)
             JokCombatNativeLimit.restoreSelectorOwned()
             JokCombatNativeLimit.restorePartyMpSnapshot()
             -- The Reaction has entered KH1's native Limit state. Close only
-            -- the Pirate prefix so its own follow-up inputs are never hidden.
+            -- the Musou prefix so its own follow-up inputs are never hidden.
             if JokCombatBranch ~= nil and JokCombatBranch.active then
                 JokCombatBranch.reset(
                     "native " .. limit.name .. " owns follow-ups", true)
@@ -5031,7 +5031,7 @@ function JokCombatGuardCounter.dispatch(player)
     return requested
 end
 
--- Pirate-style modifier-free X/T families. Keep this as one global table:
+-- Musou-style modifier-free X/T families. Keep this as one global table:
 -- Lua 5.3 limits a chunk to 200 local variables and this controller already
 -- carries the validated loadout, HUD and route state in the same chunk.
 -- Every named move ends in T. X before the first T chooses Strong/C2/C3/C4/C5;
@@ -5097,7 +5097,7 @@ JokCombatBranch = {
         [0xDA] = { open = 14.0, release = 18.0 }, -- Zantetsuken
     },
 
-    slot = { id = "branch_combo", label = "Pirate Y family" },
+    slot = { id = "branch_combo", label = "Musou Y family" },
     valid = false,
     active = false,
     path = nil,
@@ -5271,7 +5271,7 @@ function JokCombatBranch.initialize()
     end
     if count ~= 13 or actionCount ~= 8 then
         ConsolePrint(string.format(
-            "[JokCombat:branch:fault] Pirate ground map count mismatch: "
+            "[JokCombat:branch:fault] Musou ground map count mismatch: "
             .. "nodes=%d/13 actions=%d/8.", count, actionCount))
         valid = false
     end
@@ -5406,7 +5406,7 @@ function JokCombatBranch.continuePhysical(player)
     restoreActionRoutes()
     JokCombatBranch.refreshAirState(player)
     if not queueAttackAfterRelease(
-            player, "pirate-light:" .. sourcePath, nil, nil) then
+            player, "musou-light:" .. sourcePath, nil, nil) then
         log("[branch] " .. sourcePath
             .. " physical continuation could not be queued.")
     end
@@ -5770,7 +5770,7 @@ function JokCombatBranch.update(player, buttons, crossPressed,
         if trianglePressed then
             log(string.format(
                 "[branch] Y delegated to native Reaction 0x%04X; "
-                    .. "Pirate family not opened.", nativeReaction))
+                    .. "Musou family not opened.", nativeReaction))
         end
         return false
     end
@@ -6332,7 +6332,7 @@ function _OnInit()
         "unavailable."))
     log(string.format("complete action records ready: %d/%d.",
         validActionRecordCount, #ACTION_CATALOG - 1))
-    log(string.format("Pirate Y map %s: %d ground nodes, "
+    log(string.format("Musou Y map %s: %d ground nodes, "
         .. "%d ground Action routes + five native Limits; "
         .. "two aerial Actions and Counterattack remain contextual.",
         branchValid and "ready" or "disabled",
@@ -6603,7 +6603,7 @@ function _OnFrame()
         and not nativeShortcutHeld then
         if player.airborne and not JokCombatAirJump.releaseRequired then
             -- The second jump is the only universal offensive jump cancel. It
-            -- closes the current Pirate family first, then Kinetic Step owns
+            -- closes the current Musou family first, then Kinetic Step owns
             -- one byte-only aerial route and one synthetic Attack edge.
             actionConsumed = true
             if JokCombatAirJump.canBegin(player, true) then
@@ -6657,7 +6657,7 @@ function _OnFrame()
     end
 
     -- Counterattack belongs only to a confirmed successful Guard. It consumes
-    -- a modifier-free physical A before either the Pirate tree or R2 loadout
+    -- a modifier-free physical A before either the Musou tree or R2 loadout
     -- can interpret the same edge.
     if not actionConsumed and crossPressed
         and (buttons & (BUTTON.L1 | BUTTON.R1 | BUTTON.L2 | BUTTON.R2)) == 0

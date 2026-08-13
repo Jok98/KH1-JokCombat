@@ -490,7 +490,7 @@ def assert_integration() -> None:
         "local nativeReaction = ReadShort(ADDRESS.reactionCommandId)",
         "if nativeReaction ~= 0 and not branchOwnsInput then",
         "Y delegated to native Reaction 0x%04X",
-        "Pirate family not opened",
+        "Musou family not opened",
         "function JokCombatBranch.guideEntries",
         "function JokCombatBranch.familyGuideEntries",
         'local sequence = "[Y]"',
