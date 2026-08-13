@@ -409,8 +409,15 @@ def assert_integration() -> None:
         "branchActionAbilities = true",
         "branchLimits = true",
         "comboGuide = true",
+        "neutralTriangleGraceFrames = 2",
         'return string.rep("X", position) .. "T"',
-        'if root == "T" then return JokCombatBranch.execute(player, root) end',
+        'if root == "T" then return JokCombatBranch.armNeutralTriangle() end',
+        "function JokCombatBranch.armNeutralTriangle",
+        "function JokCombatBranch.resolveNeutralTriangle",
+        "neutral Y left native for contextual arbitration",
+        "physical A took priority",
+        "opening Strong",
+        "neutral Y arbitration ready: two released frames before Strong",
         "function JokCombatBranch.continuePhysical",
         "+ A -> native physical continuation; family closed",
         "JokCombatBranch.reset(\"Guard cancel\")",
@@ -421,7 +428,7 @@ def assert_integration() -> None:
         "if configurationInputActive or nativeLimitActive then",
         "updateDefenseRouting(buttons, false, false, true)",
         "local nativeReaction = ReadShort(ADDRESS.reactionCommandId)",
-        "native Reaction Command took priority",
+        "if nativeReaction ~= 0 and not branchOwnsInput then",
         "Y delegated to native Reaction 0x%04X",
         "Pirate family not opened",
         "function JokCombatBranch.guideEntries",
@@ -448,12 +455,34 @@ def assert_integration() -> None:
     reaction_gate = branch_update.index(
         "local nativeReaction = ReadShort(ADDRESS.reactionCommandId)"
     )
-    strong_dispatch = branch_update.index(
-        'if root == "T" then return JokCombatBranch.execute(player, root) end'
+    arbitration = branch_update.index(
+        "JokCombatBranch.resolveNeutralTriangle("
     )
-    assert selector_gate < reaction_gate < strong_dispatch, (
-        "native Limit selector must keep priority; contextual Reaction must "
-        "then gate neutral Strong dispatch"
+    strong_arm = branch_update.index(
+        'if root == "T" then return JokCombatBranch.armNeutralTriangle() end'
+    )
+    assert selector_gate < arbitration < reaction_gate < strong_arm, (
+        "native Limit must keep priority; an already pending neutral Y must "
+        "resolve before the idle Reaction gate and a new Strong request"
+    )
+
+    resolver_start = SOURCE.index(
+        "function JokCombatBranch.resolveNeutralTriangle"
+    )
+    resolver_end = SOURCE.index(
+        "function JokCombatBranch.updateUltimateState", resolver_start
+    )
+    resolver = SOURCE[resolver_start:resolver_end]
+    reaction_check = resolver.index(
+        "local nativeReaction = ReadShort(ADDRESS.reactionCommandId)"
+    )
+    cross_cancel = resolver.index("if crossPressed then")
+    strong_dispatch = resolver.index(
+        'JokCombatBranch.execute(player, "T")'
+    )
+    assert reaction_check < cross_cancel < strong_dispatch, (
+        "native Reaction and the first physical A confirmation must both win "
+        "before delayed Strong dispatch"
     )
     assert "branchMagic" not in SOURCE
     assert "JokCombatMagic" not in SOURCE

@@ -116,9 +116,13 @@ native Limits without duplicate named moves. The full input map, airborne C4
 bridge, availability rules, and Combo Guide examples are maintained in
 `JokCombat_BranchCombo_Mapping.md`.
 
-Reaction Commands are inspected before opening a `Y` family. Save, Examine,
-Talk, and other native contextual commands therefore retain priority. Magic
-and Summons do not enter the branch state machine.
+Reaction Commands are inspected before opening a `Y` family. Neutral `Y` uses
+a two-released-frame arbitration: its physical edge reaches KH1 first, and
+Strong opens only if no Reaction, non-root Command Menu state, or following
+physical `A` claims the input. Once a JokCombat Action has entered, a transient
+Reaction value published by that complete native record cannot close its own
+family. Save, Examine, Talk, and their first confirmation therefore remain
+native. Magic and Summons do not enter the branch state machine.
 
 ## 7. Aerial family and ground-air cycle
 

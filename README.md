@@ -44,8 +44,10 @@ The documentation uses Xbox-style face-button labels:
 | Release `R2` | Save the Action Ability loadout automatically |
 | Release `L1 + R1 + L2 + R2` | Toggle the Command Menu overlay and Combo Guide |
 
-Magic and Reaction Commands keep priority over JokCombat inputs. In
-particular, native magic shortcuts such as `R1 + X` do not trigger Dodge Roll.
+Magic and Reaction Commands keep priority over JokCombat inputs. A neutral `Y`
+is left native through a two-frame release check before Strong opens, so Talk,
+Examine, Save, and the following `A` confirmation are not captured by the combo
+controller. Native magic shortcuts such as `R1 + X` do not trigger Dodge Roll.
 
 The complete ground, aerial, Ultimate, and Limit routes are documented in
 [the combo map](docs/JokCombat_BranchCombo_Mapping.md).

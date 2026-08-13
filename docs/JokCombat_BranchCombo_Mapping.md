@@ -20,10 +20,13 @@ Input abbreviati: `A` = Croce, `Y` = Triangolo
    inseguimento, C3 controllo area, C4 ciclo terra-aria-terra e C5 esecuzione.
    Hurricane Blast e Aerial Sweep restano nella famiglia aerea condivisa;
    Counterattack appartiene alla Guard riuscita.
-6. I Reaction Command hanno priorità su `Y`. Il Reaction ID viene controllato
-   nello stesso frame fisico, prima di aprire Strong: Salva, Esamina e Parla non
-   possono quindi armare per errore `Y -> Vortex`. Magie, menu, shortcut e costi
-   MP vanilla non vengono modificati. Summon è esclusa.
+6. I Reaction Command hanno priorità su `Y`. Da neutrale il bordo fisico resta
+   prima a KH1; Strong si apre soltanto dopo due frame a `Y` rilasciato senza un
+   Reaction ID, un menu non-root o una successiva `A` di conferma. Salva, Esamina
+   e Parla non possono quindi armare per errore `Y -> Vortex`, mentre un valore
+   Reaction transitorio pubblicato da una Action già accettata non chiude la
+   propria famiglia. Magie, menu, shortcut e costi MP vanilla non vengono
+   modificati. Summon è esclusa.
 
 ## 2. Mappa terrestre completa
 

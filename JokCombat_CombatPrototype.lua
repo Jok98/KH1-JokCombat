@@ -41,6 +41,11 @@ local CONFIG = {
     branchActionAbilities = true,
     branchLimits = true,
     branchInputTimeoutFrames = 150,
+    -- A neutral Y is shared with Talk/Examine/Save. Leave its physical edge
+    -- native, then wait two released frames before opening Strong so KH1 can
+    -- publish a contextual Reaction first. A following A always cancels this
+    -- short arbitration and remains available as a native confirmation.
+    neutralTriangleGraceFrames = 2,
     groundAirUltimate = true,
     groundAirUltimateTimeoutFrames = 600,
 
@@ -4988,6 +4993,8 @@ JokCombatBranch = {
     waitingFrames = 0,
     waitingSourceAnimation = nil,
     waitingSourceTime = 0.0,
+    neutralTrianglePending = false,
+    neutralTriangleFrames = 0,
     -- These three virtual paths keep the validated aerial order independent
     -- from the ground map: native CE -> Hurricane Blast -> Aerial Sweep.
     -- The two Action nodes still reference their single canonical catalog
@@ -5186,6 +5193,7 @@ function JokCombatBranch.reset(reason, quiet, skipCleanup, preserveUltimate)
     local branchWasActive = JokCombatBranch.active
         or JokCombatBranch.pendingPath ~= nil
         or JokCombatBranch.waitingPath ~= nil
+        or JokCombatBranch.neutralTrianglePending
     local ultimateWasActive = JokCombatBranch.ultimatePhase ~= nil
     if (branchWasActive or ultimateWasActive)
         and not skipCleanup and canRun then
@@ -5214,6 +5222,8 @@ function JokCombatBranch.reset(reason, quiet, skipCleanup, preserveUltimate)
     JokCombatBranch.waitingFrames = 0
     JokCombatBranch.waitingSourceAnimation = nil
     JokCombatBranch.waitingSourceTime = 0.0
+    JokCombatBranch.neutralTrianglePending = false
+    JokCombatBranch.neutralTriangleFrames = 0
     JokCombatBranch.airFamily = false
     if preserveUltimate ~= true then
         JokCombatBranch.clearUltimate(reason, true)
@@ -5489,6 +5499,71 @@ function JokCombatBranch.rootPath(player)
     local neutral = player.control == 0x03
         and not isAttackContext(player) and player.animation <= 0x07
     return neutral and "T" or nil
+end
+
+function JokCombatBranch.clearNeutralTriangle(reason)
+    local wasPending = JokCombatBranch.neutralTrianglePending
+    JokCombatBranch.neutralTrianglePending = false
+    JokCombatBranch.neutralTriangleFrames = 0
+    if wasPending and reason ~= nil then
+        log("[branch] neutral Y arbitration closed: " .. reason .. ".")
+    end
+    return wasPending
+end
+
+function JokCombatBranch.armNeutralTriangle()
+    JokCombatBranch.neutralTrianglePending = true
+    JokCombatBranch.neutralTriangleFrames =
+        CONFIG.neutralTriangleGraceFrames
+    log("[branch] neutral Y left native for contextual arbitration; "
+        .. "Strong will open after release if no Reaction claims it.")
+    return true
+end
+
+function JokCombatBranch.resolveNeutralTriangle(player, buttons,
+        crossPressed, trianglePressed)
+    if not JokCombatBranch.neutralTrianglePending then return false, false end
+
+    local nativeReaction = ReadShort(ADDRESS.reactionCommandId)
+    if nativeReaction ~= 0 then
+        JokCombatBranch.clearNeutralTriangle(string.format(
+            "delegated to native Reaction 0x%04X", nativeReaction))
+        return true, false
+    end
+    if not HUD.nativeRootSelectionAvailable() then
+        JokCombatBranch.clearNeutralTriangle(
+            "native Command Menu left its root")
+        return true, false
+    end
+    if JokCombatBranch.rootPath(player) ~= "T" then
+        JokCombatBranch.clearNeutralTriangle(
+            "player left the neutral gameplay state")
+        return true, false
+    end
+
+    -- Never retain a synthetic Strong request across the first confirmation
+    -- press after Talk/Examine/Save. Even if KH1 has not published its Reaction
+    -- field yet, physical A wins and reaches the game on this same frame.
+    if crossPressed then
+        JokCombatBranch.clearNeutralTriangle(
+            "physical A took priority")
+        return true, false
+    end
+    if trianglePressed then
+        JokCombatBranch.neutralTriangleFrames =
+            CONFIG.neutralTriangleGraceFrames
+        return true, false
+    end
+    if (buttons & BUTTON.TRIANGLE) ~= 0 then return true, false end
+
+    JokCombatBranch.neutralTriangleFrames =
+        JokCombatBranch.neutralTriangleFrames - 1
+    if JokCombatBranch.neutralTriangleFrames > 0 then return true, false end
+
+    JokCombatBranch.clearNeutralTriangle(nil)
+    log("[branch] neutral Y arbitration accepted: no native Reaction; "
+        .. "opening Strong.")
+    return true, JokCombatBranch.execute(player, "T")
 end
 
 function JokCombatBranch.updateUltimateState(player, crossPressed,
@@ -5809,7 +5884,8 @@ function JokCombatBranch.update(player, buttons, crossPressed,
     local modified = (buttons & (BUTTON.L1 | BUTTON.R1
         | BUTTON.L2 | BUTTON.R2)) ~= 0
     if modified then
-        if JokCombatBranch.active or JokCombatBranch.ultimatePhase ~= nil then
+        if JokCombatBranch.active or JokCombatBranch.neutralTrianglePending
+            or JokCombatBranch.ultimatePhase ~= nil then
             JokCombatBranch.reset("modifier shortcut took priority")
         end
         return false
@@ -5829,17 +5905,21 @@ function JokCombatBranch.update(player, buttons, crossPressed,
         end
         return false
     end
+    local arbitrationHandled, arbitrationConsumed =
+        JokCombatBranch.resolveNeutralTriangle(
+            player, buttons, crossPressed, trianglePressed)
+    if arbitrationHandled then return arbitrationConsumed end
+
     -- Native contextual commands (Save, Examine, Talk, etc.) own Triangle.
-    -- At a Save point the root Command Menu can still report slot 0 on the
-    -- physical Y frame, so menu state alone is one frame too late. Starting
-    -- Vortex there left its synthetic route waiting for D3 and suppressed the
-    -- first two confirmation presses. The live Reaction ID is the earlier,
-    -- authoritative gate already used by the native Limit armer.
+    -- Only a Reaction that exists while JokCombat owns no active node may gate
+    -- a new family. Some complete Action records publish a transient non-zero
+    -- value after entry; treating that as a world interaction closed Vortex
+    -- immediately and left its controls suppressed. Neutral Y uses the short
+    -- arbitration above to catch Talk/Examine/Save before Strong is dispatched.
     local nativeReaction = ReadShort(ADDRESS.reactionCommandId)
-    if nativeReaction ~= 0 then
-        if JokCombatBranch.active or JokCombatBranch.ultimatePhase ~= nil then
-            JokCombatBranch.reset("native Reaction Command took priority")
-        end
+    local branchOwnsInput = JokCombatBranch.active
+        or JokCombatBranch.ultimatePhase ~= nil
+    if nativeReaction ~= 0 and not branchOwnsInput then
         if trianglePressed then
             log(string.format(
                 "[branch] Y delegated to native Reaction 0x%04X; "
@@ -5847,10 +5927,7 @@ function JokCombatBranch.update(player, buttons, crossPressed,
         end
         return false
     end
-    if not HUD.nativeRootSelectionAvailable() then
-        if JokCombatBranch.active or JokCombatBranch.ultimatePhase ~= nil then
-            JokCombatBranch.reset("native command took priority")
-        end
+    if not HUD.nativeRootSelectionAvailable() and not branchOwnsInput then
         return false
     end
 
@@ -5960,7 +6037,7 @@ function JokCombatBranch.update(player, buttons, crossPressed,
     end
     JokCombatBranch.airFamily = player.airborne
         and root == JokCombatBranch.airFinisherPath
-    if root == "T" then return JokCombatBranch.execute(player, root) end
+    if root == "T" then return JokCombatBranch.armNeutralTriangle() end
     local consumed = JokCombatBranch.queue(player, root)
     if not JokCombatBranch.active then JokCombatBranch.airFamily = false end
     return consumed
@@ -6424,8 +6501,10 @@ function _OnInit()
         .. "C4=ground-air Ultimate, C5=execution.")
     log("Combo Guide ready: C4 shows B Aerial Chase and its landing close; "
         .. "A otherwise stays a native physical continuation.")
-    log("fourth loadout row follows the native Summon unlock; early saves "
-        .. "show and edit the three rows KH1 currently renders.")
+    log("neutral Y arbitration ready: two released frames before Strong; "
+        .. "Reaction Commands and the first physical A keep native priority.")
+    log("fourth loadout row ready: locked Summon borrows a reversible visual "
+        .. "carrier; only a native 0xFF slot remains three-row.")
     log("native Ripple Drive/Stun Impact/Gravity Break/Zantetsuken "
         .. "selectors ready.")
     log("Action Ability context ready: Hurricane Blast is callable on ground "
