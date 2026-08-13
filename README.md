@@ -113,6 +113,7 @@ borrowing, and drop-rate patch are runtime-only.
 
 - [Technical design and implementation decisions](docs/TECHNICAL_DESIGN.md)
 - [Current combo map](docs/JokCombat_BranchCombo_Mapping.md)
+- [Roadmap](docs/ROADMAP.md)
 - [Archived development history](docs/DEVELOPMENT_HISTORY.md)
 - [Critical Mix reference analysis](docs/CMix_AnimCancel_AbilityHandler_analysis.md)
 

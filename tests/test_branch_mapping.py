@@ -394,7 +394,7 @@ def assert_air_attack_descent_brake() -> None:
         assert guard in SOURCE, f"missing air-attack descent guard: {guard}"
 
     start = SOURCE.index("JokCombatAirAttackBrake = {")
-    end = SOURCE.index("local function actionKind", start)
+    end = SOURCE.index("JokCombatAttackSpeed = {", start)
     controller = SOURCE[start:end]
     assert controller.count("WriteFloat(") == 1
     assert "animation == 0xD1" not in controller
