@@ -29,7 +29,7 @@ combo-magic adapter proved unable to reproduce KH1's complete cast path.
 | File | Release role |
 |---|---|
 | `JokCombat_CombatPrototype.lua` | Main v1.0.0 combat, input, HUD, movement, Action, and Limit controller. The historical filename is retained to avoid breaking existing installations. |
-| `JokCombat_NativeAbilities.lua` | Persistent native grant of High Jump, four Combo Plus, two Air Combo Plus, Combo Master, and 99 maximum AP. |
+| `JokCombat_NativeAbilities.lua` | Persistent native grant of Shared High Jump, four Combo Plus, two Air Combo Plus, Combo Master, and 99 maximum AP. |
 | `JokCombat_DropRate.lua` | Runtime-only 2.0x item and prize drop patch. |
 
 `JokCombat_StateProbe.lua`, `JokCombat_InputProbe.lua`, and
@@ -81,7 +81,7 @@ finisher. The release instead leaves every normal `A` press to KH1.
 
 The native ability module equips the exact intended maxima:
 
-- High Jump x1;
+- Shared High Jump x1;
 - Combo Plus x4;
 - Air Combo Plus x2;
 - Combo Master x1.
@@ -108,12 +108,12 @@ returns to native physical continuation.
 | Strong | `Y` | Burst | Vortex -> Gravity Break -> Ragnarok |
 | C2 | `A Y` | Pursuit | Sliding Dash -> Sonic Blade |
 | C3 | `A A Y` | Crowd control | Stun Impact -> Ripple Drive -> Trinity Limit |
-| C4 | `A A A Y` | Ground-air-ground Ultimate | Slapshot -> real jump -> aerial branch -> Blitz -> Strike Raid |
+| C4 | `A A A Y` | Combo pressure | Slapshot -> Blitz -> Strike Raid |
 | C5 | `A A A A Y` | Execution | Zantetsuken -> Ars Arcanum |
 
 The five families contain eight unique ground Action Abilities and all five
-native Limits without duplicate named moves. The full input map, airborne C4
-bridge, availability rules, and Combo Guide examples are maintained in
+native Limits without duplicate named moves. The full input map, independent
+aerial family, availability rules, and Combo Guide examples are maintained in
 `JokCombat_BranchCombo_Mapping.md`.
 
 Reaction Commands are inspected before opening a `Y` family. Neutral `Y` uses
@@ -124,7 +124,7 @@ Reaction value published by that complete native record cannot close its own
 family. Save, Examine, Talk, and their first confirmation therefore remain
 native. Magic and Summons do not enter the branch state machine.
 
-## 7. Aerial family and ground-air cycle
+## 7. Independent aerial family
 
 After any intermediate normal aerial `A`, the aerial `Y` family is:
 
@@ -136,11 +136,10 @@ Only actions that KH1 can execute correctly while airborne are used. The
 retired fake-ground implementation could show an animation but could not
 reliably preserve VFX, hitboxes, damage, stick control, or altitude.
 
-C4 connects both combat planes. Slapshot opens a short buffered `B` window,
-then KH1 performs a real jump. The normal aerial family remains available,
-Aerial Sweep returns Sora toward the ground, and a natural landing opens Blitz
-followed by Strike Raid. No airborne flag or fake altitude is written to force
-the transition.
+The aerial family is independent from every ground family. A normal jump closes
+the current ground branch, while the second jump deliberately resets the air
+string so it can begin again. No airborne flag or fake altitude is written to
+force a ground-to-air transition.
 
 ## 8. Native Action Ability dispatch
 
@@ -214,8 +213,10 @@ event. A whiffed Guard never exposes Counterattack.
 
 ## 12. Jump and descent model
 
-High Jump is a persistent native ability. Kinetic Step is a runtime-only
-second jump with one charge per airtime:
+High Jump is a persistent native Shared ability. Kinetic Step is a separate
+runtime-only second jump with one charge per airtime. The detector accepts both
+the base Jump entry (`0x04`) and High Jump entry (`0x09`) as the real first
+jump:
 
 1. a native first jump arms the charge;
 2. after the first `B` is released, a new airborne `B` may cancel an ordinary
@@ -227,7 +228,8 @@ second jump with one charge per airtime:
 The controller never creates a third jump and resets on player changes,
 special aerial states, Limits, faults, and reloads.
 
-Descent is tuned through downward transform deltas only:
+Descent is tuned through downward transform deltas only. Base Jump falls in
+`0x06`, while Shared High Jump falls in `0x0B`; both feed the same controller:
 
 - vanilla free fall after either jump retains 45% of its downward delta;
 - ordinary aerial attacks `CC`, `CD`, and `CE` retain 25%;
@@ -243,14 +245,16 @@ factor from being multiplied twice after Kinetic Step.
 | Change | Persistence |
 |---|---|
 | 99 maximum AP | Saved by KH1 after a normal save |
-| High Jump and exact 4/2/1 combo passive counts | Saved by KH1 after a normal save |
+| Shared High Jump and exact 4/2/1 combo passive counts | Saved by KH1 after a normal save |
 | R2 Action Ability assignments | Local `JokCombat_ActionLoadout.cfg` |
 | Branch state, Action routes, Limit selectors, second jump, descent tuning | Process only |
 | 2.0x item/prize drop multipliers | Process only |
 
-The native ability writer preserves the contiguous 48-byte KH1 ability list,
-equips an existing disabled copy in place, inserts only missing copies, and
-removes later vanilla surplus beyond the configured maxima. Because those
+The native ability writer treats KH1's two stores separately. It preserves the
+four-byte Shared movement list for High Jump and the contiguous 48-byte Sora
+ability list for combo passives. It inserts only missing entries, equips
+disabled personal copies in place, and removes later vanilla surplus beyond
+the configured maxima without discarding unrelated entries. Because those
 changes can persist, the installation instructions require a save backup.
 
 ## 14. Drop-rate policy
@@ -298,8 +302,8 @@ python tests/test_drop_rate.py
 ```
 
 The v1.0.0 gameplay baseline has also been tested live for native ground and
-aerial strings, all five branch families, all five Limits, the C4 Ultimate,
-R2 Actions, Guard/Dodge/Counterattack, Kinetic Step, both descent profiles, and
+aerial strings, all five branch families, all five Limits, the independent
+aerial family, R2 Actions, Guard/Dodge/Counterattack, Kinetic Step, both descent profiles, and
 the fixed drop multiplier.
 
 ## 18. Attribution

@@ -14,8 +14,8 @@ an extended ground-to-air cycle, universal defense, and faster progression.
   the same ground or aerial state.
 - Five role-based `Y` branches containing eight Action Abilities and all five
   native Limits, with no duplicated special move.
-- A dedicated ground-to-air-to-ground Ultimate route and a three-step aerial
-  branch available after any normal aerial hit.
+- Five direct ground families and a separate three-step aerial branch
+  available after any normal aerial hit.
 - One configurable `R2` Action Ability group, shown and edited through KH1's
   own Command Menu.
 - Universal Guard on `L2 + B`, Dodge Roll on `X`, and Counterattack after a
@@ -49,7 +49,7 @@ is left native through a two-frame release check before Strong opens, so Talk,
 Examine, Save, and the following `A` confirmation are not captured by the combo
 controller. Native magic shortcuts such as `R1 + X` do not trigger Dodge Roll.
 
-The complete ground, aerial, Ultimate, and Limit routes are documented in
+The complete ground, aerial, and Limit routes are documented in
 [the combo map](docs/JokCombat_BranchCombo_Mapping.md).
 
 ## Requirements
@@ -95,11 +95,12 @@ and are not required for normal play.
 
 ## Save-file changes
 
-`JokCombat_NativeAbilities.lua` grants and equips High Jump, four Combo Plus,
-two Air Combo Plus, and Combo Master, and sets Sora's maximum AP to `99`.
-These changes become part of the save after KH1 saves normally. The combat
-controller, Action Ability loadout, second jump, descent tuning, Limit cost
-borrowing, and drop-rate patch are runtime-only.
+`JokCombat_NativeAbilities.lua` grants native High Jump through KH1's Shared
+ability list, equips four Combo Plus, two Air Combo Plus, and Combo Master in
+Sora's ability list, and sets Sora's maximum AP to `99`. These changes become
+part of the save after KH1 saves normally. The combat controller, Action
+Ability loadout, Kinetic Step second jump, descent tuning, Limit cost borrowing,
+and drop-rate patch are runtime-only.
 
 ## Compatibility and known limits
 

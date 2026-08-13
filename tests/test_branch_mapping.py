@@ -29,7 +29,7 @@ EXPECTED = {
     "XXT": ("action", "stun_impact"),
     "XXTT": ("action", "ripple_drive"),
     "XXTTT": ("limit", "trinity_limit"),
-    # C4 / ground-air-ground Ultimate.
+    # C4 / combo pressure.
     "XXXT": ("action", "slapshot"),
     "XXXTT": ("action", "blitz"),
     "XXXTTT": ("limit", "strike_raid"),
@@ -119,9 +119,7 @@ def assert_map(nodes: dict[str, dict[str, str]]) -> None:
         )
         for path in family
     }
-    assert "triangle" not in nodes["XXXT"], (
-        "Slapshot must enter C4 through the real B jump, not a ground Y"
-    )
+    assert nodes["XXXT"]["triangle"] == "XXXTT"
     assert nodes["XXXTT"]["triangle"] == "XXXTTT"
 
 
@@ -168,21 +166,6 @@ def assert_aerial_is_independent() -> None:
         "return JokCombatBranch.airFinisherPath",
         "native CE -> Hurricane Blast -> Aerial Sweep",
         "Aerial Finisher physical continuation ignored before",
-        'ultimateLauncherPath = "XXXT"',
-        'ultimateReturnPath = "XXXTT"',
-        'ultimateLimitPath = "XXXTTT"',
-        'ultimatePhase = "launch_buffered"',
-        'ultimatePhase = "jumping"',
-        'ultimatePhase = "air_ready"',
-        'ultimatePhase = "air_chain"',
-        'ultimatePhase = "returning"',
-        'ultimatePhase = "ground_ready"',
-        'ultimatePhase = "closing"',
-        "function JokCombatBranch.beginUltimate",
-        "function JokCombatBranch.updateUltimateState",
-        '"[B] Aerial Chase"',
-        '"[Y] Blitz after landing"',
-        "natural landing confirmed",
         "player.airborne",
     )
     for guard in guards:
@@ -274,6 +257,8 @@ def assert_native_second_jump() -> None:
         "function JokCombatAirJump.entryMatchesOwnedRoute",
         "function JokCombatAirJump.initialize",
         "function JokCombatAirJump.restoreRoutes",
+        "function JokCombatAirJump.isNativeFirstJumpEntry",
+        "return animation == 0x04 or animation == 0x09",
         "function JokCombatAirJump.noteGroundJump",
         "function JokCombatAirJump.boost",
         "function JokCombatAirJump.brakeFall",
@@ -286,10 +271,10 @@ def assert_native_second_jump() -> None:
         "WriteFloat(player.pointer + PLAYER.verticalPosition,",
         "boostedPosition, true)",
         "rawDelta * CONFIG.airFallBrakeFactor",
-        "if player.animation ~= 0x06 or rawDelta <= 0.0 then",
+        "player.animation ~= 0x06 and player.animation ~= 0x0B",
         "JokCombatAirJump.brakeFall(player)",
         "free-fall brake: factor=%.2f",
-        "native free-fall brake ready: first/second Fall 0x06",
+        "native free-fall brake ready: base Fall 0x06 / High Jump Fall",
         "if player.animation == 0x0F then",
         "and JokCombatAirJump.ownsCircle(buttons) then",
         "if not triggerAttackCommand() then",
@@ -303,6 +288,7 @@ def assert_native_second_jump() -> None:
         "air route 0x0F + Attack pulse armed",
         "releaseRequired = false",
         "first-jump B released; second-jump input unlocked",
+        "first native jump confirmed via 0x%02X; ",
         "release the first-jump input",
         "not nativeShortcutHeld",
     )
@@ -333,6 +319,7 @@ def assert_native_second_jump() -> None:
     first_jump_source = adapter[first_jump_start:first_jump_end]
     assert "JokCombatAirJump.fallBrakeArmed = true" in first_jump_source
     assert "JokCombatAirJump.fallBrakeSamples = 0" in first_jump_source
+    assert "local circleEdge" not in first_jump_source
 
     # Model the transient route set: all eight canonical air entries must be
     # covered, with 0x09 reserved exclusively for FlyingCombo1 and 0x0F used
@@ -362,15 +349,26 @@ def assert_native_second_jump() -> None:
     assert list(simulated_heads.values()).count(0x09) == 1
 
     native_guards = (
-        'VERSION = "v0.4.0"',
-        '{ name = "High Jump", base = 0x01, equipped = 0x01,',
-        "unequipped = 0x81, targetCopies = 1",
-        "High Jump + exact native counts 4/2/1",
+        'VERSION = "v0.5.0"',
+        "SHARED_ABILITY_SLOT_COUNT = 4",
+        "sharedAbilitySlots = 0x2DE98F9",
+        "local SHARED_HIGH_JUMP = {",
+        "local function reconcileSharedHighJump",
+        "local function removeLegacySoraHighJump",
+        "Shared High Jump + exact native counts 4/2/1",
     )
     for guard in native_guards:
         assert guard in NATIVE_SOURCE, (
-            f"missing native High Jump grant guard: {guard}"
+            f"missing Shared High Jump grant guard: {guard}"
         )
+
+    passives_start = NATIVE_SOURCE.index("local PASSIVES = {")
+    passives_end = NATIVE_SOURCE.index(
+        "local SHARED_HIGH_JUMP", passives_start
+    )
+    assert "High Jump" not in NATIVE_SOURCE[passives_start:passives_end], (
+        "High Jump must not return to Sora's personal ability list"
+    )
 
 
 def assert_air_attack_descent_brake() -> None:
@@ -438,12 +436,11 @@ def assert_integration() -> None:
         'if path == "T" then return nil end',
         'return HUD.showOverlay("guide", guideEntries, "Combo Guide")',
         "legacy combo-magic recovery ready; no combo path can cast magic.",
-        "groundAirUltimate = true",
-        "groundAirUltimateTimeoutFrames = 600",
         "Strong=burst, C2=pursuit, C3=crowd control",
-        "ground-air Ultimate ready: AAAY Slapshot -> B real jump",
-        "ultimate-aerial-chase",
-        "natural landing -> Y Blitz",
+        "C4=combo pressure, C5=execution",
+        "standard C4",
+        "Slapshot/Blitz/Strike Raid",
+        "C4 shows Slapshot -> Blitz -> Strike Raid",
     )
     for guard in guards:
         assert guard in SOURCE, f"missing integration guard: {guard}"
@@ -470,7 +467,7 @@ def assert_integration() -> None:
         "function JokCombatBranch.resolveNeutralTriangle"
     )
     resolver_end = SOURCE.index(
-        "function JokCombatBranch.updateUltimateState", resolver_start
+        "function JokCombatBranch.nodeName", resolver_start
     )
     resolver = SOURCE[resolver_start:resolver_end]
     reaction_check = resolver.index(
@@ -488,12 +485,15 @@ def assert_integration() -> None:
     assert "JokCombatMagic" not in SOURCE
     assert '"[A] Continua vanilla"' not in SOURCE
     assert "leftStickInput" not in SOURCE
-
-    ultimate_start = SOURCE.index("function JokCombatBranch.beginUltimate")
-    ultimate_end = SOURCE.index("function JokCombatBranch.nodeName", ultimate_start)
-    ultimate_source = SOURCE[ultimate_start:ultimate_end]
-    assert "WriteFloat" not in ultimate_source
-    assert "WriteInt(player.pointer + PLAYER.airborneState" not in ultimate_source
+    for retired in (
+        "groundAirUltimate",
+        "ultimatePhase",
+        "beginUltimate",
+        "updateUltimateState",
+        "Aerial Chase",
+        "ultimate-aerial-chase",
+    ):
+        assert retired not in SOURCE, f"retired C4 state remains: {retired}"
 
     slot_start = SOURCE.index("local ACTION_SLOTS = {")
     slot_end = SOURCE.index("local ACTION_SLOT_BY_ID = {}", slot_start)
@@ -513,7 +513,7 @@ def main() -> None:
     assert_integration()
     print(
         "PASS: 13-node ground map; 8 ground Actions + 5 native Limits; "
-        "C4 ground-air-ground Ultimate; native aerial descent brake; "
+        "standard C4 Slapshot/Blitz/Strike Raid; native aerial descent brake; "
         "Counterattack gated by successful Guard"
     )
 

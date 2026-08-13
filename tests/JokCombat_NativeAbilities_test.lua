@@ -41,6 +41,7 @@ local PLAYER_POINTER_ADDRESS = 0x2537E48
 local PLAYER_POINTER = 0x100000
 local SORA_MAX_AP = 0x2DE9369
 local ABILITY_BASE = 0x2DE93A4
+local SHARED_ABILITY_BASE = 0x2DE98F9
 local GROUND_MAX = 0x2D5CCE4
 local AIR_MAX = 0x2D5CCE5
 
@@ -53,11 +54,12 @@ memory[GROUND_MAX] = 7
 memory[AIR_MAX] = 5
 
 -- Representative contiguous early-game list. The three existing combo
--- passives deliberately start disabled to exercise the 0x80 migration too;
--- High Jump is absent so the native grant path must append it.
+-- passives deliberately start disabled to exercise the 0x80 migration. The
+-- trailing High Jump is the misplaced legacy v0.4.0 copy that must migrate to
+-- the separate four-byte Shared list.
 local initialAbilities = {
     0xC0, 0xB9, 0x05, 0x96, 0xB8, 0x0A, 0x8B,
-    0x86, 0x87, 0xC1,
+    0x86, 0x87, 0xC1, 0x01,
 }
 for index, value in ipairs(initialAbilities) do
     memory[ABILITY_BASE + index - 1] = value
@@ -85,6 +87,27 @@ local function assertExactActive(baseId, expectedCount, name)
     end
 end
 
+local function collectShared(baseId)
+    local slots = {}
+    for index = 0, 3 do
+        local value = ReadByte(SHARED_ABILITY_BASE + index)
+        if value ~= 0 and (value & 0x7F) == baseId then
+            table.insert(slots, { index = index, value = value })
+        end
+    end
+    return slots
+end
+
+local function assertSharedHighJump()
+    local slots = collectShared(0x01)
+    assert(#slots == 1, string.format(
+        "Shared High Jump count: expected 1, got %d", #slots))
+    assert(slots[1].value == 0x01, string.format(
+        "Shared High Jump is non-canonical: 0x%02X", slots[1].value))
+    assert(#collect(0x01) == 0,
+        "legacy High Jump remained in Sora's Character list")
+end
+
 dofile("JokCombat_NativeAbilities.lua")
 local function findUpvalue(fn, targetName)
     for index = 1, 64 do
@@ -106,25 +129,36 @@ for _, message in ipairs(logs) do
 end
 
 assert(ReadByte(SORA_MAX_AP) == 99, "Sora AP max was not raised to 99")
-assertExactActive(0x01, 1, "High Jump")
+assertSharedHighJump()
 assertExactActive(0x06, 4, "Combo Plus")
 assertExactActive(0x07, 2, "Air Combo Plus")
 assertExactActive(0x41, 1, "Combo Master")
-assert(ReadByte(ABILITY_BASE + 15) == 0,
-    "ability list did not terminate after High Jump and the granted passives")
+assert(ReadByte(ABILITY_BASE + 14) == 0,
+    "Sora ability list did not terminate after the granted combo passives")
 
 -- Simulate a later vanilla reward appending a fifth Combo Plus immediately
 -- before another learned ability. Reconciliation must remove only the surplus
 -- copy, shift the following entry left and preserve a contiguous terminator.
-memory[ABILITY_BASE + 15] = 0x06
-memory[ABILITY_BASE + 16] = 0x3E
+memory[ABILITY_BASE + 14] = 0x06
+memory[ABILITY_BASE + 15] = 0x3E
 assert(ensureNativePassives(), "surplus reconciliation failed")
 
 assertExactActive(0x06, 4, "Combo Plus after surplus reward")
-assert(ReadByte(ABILITY_BASE + 15) == 0x3E,
+assert(ReadByte(ABILITY_BASE + 14) == 0x3E,
     "ability-list compaction did not preserve the following entry")
-assert(ReadByte(ABILITY_BASE + 16) == 0,
+assert(ReadByte(ABILITY_BASE + 15) == 0,
     "ability-list compaction did not restore the terminator")
+
+-- Simulate a duplicate vanilla Shared reward before Glide. Reconciliation
+-- removes only the newest High Jump and preserves the following movement item.
+memory[SHARED_ABILITY_BASE + 1] = 0x01
+memory[SHARED_ABILITY_BASE + 2] = 0x03
+assert(ensureNativePassives(), "Shared surplus reconciliation failed")
+assertSharedHighJump()
+assert(ReadByte(SHARED_ABILITY_BASE + 1) == 0x03,
+    "Shared compaction did not preserve Glide")
+assert(ReadByte(SHARED_ABILITY_BASE + 2) == 0,
+    "Shared compaction did not restore its terminator")
 
 -- Simulate the ability menu disabling an existing Air Combo Plus.
 local airSlots = collect(0x07)
@@ -133,5 +167,5 @@ assert(ensureNativePassives(), "Air Combo Plus re-equip failed")
 assertExactActive(0x07, 2, "Air Combo Plus after menu disable")
 
 print(string.format(
-    "PASS: High Jump + exact native counts 4/2/1, surplus compaction and re-equip (%d logs)",
+    "PASS: Shared High Jump migration + exact native counts 4/2/1, surplus compaction and re-equip (%d logs)",
     #logs))
