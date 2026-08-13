@@ -54,28 +54,46 @@ New-Item -ItemType Directory -Path $outputPath -Force | Out-Null
 $bundleName = "KH1-JokCombat-$Version"
 $archivePath = Join-Path $outputPath ($bundleName + ".zip")
 $checksumPath = $archivePath + ".sha256"
-$stagingRoot = Join-Path ([System.IO.Path]::GetTempPath()) (
-    "JokCombat-release-" + [guid]::NewGuid().ToString("N"))
-$bundlePath = Join-Path $stagingRoot $bundleName
 
+if (Test-Path -LiteralPath $archivePath) {
+    Remove-Item -LiteralPath $archivePath -Force
+}
+
+Add-Type -AssemblyName System.IO.Compression
+$fixedTimestamp = [System.DateTimeOffset]::new(
+    2026, 8, 13, 0, 0, 0, [System.TimeSpan]::Zero)
+$archiveStream = [System.IO.File]::Open(
+    $archivePath,
+    [System.IO.FileMode]::CreateNew,
+    [System.IO.FileAccess]::Write,
+    [System.IO.FileShare]::None)
 try {
-    New-Item -ItemType Directory -Path $bundlePath -Force | Out-Null
-    foreach ($relativePath in $releaseFiles) {
-        Copy-Item -LiteralPath (Join-Path $repoRoot $relativePath) `
-            -Destination (Join-Path $bundlePath $relativePath)
-    }
-    Compress-Archive -LiteralPath $bundlePath -DestinationPath $archivePath `
-        -CompressionLevel Optimal -Force
-} finally {
-    if (Test-Path -LiteralPath $stagingRoot) {
-        $resolvedStage = [System.IO.Path]::GetFullPath($stagingRoot)
-        $tempPrefix = [System.IO.Path]::GetFullPath(
-            [System.IO.Path]::GetTempPath())
-        if ($resolvedStage.StartsWith(
-                $tempPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
-            Remove-Item -LiteralPath $resolvedStage -Recurse -Force
+    $archive = [System.IO.Compression.ZipArchive]::new(
+        $archiveStream,
+        [System.IO.Compression.ZipArchiveMode]::Create,
+        $false)
+    try {
+        foreach ($relativePath in $releaseFiles) {
+            $entryName = ($bundleName + "/" + $relativePath).Replace('\', '/')
+            $entry = $archive.CreateEntry(
+                $entryName,
+                [System.IO.Compression.CompressionLevel]::Optimal)
+            $entry.LastWriteTime = $fixedTimestamp
+            $sourceStream = [System.IO.File]::OpenRead(
+                (Join-Path $repoRoot $relativePath))
+            $entryStream = $entry.Open()
+            try {
+                $sourceStream.CopyTo($entryStream)
+            } finally {
+                $entryStream.Dispose()
+                $sourceStream.Dispose()
+            }
         }
+    } finally {
+        $archive.Dispose()
     }
+} finally {
+    $archiveStream.Dispose()
 }
 
 $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $archivePath).Hash.ToLowerInvariant()

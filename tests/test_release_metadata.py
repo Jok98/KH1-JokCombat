@@ -46,6 +46,9 @@ def test_release_manifest_is_minimal_and_complete() -> None:
 
     assert '    "v2.0.0"' not in build_script
     assert '[string]$Version = "v2.0.0"' in build_script
+    assert "System.IO.Compression.ZipArchive]::new" in build_script
+    assert "$entry.LastWriteTime = $fixedTimestamp" in build_script
+    assert "Compress-Archive" not in build_script
     assert "dist/" in read(".gitignore")
 
 
