@@ -1,8 +1,8 @@
 # JokCombat Development History
 
-> Archived pre-1.0 development log. This document preserves the experiments,
+> Archived development log. This document preserves the experiments,
 > live test results, rejected approaches, and migration notes that led to the
-> stable v1.0.0 design. For current installation and usage, see the repository
+> stable v2.0.0 design. For current installation and usage, see the repository
 > README. For the release architecture, see `TECHNICAL_DESIGN.md`.
 
 Mod combat-oriented sperimentale per **KINGDOM HEARTS FINAL MIX PC**. Il
