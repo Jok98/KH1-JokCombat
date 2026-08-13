@@ -20,16 +20,20 @@ JokCombat is designed around four principles:
 4. Fail closed on an unsupported executable or an unexpected memory layout.
 
 The project does not modify story progression, scripted rewards, chests,
-synthesis, inventory, world flags, bosses, or Summons. Magic remains native
-and is deliberately excluded from the combo dispatcher after the attempted
-combo-magic adapter proved unable to reproduce KH1's complete cast path.
+synthesis state, world flags, bosses, or Summons. Its only inventory mutation
+is the explicit native grant of one copy of each genuine Sora Keyblade except
+Ultima Weapon, plus Save the Queen for Donald and Save the King for Goofy.
+Magic remains native and is deliberately excluded from the combo dispatcher
+after the attempted combo-magic adapter proved unable to reproduce KH1's
+complete cast path.
 
 ## 2. Release modules
 
 | File | Release role |
 |---|---|
 | `JokCombat_CombatPrototype.lua` | Main v1.0.0 combat, input, HUD, movement, Action, and Limit controller. The historical filename is retained to avoid breaking existing installations. |
-| `JokCombat_NativeAbilities.lua` | Persistent native grant of High Jump, four Combo Plus, two Air Combo Plus, Combo Master, and 99 maximum AP. |
+| `JokCombat_NativeAbilities.lua` | Persistent native grant of Shared High Jump, Glide, Superglide, four Combo Plus, two Air Combo Plus, Combo Master, and 99 maximum AP. |
+| `JokCombat_NativeKeyblades.lua` | Persistent native grant of the 17 genuine Sora Keyblades other than Ultima Weapon, plus Save the Queen and Save the King, with unique-count reconciliation. |
 | `JokCombat_DropRate.lua` | Runtime-only 2.0x item and prize drop patch. |
 
 `JokCombat_StateProbe.lua`, `JokCombat_InputProbe.lua`, and
@@ -65,8 +69,9 @@ The central architectural choice is to give each action to one owner:
   the selected complete native Action record.
 - KH1 owns native magic, Reaction Commands, menu confirmation, and every
   internal follow-up after a Limit has begun.
-- JokCombat owns universal Guard/Dodge admission, the successful-Guard
-  Counterattack window, the R2 Action loadout, and the Kinetic Step request.
+- JokCombat owns universal Guard, ground-only Dodge admission, the
+  successful-Guard Counterattack window, the R2 Action loadout, and the
+  Kinetic Step request. KH1 owns native airborne Square/Superglide.
 - KH1 still executes the resulting Guard, Dodge, Counterattack, Action,
   jump, and Limit through native records or dispatchers.
 
@@ -81,7 +86,9 @@ finisher. The release instead leaves every normal `A` press to KH1.
 
 The native ability module equips the exact intended maxima:
 
-- High Jump x1;
+- Shared High Jump x1;
+- Shared Glide x1;
+- Shared Superglide x1;
 - Combo Plus x4;
 - Air Combo Plus x2;
 - Combo Master x1.
@@ -108,19 +115,23 @@ returns to native physical continuation.
 | Strong | `Y` | Burst | Vortex -> Gravity Break -> Ragnarok |
 | C2 | `A Y` | Pursuit | Sliding Dash -> Sonic Blade |
 | C3 | `A A Y` | Crowd control | Stun Impact -> Ripple Drive -> Trinity Limit |
-| C4 | `A A A Y` | Ground-air-ground Ultimate | Slapshot -> real jump -> aerial branch -> Blitz -> Strike Raid |
+| C4 | `A A A Y` | Combo pressure | Slapshot -> Blitz -> Strike Raid |
 | C5 | `A A A A Y` | Execution | Zantetsuken -> Ars Arcanum |
 
 The five families contain eight unique ground Action Abilities and all five
-native Limits without duplicate named moves. The full input map, airborne C4
-bridge, availability rules, and Combo Guide examples are maintained in
+native Limits without duplicate named moves. The full input map, independent
+aerial family, availability rules, and Combo Guide examples are maintained in
 `JokCombat_BranchCombo_Mapping.md`.
 
-Reaction Commands are inspected before opening a `Y` family. Save, Examine,
-Talk, and other native contextual commands therefore retain priority. Magic
-and Summons do not enter the branch state machine.
+Reaction Commands are inspected before opening a `Y` family. Neutral `Y` uses
+a two-released-frame arbitration: its physical edge reaches KH1 first, and
+Strong opens only if no Reaction, non-root Command Menu state, or following
+physical `A` claims the input. Once a JokCombat Action has entered, a transient
+Reaction value published by that complete native record cannot close its own
+family. Save, Examine, Talk, and their first confirmation therefore remain
+native. Magic and Summons do not enter the branch state machine.
 
-## 7. Aerial family and ground-air cycle
+## 7. Independent aerial family
 
 After any intermediate normal aerial `A`, the aerial `Y` family is:
 
@@ -132,11 +143,10 @@ Only actions that KH1 can execute correctly while airborne are used. The
 retired fake-ground implementation could show an animation but could not
 reliably preserve VFX, hitboxes, damage, stick control, or altitude.
 
-C4 connects both combat planes. Slapshot opens a short buffered `B` window,
-then KH1 performs a real jump. The normal aerial family remains available,
-Aerial Sweep returns Sora toward the ground, and a natural landing opens Blitz
-followed by Strike Raid. No airborne flag or fake altitude is written to force
-the transition.
+The aerial family is independent from every ground family. A normal jump closes
+the current ground branch, while the second jump deliberately resets the air
+string so it can begin again. No airborne flag or fake altitude is written to
+force a ground-to-air transition.
 
 ## 8. Native Action Ability dispatch
 
@@ -154,8 +164,13 @@ into airborne actions.
 ## 9. Native Limit dispatch and MP policy
 
 The Action immediately before a Limit pre-arms one validated native Reaction
-Command. The final physical `Y` is then consumed by KH1's own Limit dispatcher,
-which owns targeting, movement, animation, VFX, damage, and follow-up inputs.
+Command. If the final physical `Y` arrives while that Action is still
+recovering, JokCombat records that one real edge and holds Steam Global's
+native Auto-Reaction level until KH1 can legally accept it. The level is
+journaled before ownership, bounded by the selector timeout, and cleared before
+Limit follow-ups begin. It does not manufacture a second raw-button press, so
+one final `Y` is sufficient while KH1's own Limit dispatcher still owns
+targeting, movement, animation, VFX, damage, and follow-up inputs.
 
 Sonic Blade, Ars Arcanum, Strike Raid, and Ragnarok temporarily borrow a zero
 cost only for the selected combo route and active native Limit. Their original
@@ -184,9 +199,12 @@ Holding `R2` opens the only configurable Action group:
 - releasing `R2` saves the configuration once to
   `JokCombat_ActionLoadout.cfg` beside the script.
 
-Guard remains fixed and cannot be replaced. The fourth visual row depends on
-KH1 naturally unlocking the Summon row; its bound R2 action remains executable
-before the row becomes visible.
+Guard remains fixed and cannot be replaced. If the four-row root exposes
+locked Summon as command `0x00` (or unlocked Summon as `0x36`), JokCombat
+temporarily substitutes command `0x06` only as a visual carrier for the fourth
+R2 Action label. The original command byte is stored in the signed recovery
+journal and restored conditionally when the overlay closes or after F1 reload.
+An actual `0xFF` fourth slot remains a three-row surface.
 
 During a combo, the same Command Menu surface becomes a read-only Combo Guide
 that lists only the valid future `Y` actions. The native `A` continuation is
@@ -196,9 +214,11 @@ and Guide persistently.
 ## 11. Defense and contextual Counterattack
 
 Universal Guard is fixed to `L2 + B` and may cancel other ordinary actions.
-Dodge Roll is fixed to `X`, may cancel ordinary actions, and cannot cancel
-itself. Native magic shortcut modifiers take priority, so `R1 + X` remains a
-magic input rather than a Dodge request.
+Dodge Roll is fixed to grounded `X`, may cancel ordinary ground actions, and
+cannot cancel itself. While airborne, JokCombat neither forces the Dodge
+selector nor enables its air bypass: `X` stays entirely native for Superglide.
+Native magic shortcut modifiers also keep priority, so `R1 + X` remains a magic
+input rather than a Dodge request.
 
 Counterattack is not an offensive combo node. A short `A` window opens only
 after all three native conditions are observed: JokCombat accepted Guard,
@@ -207,20 +227,29 @@ event. A whiffed Guard never exposes Counterattack.
 
 ## 12. Jump and descent model
 
-High Jump is a persistent native ability. Kinetic Step is a runtime-only
-second jump with one charge per airtime:
+High Jump, Glide, and Superglide are persistent native Shared abilities.
+Kinetic Step is a separate runtime-only second jump with one charge per
+airtime. The detector accepts both the base Jump entry (`0x04`) and High Jump
+entry (`0x09`) as the real first jump:
 
 1. a native first jump arms the charge;
-2. after the first `B` is released, a new airborne `B` may cancel an ordinary
-   aerial action;
-3. a bounded native air-action route enters the Kinetic Step animation and
+2. holding that first `B` remains native for the complete variable-height High
+   Jump, and releasing it arms input ownership for Kinetic Step;
+3. a new airborne `B` may cancel an ordinary aerial action;
+4. a bounded native air-action route enters the Kinetic Step animation and
    applies its validated lift;
-4. landing is the only normal charge refill.
+5. after either jump, held airborne `X` remains KH1's native Superglide command;
+6. landing is the only normal second-jump charge refill.
 
-The controller never creates a third jump and resets on player changes,
-special aerial states, Limits, faults, and reloads.
+The controller suppresses later native Circle/Glide input only after the first
+`B` is released, because that physical command is reserved for Kinetic Step.
+It never remaps Square to Circle: Superglide already owns Square natively. A
+timed-out second-jump request remains consumed until landing. The controller
+never creates a third jump and resets on player changes, special aerial states,
+Limits, faults, and reloads.
 
-Descent is tuned through downward transform deltas only:
+Descent is tuned through downward transform deltas only. Base Jump falls in
+`0x06`, while Shared High Jump falls in `0x0B`; both feed the same controller:
 
 - vanilla free fall after either jump retains 45% of its downward delta;
 - ordinary aerial attacks `CC`, `CD`, and `CE` retain 25%;
@@ -236,15 +265,32 @@ factor from being multiplied twice after Kinetic Step.
 | Change | Persistence |
 |---|---|
 | 99 maximum AP | Saved by KH1 after a normal save |
-| High Jump and exact 4/2/1 combo passive counts | Saved by KH1 after a normal save |
+| Shared High Jump, Glide, Superglide, and exact 4/2/1 combo passive counts | Saved by KH1 after a normal save |
+| One total copy of each genuine non-Ultima Keyblade | Saved by KH1 after a normal save |
+| Save the Queen and Save the King | Saved by KH1 after a normal save |
 | R2 Action Ability assignments | Local `JokCombat_ActionLoadout.cfg` |
-| Branch state, Action routes, Limit selectors, second jump, descent tuning | Process only |
+| Branch state, Action routes, Limit selectors, second jump, input ownership, descent tuning | Process only |
 | 2.0x item/prize drop multipliers | Process only |
 
-The native ability writer preserves the contiguous 48-byte KH1 ability list,
-equips an existing disabled copy in place, inserts only missing copies, and
-removes later vanilla surplus beyond the configured maxima. Because those
-changes can persist, the installation instructions require a save backup.
+The native ability writer treats KH1's two stores separately. It preserves the
+four-byte Shared movement list for High Jump, Glide, and Superglide and the
+contiguous 48-byte Sora ability list for combo passives. It inserts only
+missing entries, equips disabled personal copies in place, and removes later
+vanilla surplus beyond the configured maxima without discarding unrelated
+entries. Because those changes can persist, the installation instructions
+require a save backup.
+
+The Keyblade module follows KH1FM's native save layout: Sora's equipped weapon
+is stored in his Character record while the 0x100-byte inventory-count array
+starts at save offset `0x499`. For each of the 17 targets it keeps inventory
+stock at zero when that weapon is equipped and one otherwise. This prevents
+later vanilla rewards from creating duplicate unique weapons without changing
+their reward or story flags. Ultima Weapon (`0x64`), Dream Sword, Dream Shield,
+Dream Rod, Wooden Sword, and the equipped-weapon field are never written by the
+module. Ultima therefore remains tied to KH1's normal synthesis progression.
+The same ownership rule is applied to Save the Queen (`0x72`) using Donald's
+equipped-weapon record and Save the King (`0x82`) using Goofy's. No other ally
+weapon is granted or modified.
 
 ## 14. Drop-rate policy
 
@@ -276,7 +322,8 @@ ability, or Reaction structures is unsupported even with conditional restore.
 - Steam Global is the only validated executable.
 - Summons and combo magic are intentionally excluded.
 - Perfect Guard and a dedicated enemy launcher are not implemented.
-- The fourth Command Menu row is naturally gated by KH1's Summon unlock.
+- A build or save that publishes no fourth root slot (`0xFF`) still exposes
+  only three overlay rows; locked `0x00` and unlocked `0x36` rows are handled.
 - The project uses fixed executable addresses and therefore requires a new
   validation pass after any game executable update.
 
@@ -290,8 +337,8 @@ python tests/test_drop_rate.py
 ```
 
 The v1.0.0 gameplay baseline has also been tested live for native ground and
-aerial strings, all five branch families, all five Limits, the C4 Ultimate,
-R2 Actions, Guard/Dodge/Counterattack, Kinetic Step, both descent profiles, and
+aerial strings, all five branch families, all five Limits, the independent
+aerial family, R2 Actions, Guard/Dodge/Counterattack, Kinetic Step, both descent profiles, and
 the fixed drop multiplier.
 
 ## 18. Attribution

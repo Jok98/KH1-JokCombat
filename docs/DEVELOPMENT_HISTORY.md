@@ -8,8 +8,8 @@
 Mod combat-oriented sperimentale per **KINGDOM HEARTS FINAL MIX PC**. Il
 progetto mantiene storia, reward fissi, chest, synthesis, boss e world flags
 vanilla. Le sole eccezioni intenzionali sono il bootstrap nativo di High Jump,
-Combo Plus, Air Combo Plus e Combo Master e il moltiplicatore globale dei drop
-descritto sotto.
+Glide, Superglide, Combo Plus, Air Combo Plus e Combo Master e il moltiplicatore
+globale dei drop descritto sotto.
 
 ## Stato attuale
 
@@ -367,11 +367,12 @@ La repository contiene tre probe read-only e il primo prototipo combat:
   a KH1 e un bridge post-finisher per i cicli infiniti terra/aria, quattro slot
   R2 configurabili, otto Action Ability e cinque Limit nativi nelle famiglie
   Pirate terrestri, due Action aeree separate e Counterattack contestuale,
-  jump-cancel terra -> aria, Kinetic Step a carica singola, Guard
-  universale su L2 + Cerchio e Dodge Roll fisso su Quadrato;
-- `JokCombat_NativeAbilities.lua`: imposta 99 AP massimi e assegna tramite la
-  lista abilita' nativa High Jump e le quantita' massime vanilla richieste:
-  quattro Combo Plus, due Air Combo Plus e un Combo Master, tutte equipaggiate;
+  jump-cancel terra -> aria, Kinetic Step a carica singola, Guard universale su
+  L2 + Cerchio, Dodge Roll terrestre e Superglide nativo aereo su Quadrato;
+- `JokCombat_NativeAbilities.lua`: imposta 99 AP massimi, assegna High Jump,
+  Glide e Superglide tramite la lista Shared nativa e mantiene nella lista
+  personale di Sora le quantita' massime vanilla richieste: quattro Combo Plus,
+  due Air Combo Plus e un Combo Master, tutte equipaggiate;
 - `JokCombat_DropRate.lua`: imposta a `2.0x` sia il moltiplicatore degli item
   sia quello dei prize, con firma Steam verificata e ripristino condizionale;
 - `docs/JokCombat_BranchCombo_Mapping.md`: mappa Pirate terrestre di 13 nodi,
@@ -389,40 +390,45 @@ Counterattack usa invece una finestra breve aperta esclusivamente dal segnale
 reale di una Guard riuscita.
 
 Il loadout Action Ability resta runtime-only e non inserisce le undici mosse
-nel salvataggio. Guard e Dodge Roll restano comandi fissi; magie e Limit non
-compaiono nell'editor. I cinque Limit sono accessibili soltanto dalle combo
-Pirate e non vengono aggiunti alla lista abilità. High Jump e le tre famiglie
-passive costituiscono una scelta strutturale del moveset e vengono
-apprese/equipaggiate nativamente.
+nel salvataggio. Guard e Dodge Roll terrestre restano comandi fissi; Quadrato
+in aria rimane invece nativo per Superglide. Magie e Limit non compaiono
+nell'editor. I cinque Limit sono accessibili soltanto dalle combo
+Pirate e non vengono aggiunti alla lista abilità. High Jump, Glide, Superglide
+e le tre famiglie passive costituiscono una scelta strutturale del moveset e
+vengono apprese/equipaggiate nativamente.
 
 ## Abilita' native di movimento e combo
 
-`JokCombat_NativeAbilities.lua` adatta il percorso `learn_ability` del
-riferimento Critical Mix autorizzato alla build Steam verificata. Nel blocco
-save Steam a `0x2DE9360`, il record `Character` di Sora segue l'header di 4
-byte: gli AP massimi sono a `Character+0x05` (`0x2DE9369`) e la lista delle
-abilita' parte da `Character+0x40` (`0x2DE93A4`). La lista contiene 48 byte: il
-bit alto indica che l'abilita' e' appresa ma disattivata; la forma con il solo
-ID base e' quella equipaggiata. Il primo `0x00` e' lo slot in cui KH1 aggiunge
-la prossima abilita'. JokCombat assegna ed equipaggia quantità esatte di:
+`JokCombat_NativeAbilities.lua` adatta le strutture osservate nel riferimento
+Critical Mix autorizzato alla build Steam verificata. Nel blocco save Steam a
+`0x2DE9360`, il record `Character` di Sora segue l'header di 4 byte: gli AP
+massimi sono a `Character+0x05` (`0x2DE9369`) e la lista personale delle
+abilita' parte da `Character+0x40` (`0x2DE93A4`). Questa lista contiene 48 byte:
+il bit alto indica che l'abilita' e' appresa ma disattivata; la forma con il
+solo ID base e' quella equipaggiata. Il primo `0x00` e' lo slot in cui KH1
+aggiunge la prossima abilita'. Le quattro abilita' di movimento condivise sono
+invece conservate nella lista Shared a save+`0x599` (`0x2DE98F9`). JokCombat
+assegna quantità esatte di:
 
-- un `0x01` High Jump (`0x81` quando disattivata); KH1FM non usa i livelli
-  multipli di KH2, quindi questa singola voce e' il potenziamento nativo pieno;
+- un `0x01` High Jump nella lista Shared; KH1FM non usa i livelli multipli di
+  KH2, quindi questa singola voce e' il potenziamento nativo pieno;
+- un `0x03` Glide nella lista Shared;
+- un `0x04` Superglide nella lista Shared;
 - quattro `0x06` Combo Plus (`0x86` quando disattivata);
 - due `0x07` Air Combo Plus (`0x87` quando disattivata);
 - un `0x41` Combo Master (`0xC1` quando disattivata).
 
 Le copie già apprese con il bit alto vengono equipaggiate nello stesso slot;
 quelle mancanti vengono inserite nel primo slot libero. Se un futuro premio
-vanilla aggiunge una quinta Combo Plus o una terza Air Combo Plus, la v0.4.0
+vanilla aggiunge una quinta Combo Plus o una terza Air Combo Plus, il modulo
 rimuove la copia più recente e ricompatta i 48 byte, preservando ordine e primo
 terminatore `0x00`. In questo modo la progressione non può superare i massimi
 naturali dopo il bootstrap anticipato.
 
-Il modulo porta inoltre gli AP massimi di Sora a `99`: in questo modo High Jump,
-le passive e le future Action Ability possono essere realmente equipaggiate dal
+Il modulo porta inoltre gli AP massimi di Sora a `99`: in questo modo le passive
+personali e le future Action Ability possono essere realmente equipaggiate dal
 motore nativo anche all'inizio della partita, senza dipendere dagli AP ancora
-non ottenuti dalla progressione vanilla.
+non ottenuti dalla progressione vanilla. High Jump e' Shared e non consuma AP.
 
 La v0.2.0 ripara inoltre in modo condizionale i quattro byte che la v0.1.x
 aveva scritto dieci byte prima della lista reale a causa di una conversione
@@ -437,8 +443,19 @@ quindi convertite in-place in `0x06/0x07/0x41`, senza aggiungere duplicati.
 La v0.3.0 estende il grant alle quantità massime `4/2/1`. Le sette passive
 costano complessivamente 9 AP; gli AP residui dipendono dalle altre abilità già
 equipaggiate e non sono quindi un controllo affidabile del numero di copie.
-La v0.4.0 aggiunge l'unica voce High Jump di KH1FM senza alterare i massimi
-combo; il secondo salto resta invece una carica runtime del prototipo combat.
+La v0.4.0 tentava di aggiungere High Jump alla lista personale di Sora. Il test
+live dopo lo sblocco naturale a Monstro ha mostrato che il vero High Jump usa la
+lista Shared e passa dall'animazione iniziale `0x09`, non dalla `0x04` del salto
+base. La v0.5.0 migra quindi l'eventuale `0x01` legacy nella lista Shared,
+preserva le altre abilita' condivise e riconosce entrambe le animazioni come
+primo salto. Kinetic Step resta una carica runtime separata.
+La v0.6.0 completa il set Shared con Glide e Superglide. Un primo tentativo
+manteneva Cerchio/B soppresso durante High Jump e sbloccava Superglide soltanto
+dopo Kinetic Step: il test live ha mostrato che cosi' KH1 interrompeva subito
+l'altezza variabile del primo salto. Il routing corretto lascia quindi il primo
+B completamente nativo fino al rilascio, riserva il B successivo a Kinetic Step
+e non rimappa la planata: Superglide usa gia' nativamente Quadrato in aria.
+JokCombat forza Dodge Roll su Quadrato soltanto a terra.
 Il test live ha verificato `groundMax=7` e `airMax=5`: a terra KH1 sceglie
 contestualmente `C8`, `C9` o `CA` nelle posizioni `1..6` e `CB` chiude alla 7;
 in aria le posizioni `1..4` hanno mostrato `CC/CD` e `CE` chiude alla 5. Poiché
@@ -446,8 +463,9 @@ lo stesso ID può comparire in posizioni diverse, il controller Pirate usa
 `comboPosition` per scegliere C2/C3/C4/C5 e l'animazione soltanto per il timing.
 
 Questa assegnazione e' intenzionalmente persistente: dopo un salvataggio High
-Jump e le passive fanno parte della partita. Prima del primo test e' stata creata una
-copia locale di `KHFM_WW.png` sotto `KH_mod/backups/saves`.
+Jump, Glide, Superglide e le passive fanno parte della partita. Prima del primo
+test e' stata creata una copia locale di `KHFM_WW.png` sotto
+`KH_mod/backups/saves`.
 
 ## Drop rate globale al 200%
 
@@ -550,8 +568,10 @@ Ogni passaggio Action valido registra `[branch] <sequenza> requested` e poi
 `[branch] <sequenza> accepted`. Un input premuto troppo presto deve produrre
 `ignored before prebuffer`; un secondo input durante lo stesso buffer deve
 essere ignorato, non accodato. Per ogni Limit, il parent Action deve registrare
-`native <Limit> pre-armed`; l'ultimo `Y` deve registrare
-`delegated to native <Limit>` e poi `native <Limit> entered`. Verifica con MP a
+`native <Limit> pre-armed`; un solo ultimo `Y` deve registrare
+`first final Y latched once`, poi `native <Limit> entered`, anche quando viene
+premuto durante il recovery della Action precedente. Non deve essere richiesto
+un secondo edge fisico. Verifica con MP a
 zero che Sonic, Ars, Strike e Ragnarok partano comunque e che, terminata la
 sequenza, lo stesso Limit lanciato dal menu conservi il costo vanilla. Trinity
 deve lasciare invariati gli MP di Sora, Donald e Goofy; senza entrambi gli

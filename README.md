@@ -14,19 +14,23 @@ an extended ground-to-air cycle, universal defense, and faster progression.
   the same ground or aerial state.
 - Five role-based `Y` branches containing eight Action Abilities and all five
   native Limits, with no duplicated special move.
-- A dedicated ground-to-air-to-ground Ultimate route and a three-step aerial
-  branch available after any normal aerial hit.
+- Five direct ground families and a separate three-step aerial branch
+  available after any normal aerial hit.
 - One configurable `R2` Action Ability group, shown and edited through KH1's
   own Command Menu.
-- Universal Guard on `L2 + B`, Dodge Roll on `X`, and Counterattack after a
-  successful Guard.
-- High Jump, a once-per-airtime Kinetic Step second jump, and reduced descent
-  during free fall and ordinary aerial attacks.
+- Universal Guard on `L2 + B`, ground Dodge Roll on `X`, and Counterattack
+  after a successful Guard.
+- High Jump, a once-per-airtime Kinetic Step second jump, native Superglide on
+  held airborne `X`, and reduced descent during free fall and aerial attacks.
+- All 17 genuine Keyblades except Ultima Weapon available through KH1's native
+  Equipment menu; Ultima remains obtainable only through normal synthesis.
+- Save the Queen for Donald and Save the King for Goofy available through
+  their native Equipment menus.
 - Fixed `200%` item and prize drop multipliers.
 
 Normal magic shortcuts, Reaction Commands, story progression, rewards,
-chests, synthesis, inventory, world flags, and Summons remain under vanilla
-KH1 control.
+chests, synthesis, world flags, and Summons remain under vanilla KH1 control.
+The Keyblade module modifies only Sora's owned unique-weapon counts.
 
 ## Controls
 
@@ -36,18 +40,25 @@ The documentation uses Xbox-style face-button labels:
 |---|---|
 | `A` | Native KH1 attack and normal combo continuation |
 | `Y` | Contextual JokCombat branch based on the preceding `A` count |
-| `B` | Native jump; one additional Kinetic Step while airborne |
-| `X` | Dodge Roll |
+| `B` | Native jump; release and press again for Kinetic Step |
+| `X` | Dodge Roll while grounded; hold for native Superglide while airborne |
 | `L2 + B` | Universal Guard |
 | `R2 + A/Y/X/B` | Configured Action Ability |
 | Hold `R2`, then D-pad | Select a slot with Up/Down and change its ability with Left/Right |
 | Release `R2` | Save the Action Ability loadout automatically |
 | Release `L1 + R1 + L2 + R2` | Toggle the Command Menu overlay and Combo Guide |
 
-Magic and Reaction Commands keep priority over JokCombat inputs. In
-particular, native magic shortcuts such as `R1 + X` do not trigger Dodge Roll.
+Magic and Reaction Commands keep priority over JokCombat inputs. A neutral `Y`
+is left native through a two-frame release check before Strong opens, so Talk,
+Examine, Save, and the following `A` confirmation are not captured by the combo
+controller. Native magic shortcuts such as `R1 + X` do not trigger Dodge Roll.
 
-The complete ground, aerial, Ultimate, and Limit routes are documented in
+High Jump keeps its native variable height: hold the first `B` for the full
+ascent, release it, and press it again for Kinetic Step. Superglide already has
+a separate native command in KH1, so hold `X` while airborne after either jump.
+JokCombat never forces Dodge Roll while Sora is airborne.
+
+The complete ground, aerial, and Limit routes are documented in
 [the combo map](docs/JokCombat_BranchCombo_Mapping.md).
 
 ## Requirements
@@ -72,6 +83,7 @@ Other regional builds and the Epic Games Store executable are not supported.
    ```text
    JokCombat_CombatPrototype.lua
    JokCombat_NativeAbilities.lua
+   JokCombat_NativeKeyblades.lua
    JokCombat_DropRate.lua
    ```
 
@@ -85,19 +97,25 @@ Other regional builds and the Epic Games Store executable are not supported.
    ```
 
 5. Start KH1 or press `F1` in the LuaBackend console to reload all scripts.
-   A successful load reports `JokCombat v1.0.0`, Native Abilities, and the
-   `200%` Drop Rate module.
+   A successful load reports `JokCombat v1.0.0`, Native Abilities, Native
+   Keyblades, and the `200%` Drop Rate module.
 
 The three probe scripts in this repository are optional developer diagnostics
 and are not required for normal play.
 
 ## Save-file changes
 
-`JokCombat_NativeAbilities.lua` grants and equips High Jump, four Combo Plus,
-two Air Combo Plus, and Combo Master, and sets Sora's maximum AP to `99`.
-These changes become part of the save after KH1 saves normally. The combat
-controller, Action Ability loadout, second jump, descent tuning, Limit cost
-borrowing, and drop-rate patch are runtime-only.
+`JokCombat_NativeAbilities.lua` grants native High Jump, Glide, and Superglide
+through KH1's Shared ability list, equips four Combo Plus, two Air Combo Plus,
+and Combo Master in Sora's ability list, and sets Sora's maximum AP to `99`.
+`JokCombat_NativeKeyblades.lua` adds exactly one total copy of every genuine
+Sora Keyblade except Ultima Weapon. It does not grant the Dream weapons or
+Wooden Sword. The same module grants Save the Queen to Donald and Save the King
+to Goofy. It never writes Ultima's inventory record, synthesis state, or any
+currently equipped weapon. These changes become part of the save after KH1
+saves normally. The combat controller's ground-Dodge/air-Superglide ownership
+rule, Action Ability loadout, second jump, descent tuning, Limit cost borrowing,
+and drop-rate patch are runtime-only.
 
 ## Compatibility and known limits
 
@@ -105,8 +123,10 @@ borrowing, and drop-rate patch are runtime-only.
 - Do not load another combat overhaul that patches the same KH1 action,
   command, input, or ability structures.
 - Combo magic and Summons are intentionally excluded from JokCombat branches.
-- The fourth Command Menu row becomes visible when KH1 naturally unlocks
-  Summon; its assigned `R2` action remains callable before that point.
+- When KH1 exposes locked Summon as an existing fourth placeholder row,
+  JokCombat temporarily borrows a normal command record so all four `R2`
+  Action assignments remain visible and editable. The native row is restored
+  as soon as the overlay closes.
 - Perfect Guard and an enemy-launcher system are not part of v1.0.0.
 
 ## Documentation

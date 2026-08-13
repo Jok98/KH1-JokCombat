@@ -1,6 +1,6 @@
 # JokCombat — mappa combo contestuale A / Y
 
-Stato: **v1.0.0 — RUOLI DISTINTI; ULTIMATE C4 TERRA-ARIA-TERRA; ACTION 8/8 + LIMIT NATIVI 5/5**
+Stato: **v1.0.0 — RUOLI DISTINTI; 5 FAMIGLIE STANDARD; ACTION 8/8 + LIMIT NATIVI 5/5**
 
 Ambito: KH1 Final Mix, Steam Global, Sora
 Input abbreviati: `A` = Croce, `Y` = Triangolo
@@ -10,20 +10,23 @@ Input abbreviati: `A` = Croce, `Y` = Triangolo
 1. La stringa composta soltanto da `A` resta nativa. Combo Master, Combo Plus,
    Air Combo Plus, attacchi contestuali e finisher appartengono a KH1.
 2. Il numero di `A` prima del primo `Y` sceglie la famiglia terrestre. Dopo il
-   primo `Y`, `Y` avanza nella stessa famiglia; C4 usa anche `B` dopo Slapshot
-   per il solo passaggio Ultimate verso il salto nativo.
+   primo `Y`, `Y` avanza nella stessa famiglia. `B` resta sempre il salto
+   nativo e chiude l'eventuale famiglia terrestre attiva.
 3. Un `A` dopo una mossa nominata chiude immediatamente la famiglia e torna a
    una continuazione fisica vanilla. Non esistono prefissi reverse nascosti.
 4. Ogni `Y` produce subito la mossa indicata: la sequenza non è una password
    attesa fino all'ultimo tasto.
 5. Ogni Action Ability ha un solo ruolo contestuale: Strong è burst, C2
-   inseguimento, C3 controllo area, C4 ciclo terra-aria-terra e C5 esecuzione.
+   inseguimento, C3 controllo area, C4 pressione combo e C5 esecuzione.
    Hurricane Blast e Aerial Sweep restano nella famiglia aerea condivisa;
    Counterattack appartiene alla Guard riuscita.
-6. I Reaction Command hanno priorità su `Y`. Il Reaction ID viene controllato
-   nello stesso frame fisico, prima di aprire Strong: Salva, Esamina e Parla non
-   possono quindi armare per errore `Y -> Vortex`. Magie, menu, shortcut e costi
-   MP vanilla non vengono modificati. Summon è esclusa.
+6. I Reaction Command hanno priorità su `Y`. Da neutrale il bordo fisico resta
+   prima a KH1; Strong si apre soltanto dopo due frame a `Y` rilasciato senza un
+   Reaction ID, un menu non-root o una successiva `A` di conferma. Salva, Esamina
+   e Parla non possono quindi armare per errore `Y -> Vortex`, mentre un valore
+   Reaction transitorio pubblicato da una Action già accettata non chiude la
+   propria famiglia. Magie, menu, shortcut e costi MP vanilla non vengono
+   modificati. Summon è esclusa.
 
 ## 2. Mappa terrestre completa
 
@@ -58,24 +61,17 @@ Trinity Limit è terminale ed è disponibile soltanto a terra con Donald e Goofy
 nel party. Se manca uno dei due, la Guide termina su Ripple Drive e non propone
 né sostituisce Trinity.
 
-### C4 — Ultimate terra-aria-terra
+### C4 — pressione combo
 
-| Fase | Sequenza contestuale | Mossa |
-|---|---|---|
-| terra | `A A A Y` | Slapshot |
-| ponte | `B` nella recovery di Slapshot | Aerial Chase tramite salto reale |
-| aria | primo `Y` | Aerial Finisher nativa `CE` |
-| aria | `Y` successivo | Hurricane Blast `D1` |
-| discesa | `Y` successivo | Aerial Sweep `D6` |
-| terra | `Y` dopo l'atterraggio naturale | Blitz `D2` |
-| chiusura | `Y` successivo | Strike Raid |
+| Sequenza | Mossa |
+|---|---|
+| `A A A Y` | Slapshot |
+| `A A A Y Y` | Blitz |
+| `A A A Y Y Y` | Strike Raid |
 
-Strike Raid è terminale. Un `B` premuto nella breve coda di Slapshot viene
-memorizzato una sola volta fino alla recovery sicura; un input ancora più
-precoce viene scartato. Dopo il salto è possibile inserire un `A`
-aereo nativo prima del primo `Y`; la Ultimate resta pronta finché Sora è
-realmente airborne. Un `A` dopo l'atterraggio rinuncia invece alla chiusura e
-riprende la combo vanilla.
+Strike Raid è terminale. C4 usa le stesse regole di concatenazione e le stesse
+finestre sicure delle altre famiglie, senza salto obbligatorio o stato
+terra-aria-terra dedicato.
 
 ### C5 — esecuzione
 
@@ -97,7 +93,7 @@ le posizioni successive restano vanilla: la mappa non inventa C6/C7.
 
 Non ci sono mosse duplicate e nessuna mossa nominata viene eseguita da `A`.
 
-## 3. Famiglia aerea e ponte C4
+## 3. Famiglia aerea indipendente
 
 Dopo qualunque colpo intermedio della combo aerea, `Y` apre sempre la stessa
 catena già validata:
@@ -109,16 +105,15 @@ catena già validata:
 | `Y` successivo | Aerial Sweep `D6`, terminale |
 
 La catena usa i nodi virtuali `AIR_CE -> AIR_D1 -> AIR_D6`. Hurricane Blast e
-Aerial Sweep puntano ai loro record canonici, ma non occupano più nodi della
-mappa terrestre. C4 entra nella stessa catena soltanto dopo che il flag
-airborne nativo è realmente visibile; Aerial Sweep ne gestisce la discesa e la
-chiusura Blitz viene offerta soltanto dopo il ritorno reale a terra. Restano
-disabilitati fake-ground, sospensione, scritture di quota e manipolazione dello
-stick.
+Aerial Sweep puntano ai loro record canonici, ma non occupano nodi della mappa
+terrestre. Il salto normale chiude qualsiasi famiglia terrestre; la famiglia
+aerea parte soltanto quando il flag airborne nativo è realmente visibile.
+Restano disabilitati fake-ground, sospensione, scritture di quota e
+manipolazione dello stick.
 
 ## 4. Counterattack contestuale
 
-Counterattack non è una C4 offensiva. JokCombat osserva in sola lettura il byte
+Counterattack è contestuale alla difesa. JokCombat osserva in sola lettura il byte
 Steam `0x296B230`, port dello stesso segnale usato dal riferimento Critical Mix.
 La finestra si apre soltanto quando sono vere insieme queste condizioni:
 
@@ -142,7 +137,7 @@ hitbox, danno e follow-up.
 | Strong | Gravity Break | Ragnarok | `0x005A` |
 | C2 | Sliding Dash | Sonic Blade | `0x004B` |
 | C3 | Ripple Drive | Trinity Limit | `0x0052` |
-| C4 | Blitz dopo l'atterraggio | Strike Raid | `0x005E` |
+| C4 | Blitz | Strike Raid | `0x005E` |
 | C5 | Zantetsuken | Ars Arcanum | `0x0057` |
 
 Sonic Blade, Ars Arcanum, Strike Raid e Ragnarok prendono in prestito a zero
@@ -198,15 +193,6 @@ Dopo Sliding Dash:
 Dopo Slapshot:
 
 ```text
-[B] Aerial Chase
-[Y] Aerial Finisher
-[Y][Y] Hurricane Blast
-[Y][Y][Y] Aerial Sweep
-```
-
-Dopo l'atterraggio della Ultimate:
-
-```text
 [Y] Blitz
 [Y][Y] Strike Raid
 -
@@ -231,14 +217,11 @@ condiviso resta `L1 + R1 + L2 + R2` rilasciato senza D-pad.
 - Ogni Action concatenabile conserva la propria finestra di prebuffer/release
   e accetta al massimo un input.
 - Guard, Dodge, modificatori, reaction command, menu, reload e perdita del
-  player object chiudono sempre la famiglia e ogni selector posseduto. Il salto
-  chiude ogni famiglia tranne il solo `B` C4 accettato nella recovery di
-  Slapshot, che apre la state machine Ultimate.
+  player object chiudono sempre la famiglia e ogni selector posseduto. Anche il
+  salto chiude sempre la famiglia terrestre attiva.
 - La stringa `A` e il suo ciclo infinito post-finisher restano gestiti dal
   dispatcher KH1 con Combo Master/Combo Plus/Air Combo Plus.
 - Nessuna combo modifica slot Shortcut, livelli magia, salvataggio, inventario
   o progressione.
-- La Ultimate osserva soltanto lo stato airborne e usa il jump-cancel già
-  validato: non scrive quota, velocità verticale, stick o flag terra/aria.
 - I follow-up dei Limit appartengono interamente allo stato nativo: dopo
   l'attivazione JokCombat non intercetta i loro input interni.

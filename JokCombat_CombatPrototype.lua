@@ -30,10 +30,9 @@ local CONFIG = {
 
     -- Modifier-free Triangle selects the Pirate-style Strong/C2/C3/C4/C5
     -- family. Eight ground Action Abilities and all five native Limits form
-    -- five role-specific branches; Cross after a named move closes the family
-    -- and remains a physical continuation. C4 is the one deliberate exception
-    -- to the Y-only rule: B after Slapshot starts a real jump chase, crosses
-    -- the validated aerial family, then returns to Blitz -> Strike Raid.
+    -- five standard role-specific branches; Cross after a named move closes
+    -- the family and remains a physical continuation. C4 is now an ordinary
+    -- Slapshot -> Blitz -> Strike Raid route with no jump/landing state machine.
     -- The failed reverse-magic adapter is retired: normal menu/R1 magic remains
     -- entirely native. All five unique Limit leaves use the validated native
     -- Reaction dispatcher; no Limit animation, hitbox or follow-up is imitated.
@@ -41,9 +40,11 @@ local CONFIG = {
     branchActionAbilities = true,
     branchLimits = true,
     branchInputTimeoutFrames = 150,
-    groundAirUltimate = true,
-    groundAirUltimateTimeoutFrames = 600,
-
+    -- A neutral Y is shared with Talk/Examine/Save. Leave its physical edge
+    -- native, then wait two released frames before opening Strong so KH1 can
+    -- publish a contextual Reaction first. A following A always cancels this
+    -- short arbitration and remains available as a native confirmation.
+    neutralTriangleGraceFrames = 2,
     -- While KH1 owns a normal Cross string, reuse the native Command Menu as
     -- a read-only guide for the current Pirate-style family. Named Action
     -- Abilities are dispatched only by Triangle/Y; Cross/A always remains a
@@ -68,6 +69,10 @@ local CONFIG = {
     secondJumpLiftAmount = 30.0,
     secondJumpLiftEndTime = 25.0,
     secondJumpSpeedDivisor = 1.1,
+    -- High Jump keeps native variable-height B ownership. KH1 already maps
+    -- learned Superglide to held Square in midair, so the mod leaves that input
+    -- completely vanilla and limits its forced Square Dodge to the ground.
+    nativeAirSuperglideOnSquare = true,
     -- Slow the positive position delta of vanilla Fall 0x06 after either the
     -- first jump or Kinetic Step. The same controller owns both phases, so the
     -- factor is never applied twice after the second jump. Aerial attacks use
@@ -81,9 +86,9 @@ local CONFIG = {
     airAttackFallBrakeFactor = 0.25,
     defensiveCancels = true,
     universalGuardCancel = true,
-    universalDodgeCancel = true,
+    universalDodgeCancel = true, -- any ordinary ground action; never airborne
     guardOnL2Circle = true,
-    fixedDodgeOnSquare = true,
+    fixedDodgeOnSquare = true, -- ground X; airborne X is native Superglide
     -- Counterattack is contextual rather than part of an offensive branch.
     -- A real 0x10 Guard-connect event opens one short physical Cross window.
     guardCounterAttemptFrames = 120,
@@ -166,6 +171,11 @@ local ADDRESS = {
     compactPointerSegments = 0x2EE3980,
     triggerMenu1 = 0x23D3F80,
     triggerMenu2 = 0x232DDC4,
+    -- Steam Global's native Auto-Reaction input level sits 0x1C bytes after
+    -- triggerMenu2. It is never used as a free-running macro: the Limit
+    -- adapter may hold it only after one real final-Y edge, with ownership
+    -- recorded in the existing recovery journal first.
+    autoReaction = 0x232DDE0,
     defenseAbilityFlags = 0x2D5EC10,
 
     -- Migration-only native magic fields. v0.10.6+ never writes them during
@@ -340,8 +350,8 @@ local NATIVE_FINISHER_ABILITY_MASK = RIPPLE_DRIVE_ABILITY_BIT
     | ZANTETSUKEN_ABILITY_BIT
 local NATIVE_FINISHER_ABILITY_CLEAR_MASK = 0xC3FFFFFF
 
--- Only Sora combat Action Abilities are exposed. Guard and Dodge Roll stay on
--- their fixed controls; support, shared and special/Limit abilities never enter
+-- Only Sora combat Action Abilities are exposed. Guard and ground Dodge Roll
+-- stay on their fixed controls; support, shared and special/Limit abilities never enter
 -- this catalog. The animation map is adapted from the authorized Critical Mix
 -- action dictionary; every complete record below was read from and signature-
 -- checked against the Steam action table. Gameplay effects and contextual
@@ -695,8 +705,14 @@ local HUD = {
     dpadReleaseLock = false,
     controlChordHeld = false,
     controlChordUsed = false,
+    -- KH1 renders locked Summon as command 0x00. While the R2 overlay owns all
+    -- four face inputs, command 0x06 is borrowed only as a normal visual
+    -- carrier for row four and is restored conditionally when the overlay ends.
+    nativeFallbackCommandId = 0x06,
+    nativeCommandBackup = nil,
     nativeRecoveryAddress = 0x2DB7940,
     nativeRecoverySignature = 0x31574F524E4B4F4A, -- "JOKNROW1"
+    nativeCarrierSignature = 0x31444D43524B4A, -- "JKRCMD1\0"
     -- Legacy markers are read only during initialization. The current marker
     -- records the temporary visual/logical cursor pair alongside the token
     -- redirects.
@@ -774,7 +790,7 @@ local function saveActionLoadout()
     end
 
     file:write("# JokCombat v0.9.9 Action Ability loadout\n")
-    file:write("# Guard remains fixed on L2+Circle; Dodge Roll on Square.\n")
+    file:write("# Guard: L2+Circle; ground Dodge: Square; air Superglide: hold Square.\n")
     file:write("# Only the four exact-R2 Action Ability slots are active.\n")
     file:write("# action_overlay controls both loadout labels and Combo Guide.\n")
     file:write("action_overlay=", HUD.enabled and "true" or "false", "\n")
@@ -1018,7 +1034,8 @@ function HUD.observeNativeSelection()
         HUD.nativeSelectionPendingFrames = 0
         HUD.nativeDpadPassMask = 0
         if #HUD.nativeTokenBackups > 0 then
-            HUD.writeNativeRecovery(HUD.nativeTokenBackups)
+            HUD.writeNativeRecovery(
+                HUD.nativeTokenBackups, HUD.nativeCommandBackup)
         end
         return true
     end
@@ -1130,7 +1147,7 @@ function HUD.clearNativeRecovery()
     WriteLong(HUD.nativeRecoveryAddress + 0x40, 0)
 end
 
-function HUD.writeNativeRecovery(patches)
+function HUD.writeNativeRecovery(patches, commandPatch)
     if patches == nil or #patches < 1 or #patches > 4 then return false end
     HUD.clearNativeRecovery()
     WriteInt(HUD.nativeRecoveryAddress + 0x08, #patches)
@@ -1152,6 +1169,20 @@ function HUD.writeNativeRecovery(patches)
         WriteInt(address, patch.address)
         WriteInt(address + 0x04, patch.original)
         WriteInt(address + 0x08, patch.patched)
+    end
+    if commandPatch ~= nil then
+        -- This secondary signed record ends before the separate recovery block
+        -- at +0x70. The primary marker is still published last below.
+        WriteLong(HUD.nativeRecoveryAddress + 0x48,
+            commandPatch.menuObject)
+        WriteByte(HUD.nativeRecoveryAddress + 0x50,
+            commandPatch.original)
+        WriteByte(HUD.nativeRecoveryAddress + 0x51,
+            commandPatch.patched)
+        WriteByte(HUD.nativeRecoveryAddress + 0x52, 0x17)
+        WriteByte(HUD.nativeRecoveryAddress + 0x53, 0xC6)
+        WriteLong(HUD.nativeRecoveryAddress + 0x40,
+            HUD.nativeCarrierSignature)
     end
     -- Publish the marker last so a partial recovery record is never accepted.
     WriteLong(HUD.nativeRecoveryAddress, HUD.nativeRecoverySignature)
@@ -1270,19 +1301,35 @@ function HUD.recoverStaleNativeRows()
                 and ReadByte(ADDRESS.commandMenuSlot) == original
         end
     end
+    local carrierRestored = false
+    if ReadLong(HUD.nativeRecoveryAddress + 0x40)
+            == HUD.nativeCarrierSignature
+        and ReadByte(HUD.nativeRecoveryAddress + 0x52) == 0x17
+        and ReadByte(HUD.nativeRecoveryAddress + 0x53) == 0xC6 then
+        local menuObject = ReadLong(HUD.nativeRecoveryAddress + 0x48)
+        local original = ReadByte(HUD.nativeRecoveryAddress + 0x50)
+        local patched = ReadByte(HUD.nativeRecoveryAddress + 0x51)
+        if menuObject >= BASE_ADDR
+            and menuObject < BASE_ADDR + HUD.moduleSize
+            and ReadByte(menuObject + 0x17, true) == patched then
+            WriteByte(menuObject + 0x17, original, true)
+            carrierRestored = true
+        end
+    end
     HUD.clearNativeRecovery()
     if restored > 0 or commandRestored or recordRestored or summonRestored
-        or selectionRestored or rowLoopRestored then
-        log(string.format("Command Menu recovery: labels=%d%s%s%s%s%s.",
+        or selectionRestored or carrierRestored or rowLoopRestored then
+        log(string.format("Command Menu recovery: labels=%d%s%s%s%s%s%s.",
             restored,
             commandRestored and " carrier=restored" or "",
             recordRestored and " record=restored" or "",
             summonRestored and " summon-slot=restored" or "",
             selectionRestored and " cursor=restored" or "",
+            carrierRestored and " row4=restored" or "",
             rowLoopRestored and " row-loop=restored" or ""))
     end
     return restored > 0 or commandRestored or recordRestored or summonRestored
-        or selectionRestored or rowLoopRestored
+        or selectionRestored or carrierRestored or rowLoopRestored
 end
 
 function HUD.restoreNativeRows()
@@ -1293,7 +1340,14 @@ function HUD.restoreNativeRows()
             restored = restored + 1
         end
     end
+    local commandPatch = HUD.nativeCommandBackup
+    if commandPatch ~= nil
+        and ReadByte(commandPatch.address, true) == commandPatch.patched then
+        WriteByte(commandPatch.address, commandPatch.original, true)
+        restored = restored + 1
+    end
     HUD.nativeTokenBackups = {}
+    HUD.nativeCommandBackup = nil
     HUD.clearNativeRecovery()
     HUD.overlayGroup = nil
     HUD.overlaySignature = nil
@@ -1339,11 +1393,30 @@ function HUD.showOverlay(groupId, suppliedEntries, suppliedLabel)
     for index = 1, 4 do
         commands[index] = ReadByte(menuObject + 0x13 + index, true)
     end
-    -- A zero/FF fourth ID means the native Summon row has not been unlocked
-    -- yet. Patch only rows the game already owns; once KH1 supplies a real
-    -- fourth ID, the changed signature automatically expands this to four.
-    local visibleCount = (commands[4] == 0x00 or commands[4] == 0xFF)
-        and 3 or 4
+    local activeCommandPatch = HUD.nativeCommandBackup
+    if activeCommandPatch ~= nil
+        and activeCommandPatch.address == menuObject + 0x17
+        and commands[4] == activeCommandPatch.patched then
+        commands[4] = activeCommandPatch.original
+    end
+    -- A real four-row root may expose locked Summon as command 0x00. The row
+    -- already exists visually, so borrow a normal command only while the R2
+    -- overlay owns it. Only 0xFF means KH1 published no fourth row at all.
+    local visibleCount = commands[4] == 0xFF and 3 or 4
+    local displayCommands = {
+        commands[1], commands[2], commands[3], commands[4],
+    }
+    local commandPatch = nil
+    if visibleCount == 4
+        and (commands[4] == 0x00 or commands[4] == 0x36) then
+        displayCommands[4] = HUD.nativeFallbackCommandId
+        commandPatch = {
+            address = menuObject + 0x17,
+            menuObject = menuObject,
+            original = commands[4],
+            patched = displayCommands[4],
+        }
+    end
     local signature = string.format("%s|%X|%02X%02X%02X%02X|%s",
         groupId, menuObject, commands[1], commands[2], commands[3],
         commands[4], table.concat(entries, "|"))
@@ -1352,6 +1425,16 @@ function HUD.showOverlay(groupId, suppliedEntries, suppliedLabel)
         for _, patch in ipairs(HUD.nativeTokenBackups) do
             stillPatched = stillPatched
                 and (ReadInt(patch.address) & 0xFFFFFFFF) == patch.patched
+        end
+        if commandPatch ~= nil then
+            stillPatched = stillPatched and activeCommandPatch ~= nil
+                and activeCommandPatch.address == commandPatch.address
+                and activeCommandPatch.original == commandPatch.original
+                and activeCommandPatch.patched == commandPatch.patched
+                and ReadByte(commandPatch.address, true)
+                    == commandPatch.patched
+        else
+            stillPatched = stillPatched and activeCommandPatch == nil
         end
         if stillPatched then return true end
     end
@@ -1373,7 +1456,7 @@ function HUD.showOverlay(groupId, suppliedEntries, suppliedLabel)
     local usedAddresses = {}
     for index = 1, visibleCount do
         local messageAddress, messageIndex =
-            HUD.commandMessageTokenAddress(commands[index])
+            HUD.commandMessageTokenAddress(displayCommands[index])
         local textToken = HUD.pointerTokenForAbsolute(
             BASE_ADDR + lineAddresses[index])
         if messageAddress == nil or textToken == nil then
@@ -1395,20 +1478,25 @@ function HUD.showOverlay(groupId, suppliedEntries, suppliedLabel)
     for index = 1, 4 do
         WriteArray(lineAddresses[index], getKHSCII(entries[index], 0x20))
     end
-    if not HUD.writeNativeRecovery(patches) then
+    if not HUD.writeNativeRecovery(patches, commandPatch) then
         return HUD.nativeOverlayFailure("recovery record rejected")
     end
     for _, patch in ipairs(patches) do
         WriteInt(patch.address, patch.patched)
     end
+    if commandPatch ~= nil then
+        WriteByte(commandPatch.address, commandPatch.patched, true)
+    end
     HUD.nativeTokenBackups = patches
+    HUD.nativeCommandBackup = commandPatch
     HUD.nativeFailureKey = nil
     HUD.overlayGroup = groupId
     HUD.overlaySignature = signature
     log(string.format(
-        "native Command Menu labels active: %s ids=%02X/%02X/%02X/%02X visible=%d/4%s.",
+        "native Command Menu labels active: %s ids=%02X/%02X/%02X/%02X visible=%d/4%s%s.",
         groupLabel, commands[1], commands[2], commands[3], commands[4],
-        visibleCount, visibleCount == 3 and " (Summon locked)" or ""))
+        visibleCount, visibleCount == 3 and " (fourth row unavailable)" or "",
+        commandPatch ~= nil and " row4-carrier=06" or ""))
     return true
 end
 
@@ -2186,7 +2274,7 @@ function HUD.visibleEditableCount(groupId)
         and ReadInt(menuObject, true) == 0
         and ReadInt(menuObject + 0x10, true) == 4 then
         local fourthCommand = ReadByte(menuObject + 0x17, true)
-        if fourthCommand ~= 0x00 and fourthCommand ~= 0xFF then
+        if fourthCommand ~= 0xFF then
             return maximum
         end
     end
@@ -3103,6 +3191,14 @@ function JokCombatAirJump.noteGroundJump(player)
     JokCombatAirJump.groundRequestFrames = CONFIG.secondJumpArmFrames
 end
 
+function JokCombatAirJump.isNativeFirstJumpEntry(animation)
+    -- 0x04 is KH1's base Jump entry. Once the real Shared High Jump record is
+    -- active, the same physical B enters 0x09 instead. LuaBackend can observe
+    -- either transition after raw70 has already become airborne, so both are
+    -- valid first-jump evidence and neither is a Kinetic Step request.
+    return animation == 0x04 or animation == 0x09
+end
+
 function JokCombatAirJump.boost(player)
     if not JokCombatAirJump.active or not player.airborne
         or player.animation ~= 0x0F
@@ -3168,7 +3264,9 @@ function JokCombatAirJump.brakeFall(player)
     -- Up is negative on this transform. Therefore only a positive delta in
     -- KH1's ordinary Fall animation is descent. Attack-driven movement such
     -- as Hurricane Blast or Aerial Sweep is observed but never modified.
-    if player.animation ~= 0x06 or rawDelta <= 0.0 then
+    -- Base Jump falls through 0x06; Shared High Jump falls through 0x0B.
+    if (player.animation ~= 0x06 and player.animation ~= 0x0B)
+        or rawDelta <= 0.0 then
         JokCombatAirJump.lastVerticalPosition = position
         return false
     end
@@ -3308,12 +3406,15 @@ function JokCombatAirJump.observe(player, buttons)
 
     if not JokCombatAirJump.wasAirborne
         and not JokCombatAirJump.consumed then
-        local circleEdge = (buttons & BUTTON.CIRCLE) ~= 0
-            and (lastButtons & BUTTON.CIRCLE) == 0
         local unmodified = (buttons
             & (BUTTON.L1 | BUTTON.R1 | BUTTON.L2 | BUTTON.R2)) == 0
-        local observedJumpEntry = circleEdge and unmodified
-            and player.animation == 0x04
+        -- The game can publish airborne=true one frame before LuaBackend sees
+        -- 0x04/0x09. Requiring the physical B edge here therefore loses a
+        -- legitimate High Jump: on the following frame B is already held.
+        -- A fresh ground->air transition into either native entry is sufficient
+        -- evidence; neither animation can be produced by Kinetic Step.
+        local observedJumpEntry = unmodified
+            and JokCombatAirJump.isNativeFirstJumpEntry(player.animation)
         if JokCombatAirJump.groundRequestFrames > 0
             or observedJumpEntry then
             JokCombatAirJump.available = true
@@ -3328,7 +3429,10 @@ function JokCombatAirJump.observe(player, buttons)
             JokCombatAirJump.releaseRequired =
                 JokCombatAirJump.releaseRequired
                 or (buttons & BUTTON.CIRCLE) ~= 0
-            log("[air-jump] first native jump confirmed; second jump armed.")
+            log(string.format(
+                "[air-jump] first native jump confirmed via 0x%02X; "
+                    .. "second jump armed.",
+                player.animation))
         end
         JokCombatAirJump.groundRequestFrames = 0
     end
@@ -3374,8 +3478,12 @@ function JokCombatAirJump.ownsCircle(buttons)
     if (buttons & (BUTTON.L1 | BUTTON.R1 | BUTTON.L2 | BUTTON.R2)) ~= 0 then
         return false
     end
+    -- While the first B is still held, High Jump must remain completely native
+    -- or KH1 cuts its variable-height ascent short. Once that B is released,
+    -- reserve later B input for Kinetic Step and suppress post-Kinetic B Glide.
     return (JokCombatAirJump.available
             and not JokCombatAirJump.releaseRequired)
+        or JokCombatAirJump.consumed
         or JokCombatAirJump.routeOwned or JokCombatAirJump.active
 end
 
@@ -4187,6 +4295,11 @@ JokCombatNativeLimit = {
     activationFrames = 0,
     activationObserved = false,
     selectorRestored = false,
+    -- A real final Y may arrive while the parent Action still owns Sora. KH1
+    -- cannot consume that edge yet, so this bounded native input latch keeps
+    -- the same request alive until the Reaction dispatcher accepts it.
+    finalInputPending = false,
+    finalInputMarker = 0xA19C,
 }
 
 function JokCombatNativeLimit.buildIndex()
@@ -4215,6 +4328,7 @@ function JokCombatNativeLimit.writeIfOwned(address, owned, original)
 end
 
 function JokCombatNativeLimit.clearJournal()
+    WriteShort(ADDRESS.magicRecovery + 0x16, 0)
     WriteLong(ADDRESS.magicRecovery, 0)
 end
 
@@ -4281,6 +4395,7 @@ function JokCombatNativeLimit.publishJournal(limit, player)
     WriteByte(journal + 0x13, ally1MP)
     WriteByte(journal + 0x14, ally2MP)
     WriteByte(journal + 0x15, limit.restorePartyMP and 0xA6 or 0x00)
+    WriteShort(journal + 0x16, 0)
     WriteLong(journal, JokCombatNativeLimit.recoverySignature)
     return JokCombatNativeLimit.journalLimit() == limit
         and ReadShort(journal + 0x0A) == costOriginal
@@ -4306,6 +4421,90 @@ function JokCombatNativeLimit.restorePartyMpSnapshot()
     return restored
 end
 
+function JokCombatNativeLimit.finalInputOwned()
+    return JokCombatNativeLimit.journalLimit() ~= nil
+        and ReadShort(ADDRESS.magicRecovery + 0x16)
+            == JokCombatNativeLimit.finalInputMarker
+end
+
+function JokCombatNativeLimit.restoreFinalInputLatch()
+    local owned = JokCombatNativeLimit.finalInputOwned()
+    local restored = 0
+    if owned and ReadByte(ADDRESS.autoReaction) == 0x01 then
+        WriteByte(ADDRESS.autoReaction, 0x00)
+        if ReadByte(ADDRESS.autoReaction) == 0x00 then restored = 1 end
+    end
+    if owned then WriteShort(ADDRESS.magicRecovery + 0x16, 0) end
+    JokCombatNativeLimit.finalInputPending = false
+    return restored
+end
+
+function JokCombatNativeLimit.maintainFinalInputLatch()
+    if not JokCombatNativeLimit.finalInputPending
+        or JokCombatNativeLimit.activationObserved
+        or not JokCombatNativeLimit.journalValid() then return false end
+
+    if JokCombatNativeLimit.finalInputOwned() then
+        -- KH1 is allowed to consume the level. Reassert only the value that
+        -- this journal owns; any third-party value makes the latch stand down.
+        local current = ReadByte(ADDRESS.autoReaction)
+        if current == 0x00 then WriteByte(ADDRESS.autoReaction, 0x01) end
+        if ReadByte(ADDRESS.autoReaction) == 0x01 then return true end
+        JokCombatNativeLimit.finalInputPending = false
+        return false
+    end
+
+    local current = ReadByte(ADDRESS.autoReaction)
+    if current == 0x01 then
+        -- The physical edge may still own this frame. Wait for its native
+        -- level to fall before claiming the byte for the buffered request.
+        return false
+    end
+    if current ~= 0x00 then
+        JokCombatNativeLimit.finalInputPending = false
+        log(string.format(
+            "[limit] final-Y latch unavailable: Auto-Reaction=0x%02X.",
+            current))
+        return false
+    end
+
+    -- Journal first: an F1 reload between these two writes can safely restore
+    -- only the exact 0x01 level JokCombat subsequently owns.
+    WriteShort(ADDRESS.magicRecovery + 0x16,
+        JokCombatNativeLimit.finalInputMarker)
+    WriteByte(ADDRESS.autoReaction, 0x01)
+    if JokCombatNativeLimit.finalInputOwned()
+        and ReadByte(ADDRESS.autoReaction) == 0x01 then return true end
+    if ReadByte(ADDRESS.autoReaction) == 0x01 then
+        WriteByte(ADDRESS.autoReaction, 0x00)
+    end
+    WriteShort(ADDRESS.magicRecovery + 0x16, 0)
+    JokCombatNativeLimit.finalInputPending = false
+    return false
+end
+
+function JokCombatNativeLimit.acceptFinalInput(limitId, player)
+    if not JokCombatNativeLimit.armed then
+        if not JokCombatNativeLimit.arm(limitId, player) then return false end
+    end
+    if JokCombatNativeLimit.activeId ~= limitId
+        or JokCombatNativeLimit.activationObserved then return false end
+    local limit = JokCombatNativeLimit.byId[limitId]
+    if limit == nil then return false end
+    local firstRequest = not JokCombatNativeLimit.finalInputPending
+        and not JokCombatNativeLimit.finalInputOwned()
+    JokCombatNativeLimit.selectionFrames =
+        JokCombatNativeLimit.selectionGraceFrames
+    JokCombatNativeLimit.finalInputPending = true
+    JokCombatNativeLimit.maintainFinalInputLatch()
+    if firstRequest then
+        log(string.format(
+            "[limit:%s] first final Y latched once for native %s.",
+            limit.tag, limit.name))
+    end
+    return true
+end
+
 function JokCombatNativeLimit.restore(reason, quiet)
     local journal = ADDRESS.magicRecovery
     local limit = JokCombatNativeLimit.journalLimit()
@@ -4313,6 +4512,8 @@ function JokCombatNativeLimit.restore(reason, quiet)
     local active = JokCombatNativeLimit.byId[JokCombatNativeLimit.activeId]
     local restored = 0
     if ownsJournal then
+        restored = restored
+            + JokCombatNativeLimit.restoreFinalInputLatch()
         local reactionOriginal = ReadShort(journal + 0x0C)
         if JokCombatNativeLimit.writeIfOwned(
                 ADDRESS.reactionWriter,
@@ -4356,6 +4557,7 @@ function JokCombatNativeLimit.restore(reason, quiet)
     JokCombatNativeLimit.activationFrames = 0
     JokCombatNativeLimit.activationObserved = false
     JokCombatNativeLimit.selectorRestored = false
+    JokCombatNativeLimit.finalInputPending = false
     if wasArmed and not quiet then
         log(string.format(
             "[limit:%s] native selector restored (%s; %d owned fields).",
@@ -4433,6 +4635,7 @@ function JokCombatNativeLimit.initialize()
     JokCombatNativeLimit.buildIndex()
     JokCombatNativeLimit.activeId = nil
     JokCombatNativeLimit.armed = false
+    JokCombatNativeLimit.finalInputPending = false
     JokCombatNativeLimit.recoverLegacySonic()
     JokCombatNativeLimit.recoverStale()
     if ReadLong(ADDRESS.magicRecovery) ~= 0 then
@@ -4661,12 +4864,9 @@ function JokCombatNativeLimit.update(player, buttons)
 
     local triangleStarted = (buttons & BUTTON.TRIANGLE) ~= 0
         and (lastButtons & BUTTON.TRIANGLE) == 0
-    if triangleStarted and not JokCombatNativeLimit.activationObserved then
-        JokCombatNativeLimit.selectionFrames =
-            JokCombatNativeLimit.selectionGraceFrames
-        log(string.format(
-            "[limit:%s] final Y released to the native Reaction selector.",
-            limit.tag))
+    if triangleStarted and not JokCombatNativeLimit.activationObserved
+        and not limitActive then
+        JokCombatNativeLimit.acceptFinalInput(limit.id, player)
     end
 
     if limitActive then
@@ -4674,6 +4874,7 @@ function JokCombatNativeLimit.update(player, buttons)
             JokCombatNativeLimit.activationObserved = true
             JokCombatNativeLimit.frames =
                 JokCombatNativeLimit.limitTimeoutFrames
+            JokCombatNativeLimit.restoreFinalInputLatch()
             JokCombatNativeLimit.restoreSelectorOwned()
             JokCombatNativeLimit.restorePartyMpSnapshot()
             -- The Reaction has entered KH1's native Limit state. Close only
@@ -4697,6 +4898,8 @@ function JokCombatNativeLimit.update(player, buttons)
         end
         return true
     end
+
+    JokCombatNativeLimit.maintainFinalInputLatch()
 
     if JokCombatNativeLimit.activationObserved then
         JokCombatNativeLimit.restorePartyMpSnapshot()
@@ -4833,11 +5036,10 @@ end
 -- carries the validated loadout, HUD and route state in the same chunk.
 -- Every named move ends in T. X before the first T chooses Strong/C2/C3/C4/C5;
 -- X after a named move returns to the vanilla physical string. Strong is
--- energy/burst, C2 is pursuit, C3 is crowd control, C4 is the ground-air-ground
--- Ultimate and C5 is single-target execution. C4 alone also accepts B after
--- Slapshot: KH1 performs a real jump, the validated aerial family owns the air
--- phase, and Blitz -> Strike Raid closes after the natural landing.
--- Counterattack remains contextual to a successful Guard.
+-- energy/burst, C2 is pursuit, C3 is crowd control, C4 is combo pressure and
+-- C5 is single-target execution. Counterattack remains contextual to a
+-- successful Guard; the aerial Y family remains independent of every ground
+-- branch.
 JokCombatBranch = {
     nodes = {
         -- Strong / energy: Y Y Y.
@@ -4855,10 +5057,9 @@ JokCombatBranch = {
             triangle = "XXTTT" },
         XXTTT = { kind = "limit", id = "trinity_limit" },
 
-        -- C4 / ground-air-ground Ultimate:
-        -- A A A Y (Slapshot), B (real jump chase), aerial Y family,
-        -- natural landing, Y (Blitz), Y (Strike Raid).
-        XXXT = { kind = "action", id = "slapshot" },
+        -- C4 / combo pressure: A A A Y Y Y.
+        XXXT = { kind = "action", id = "slapshot",
+            triangle = "XXXTT" },
         XXXTT = { kind = "action", id = "blitz",
             triangle = "XXXTTT" },
         XXXTTT = { kind = "limit", id = "strike_raid" },
@@ -4910,6 +5111,8 @@ JokCombatBranch = {
     waitingFrames = 0,
     waitingSourceAnimation = nil,
     waitingSourceTime = 0.0,
+    neutralTrianglePending = false,
+    neutralTriangleFrames = 0,
     -- These three virtual paths keep the validated aerial order independent
     -- from the ground map: native CE -> Hurricane Blast -> Aerial Sweep.
     -- The two Action nodes still reference their single canonical catalog
@@ -4939,14 +5142,9 @@ JokCombatBranch = {
         T = "Strong / burst",
         XT = "C2 / pursuit",
         XXT = "C3 / crowd control",
-        XXXT = "C4 / ground-air Ultimate",
+        XXXT = "C4 / combo pressure",
         XXXXT = "C5 / execution",
     },
-    ultimateLauncherPath = "XXXT",
-    ultimateReturnPath = "XXXTT",
-    ultimateLimitPath = "XXXTTT",
-    ultimatePhase = nil,
-    ultimateFrames = 0,
 }
 
 function JokCombatBranch.kindReady(node)
@@ -5077,16 +5275,13 @@ function JokCombatBranch.initialize()
             .. "nodes=%d/13 actions=%d/8.", count, actionCount))
         valid = false
     end
-    if JokCombatBranch.nodes[JokCombatBranch.ultimateLauncherPath] == nil
-        or JokCombatBranch.nodes[
-            JokCombatBranch.ultimateLauncherPath].triangle ~= nil
-        or JokCombatBranch.nodes[JokCombatBranch.ultimateReturnPath] == nil
-        or JokCombatBranch.nodes[
-            JokCombatBranch.ultimateReturnPath].triangle
-            ~= JokCombatBranch.ultimateLimitPath
-        or JokCombatBranch.nodes[JokCombatBranch.ultimateLimitPath] == nil then
-        ConsolePrint("[JokCombat:branch:fault] C4 ground-air Ultimate "
-            .. "launcher/landing topology is incomplete.")
+    if JokCombatBranch.nodes.XXXT == nil
+        or JokCombatBranch.nodes.XXXT.triangle ~= "XXXTT"
+        or JokCombatBranch.nodes.XXXTT == nil
+        or JokCombatBranch.nodes.XXXTT.triangle ~= "XXXTTT"
+        or JokCombatBranch.nodes.XXXTTT == nil then
+        ConsolePrint("[JokCombat:branch:fault] standard C4 "
+            .. "Slapshot/Blitz/Strike Raid topology is incomplete.")
         valid = false
     end
     if valid and #ACTION_CATALOG - 1 ~= 11 then valid = false end
@@ -5094,23 +5289,12 @@ function JokCombatBranch.initialize()
     return valid, count, actionCount
 end
 
-function JokCombatBranch.clearUltimate(reason, quiet)
-    local phase = JokCombatBranch.ultimatePhase
-    JokCombatBranch.ultimatePhase = nil
-    JokCombatBranch.ultimateFrames = 0
-    if phase ~= nil and not quiet then
-        log("[ultimate] " .. phase .. " closed"
-            .. (reason ~= nil and ": " .. reason or "."))
-    end
-end
-
-function JokCombatBranch.reset(reason, quiet, skipCleanup, preserveUltimate)
+function JokCombatBranch.reset(reason, quiet, skipCleanup)
     local branchWasActive = JokCombatBranch.active
         or JokCombatBranch.pendingPath ~= nil
         or JokCombatBranch.waitingPath ~= nil
-    local ultimateWasActive = JokCombatBranch.ultimatePhase ~= nil
-    if (branchWasActive or ultimateWasActive)
-        and not skipCleanup and canRun then
+        or JokCombatBranch.neutralTrianglePending
+    if branchWasActive and not skipCleanup and canRun then
         -- A child Limit is pre-armed while its parent Action is active. If
         -- that family closes without entering the native Limit, return the
         -- Reaction selector and borrowed MP state immediately.
@@ -5136,54 +5320,12 @@ function JokCombatBranch.reset(reason, quiet, skipCleanup, preserveUltimate)
     JokCombatBranch.waitingFrames = 0
     JokCombatBranch.waitingSourceAnimation = nil
     JokCombatBranch.waitingSourceTime = 0.0
+    JokCombatBranch.neutralTrianglePending = false
+    JokCombatBranch.neutralTriangleFrames = 0
     JokCombatBranch.airFamily = false
-    if preserveUltimate ~= true then
-        JokCombatBranch.clearUltimate(reason, true)
-    end
     if branchWasActive and not quiet then
         log("[branch] closed" .. (reason ~= nil and ": " .. reason or "."))
-    elseif ultimateWasActive and preserveUltimate ~= true and not quiet then
-        log("[ultimate] closed"
-            .. (reason ~= nil and ": " .. reason or "."))
     end
-end
-
-function JokCombatBranch.ultimateLauncherActive(player)
-    return CONFIG.groundAirUltimate
-        and player ~= nil and not player.airborne
-        and JokCombatBranch.path == JokCombatBranch.ultimateLauncherPath
-        and JokCombatBranch.animation == 0xCF
-        and player.animation == JokCombatBranch.animation
-end
-
-function JokCombatBranch.beginUltimate(player)
-    if not JokCombatBranch.ultimateLauncherActive(player) then return false end
-    local window = JokCombatBranch.windows[player.animation]
-    if window == nil or player.time < window.open then
-        log(string.format(
-            "[ultimate] Aerial Chase ignored before Slapshot prebuffer: "
-                .. "time=%.2f opens=%.2f.",
-            player.time, window ~= nil and window.open or 0.0))
-        return false
-    end
-
-    if player.time < window.release then
-        JokCombatBranch.ultimatePhase = "launch_buffered"
-        JokCombatBranch.ultimateFrames =
-            CONFIG.groundAirUltimateTimeoutFrames
-        log(string.format(
-            "[ultimate] Aerial Chase buffered once: Slapshot time=%.2f "
-                .. "releases=%.2f.", player.time, window.release))
-        return true
-    end
-
-    JokCombatBranch.reset("C4 Aerial Chase", true)
-    JokCombatBranch.ultimatePhase = "jumping"
-    JokCombatBranch.ultimateFrames =
-        CONFIG.groundAirUltimateTimeoutFrames
-    log("[ultimate] C4 launch accepted: Slapshot -> real B jump; "
-        .. "Y will enter the native aerial family.")
-    return true
 end
 
 function JokCombatBranch.refreshAirState(player)
@@ -5364,18 +5506,6 @@ function JokCombatBranch.observeRequest(player)
             "[branch] %s accepted: anim=0x%02X context=%s.",
             JokCombatBranch.path, player.animation,
             player.airborne and "air-native" or "ground"))
-        if JokCombatBranch.path == JokCombatBranch.airSweepPath
-            and JokCombatBranch.ultimatePhase == "air_chain" then
-            JokCombatBranch.ultimatePhase = "returning"
-            JokCombatBranch.ultimateFrames =
-                CONFIG.groundAirUltimateTimeoutFrames
-            log("[ultimate] aerial close accepted; Aerial Sweep now owns "
-                .. "the natural descent.")
-        elseif JokCombatBranch.path == JokCombatBranch.ultimateReturnPath
-            and JokCombatBranch.ultimatePhase == "closing" then
-            log("[ultimate] grounded close accepted: Blitz; final Y is "
-                .. "Strike Raid.")
-        end
         -- The parent Action is the one-frame-early carrier required by KH1's
         -- real Reaction selector. This replaces the old reverse physical A
         -- prefix without synthesizing or delaying the final Y.
@@ -5413,155 +5543,69 @@ function JokCombatBranch.rootPath(player)
     return neutral and "T" or nil
 end
 
-function JokCombatBranch.updateUltimateState(player, crossPressed,
-        trianglePressed)
-    local phase = JokCombatBranch.ultimatePhase
-    if phase == nil then return false, false end
+function JokCombatBranch.clearNeutralTriangle(reason)
+    local wasPending = JokCombatBranch.neutralTrianglePending
+    JokCombatBranch.neutralTrianglePending = false
+    JokCombatBranch.neutralTriangleFrames = 0
+    if wasPending and reason ~= nil then
+        log("[branch] neutral Y arbitration closed: " .. reason .. ".")
+    end
+    return wasPending
+end
 
-    JokCombatBranch.ultimateFrames = JokCombatBranch.ultimateFrames - 1
-    if JokCombatBranch.ultimateFrames <= 0 then
-        JokCombatBranch.reset("ground-air cycle timed out")
-        return false, false
+function JokCombatBranch.armNeutralTriangle()
+    JokCombatBranch.neutralTrianglePending = true
+    JokCombatBranch.neutralTriangleFrames =
+        CONFIG.neutralTriangleGraceFrames
+    log("[branch] neutral Y left native for contextual arbitration; "
+        .. "Strong will open after release if no Reaction claims it.")
+    return true
+end
+
+function JokCombatBranch.resolveNeutralTriangle(player, buttons,
+        crossPressed, trianglePressed)
+    if not JokCombatBranch.neutralTrianglePending then return false, false end
+
+    local nativeReaction = ReadShort(ADDRESS.reactionCommandId)
+    if nativeReaction ~= 0 then
+        JokCombatBranch.clearNeutralTriangle(string.format(
+            "delegated to native Reaction 0x%04X", nativeReaction))
+        return true, false
+    end
+    if not HUD.nativeRootSelectionAvailable() then
+        JokCombatBranch.clearNeutralTriangle(
+            "native Command Menu left its root")
+        return true, false
+    end
+    if JokCombatBranch.rootPath(player) ~= "T" then
+        JokCombatBranch.clearNeutralTriangle(
+            "player left the neutral gameplay state")
+        return true, false
     end
 
-    if phase == "launch_buffered" then
-        local window = JokCombatBranch.windows[0xCF]
-        if not JokCombatBranch.ultimateLauncherActive(player)
-            or window == nil then
-            JokCombatBranch.reset("buffered C4 launch source changed")
-            return false, false
-        end
-        if player.time < window.release then
-            if crossPressed or trianglePressed then
-                log("[ultimate] input ignored: one Aerial Chase is already "
-                    .. "buffered.")
-                return true, true
-            end
-            return false, false
-        end
-
-        JokCombatBranch.reset("buffered C4 Aerial Chase", true)
-        JokCombatBranch.ultimatePhase = "jumping"
-        JokCombatBranch.ultimateFrames =
-            CONFIG.groundAirUltimateTimeoutFrames
-        JokCombatGuardCounter.reset("buffered C4 Aerial Chase", true)
-        clearComboIntent()
-        clearTransitionCheck()
-        clearDeferredAttackCommand()
-        restoreActionRoutes()
-        cancelPlayer(player, "ultimate-aerial-chase-buffered")
-        forceCircleFrames = CONFIG.forcedInputFrames
-        phase = "jumping"
-        log("[ultimate] buffered Aerial Chase released into KH1's real jump.")
+    -- Never retain a synthetic Strong request across the first confirmation
+    -- press after Talk/Examine/Save. Even if KH1 has not published its Reaction
+    -- field yet, physical A wins and reaches the game on this same frame.
+    if crossPressed then
+        JokCombatBranch.clearNeutralTriangle(
+            "physical A took priority")
+        return true, false
     end
-
-    if phase == "jumping" then
-        if not player.airborne then
-            if crossPressed or trianglePressed then
-                log("[ultimate] air input ignored until the real jump state "
-                    .. "is visible.")
-                return true, true
-            end
-            return false, false
-        end
-        JokCombatBranch.ultimatePhase = "air_ready"
-        JokCombatBranch.ultimateFrames =
-            CONFIG.groundAirUltimateTimeoutFrames
-        phase = "air_ready"
-        log("[ultimate] native airborne state acquired; Y = Aerial Finisher.")
+    if trianglePressed then
+        JokCombatBranch.neutralTriangleFrames =
+            CONFIG.neutralTriangleGraceFrames
+        return true, false
     end
+    if (buttons & BUTTON.TRIANGLE) ~= 0 then return true, false end
 
-    if phase == "air_ready" then
-        if not player.airborne then
-            JokCombatBranch.reset("landed before the aerial phase")
-            return false, false
-        end
-        if not trianglePressed then
-            -- A stays completely native. It can be used as an optional chase
-            -- hit; the next Y still joins the same ultimate air phase.
-            return false, false
-        end
-        if transitionKind ~= nil or deferredLinkKind ~= nil then
-            log("[ultimate] Aerial Finisher input ignored while another "
-                .. "transition owns Attack.")
-            return true, true
-        end
-        JokCombatBranch.airFamily = true
-        if isAirNormalContext(player) then
-            local consumed = JokCombatBranch.queue(
-                player, JokCombatBranch.airFinisherPath)
-            if JokCombatBranch.pendingPath ~= nil
-                or JokCombatBranch.waitingPath ~= nil then
-                JokCombatBranch.ultimatePhase = "air_chain"
-                JokCombatBranch.ultimateFrames =
-                    CONFIG.groundAirUltimateTimeoutFrames
-            end
-            return true, consumed
-        end
-        local consumed = JokCombatBranch.execute(
-            player, JokCombatBranch.airFinisherPath)
-        if JokCombatBranch.waitingPath ~= nil then
-            JokCombatBranch.ultimatePhase = "air_chain"
-            JokCombatBranch.ultimateFrames =
-                CONFIG.groundAirUltimateTimeoutFrames
-        end
-        return true, consumed
-    end
+    JokCombatBranch.neutralTriangleFrames =
+        JokCombatBranch.neutralTriangleFrames - 1
+    if JokCombatBranch.neutralTriangleFrames > 0 then return true, false end
 
-    if phase == "air_chain" then
-        if not player.airborne
-            and JokCombatBranch.path ~= JokCombatBranch.airSweepPath then
-            JokCombatBranch.reset("landed before Aerial Sweep")
-            if trianglePressed then return true, true end
-            if crossPressed then return true, false end
-        end
-        return false, false
-    end
-
-    if phase == "returning" then
-        local release = JokCombatBranch.windows[0xD6].release
-        if not player.airborne
-            and (player.animation ~= 0xD6 or player.time >= release) then
-            JokCombatBranch.reset(
-                "natural landing reached", true, false, true)
-            JokCombatBranch.ultimatePhase = "ground_ready"
-            JokCombatBranch.ultimateFrames =
-                CONFIG.groundAirUltimateTimeoutFrames
-            phase = "ground_ready"
-            log("[ultimate] natural landing confirmed; Y = Blitz, "
-                .. "then Y = Strike Raid.")
-        elseif trianglePressed then
-            log("[ultimate] grounded close ignored until Aerial Sweep lands.")
-            return true, true
-        else
-            return false, false
-        end
-    end
-
-    if phase == "ground_ready" then
-        if player.airborne then
-            JokCombatBranch.reset("left the ground before the close")
-            return false, false
-        end
-        if crossPressed then
-            JokCombatBranch.reset("vanilla A replaced the ultimate close", true)
-            return true, false
-        end
-        if not trianglePressed then return false, false end
-        if transitionKind ~= nil or deferredLinkKind ~= nil then
-            log("[ultimate] Blitz close ignored while Attack is busy.")
-            return true, true
-        end
-        JokCombatBranch.ultimatePhase = "closing"
-        JokCombatBranch.ultimateFrames =
-            CONFIG.groundAirUltimateTimeoutFrames
-        JokCombatBranch.airFamily = false
-        log("[ultimate] grounded close requested: Blitz.")
-        return true, JokCombatBranch.execute(
-            player, JokCombatBranch.ultimateReturnPath)
-    end
-
-    return false, false
+    JokCombatBranch.clearNeutralTriangle(nil)
+    log("[branch] neutral Y arbitration accepted: no native Reaction; "
+        .. "opening Strong.")
+    return true, JokCombatBranch.execute(player, "T")
 end
 
 function JokCombatBranch.nodeName(node)
@@ -5578,46 +5622,6 @@ function JokCombatBranch.guideLine(sequence, node, player, path)
         return sequence .. " -"
     end
     return sequence .. " " .. (JokCombatBranch.nodeName(node) or "-")
-end
-
-function JokCombatBranch.ultimateGuideEntries(player)
-    if JokCombatBranch.ultimateLauncherActive(player)
-        and player.time >= JokCombatBranch.windows[0xCF].open then
-        return {
-            "[B] Aerial Chase",
-            "[Y] Aerial Finisher",
-            "[Y][Y] Hurricane Blast",
-            "[Y][Y][Y] Aerial Sweep",
-        }
-    end
-
-    local phase = JokCombatBranch.ultimatePhase
-    if phase == "launch_buffered" or phase == "jumping"
-        or phase == "air_ready" then
-        return {
-            "[Y] Aerial Finisher",
-            "[Y][Y] Hurricane Blast",
-            "[Y][Y][Y] Aerial Sweep",
-            "-",
-        }
-    end
-    if phase == "returning" then
-        return {
-            "[Y] Blitz after landing",
-            "[Y][Y] Strike Raid",
-            "-",
-            "-",
-        }
-    end
-    if phase == "ground_ready" then
-        return {
-            "[Y] Blitz",
-            "[Y][Y] Strike Raid",
-            "-",
-            "-",
-        }
-    end
-    return nil
 end
 
 function JokCombatBranch.familyGuideEntries(node, includeCurrent, player, path,
@@ -5700,9 +5704,6 @@ function JokCombatBranch.guideEntries(player, buttons)
     local counterEntries = JokCombatGuardCounter.guideEntries(player)
     if counterEntries ~= nil then return counterEntries end
 
-    local ultimateEntries = JokCombatBranch.ultimateGuideEntries(player)
-    if ultimateEntries ~= nil then return ultimateEntries end
-
     if JokCombatBranch.path ~= nil then
         return JokCombatBranch.branchGuideEntries(player)
     end
@@ -5731,37 +5732,41 @@ function JokCombatBranch.update(player, buttons, crossPressed,
     local modified = (buttons & (BUTTON.L1 | BUTTON.R1
         | BUTTON.L2 | BUTTON.R2)) ~= 0
     if modified then
-        if JokCombatBranch.active or JokCombatBranch.ultimatePhase ~= nil then
+        if JokCombatBranch.active or JokCombatBranch.neutralTrianglePending then
             JokCombatBranch.reset("modifier shortcut took priority")
         end
         return false
     end
-    -- A Limit's immediate parent Action pre-arms its real Reaction one input
-    -- early. Do not consume or remap the final Y: KH1 must receive that
-    -- physical edge to enter the complete dispatcher and follow-up sequence.
+    -- A Limit's immediate parent Action pre-arms its real Reaction. One real
+    -- final-Y edge is then latched until KH1 can accept it; the player never
+    -- has to repeat Y merely because the parent Action is still recovering.
     if JokCombatNativeLimit.selectorOwned() then
         if trianglePressed then
             local limit = JokCombatNativeLimit.byId[
                 JokCombatNativeLimit.activeId]
             if limit ~= nil then
+                JokCombatNativeLimit.acceptFinalInput(limit.id, player)
                 log(string.format(
-                    "[branch] %s final Y delegated to native %s.",
+                    "[branch] %s first final Y buffered for native %s.",
                     limit.path, limit.name))
             end
         end
         return false
     end
+    local arbitrationHandled, arbitrationConsumed =
+        JokCombatBranch.resolveNeutralTriangle(
+            player, buttons, crossPressed, trianglePressed)
+    if arbitrationHandled then return arbitrationConsumed end
+
     -- Native contextual commands (Save, Examine, Talk, etc.) own Triangle.
-    -- At a Save point the root Command Menu can still report slot 0 on the
-    -- physical Y frame, so menu state alone is one frame too late. Starting
-    -- Vortex there left its synthetic route waiting for D3 and suppressed the
-    -- first two confirmation presses. The live Reaction ID is the earlier,
-    -- authoritative gate already used by the native Limit armer.
+    -- Only a Reaction that exists while JokCombat owns no active node may gate
+    -- a new family. Some complete Action records publish a transient non-zero
+    -- value after entry; treating that as a world interaction closed Vortex
+    -- immediately and left its controls suppressed. Neutral Y uses the short
+    -- arbitration above to catch Talk/Examine/Save before Strong is dispatched.
     local nativeReaction = ReadShort(ADDRESS.reactionCommandId)
-    if nativeReaction ~= 0 then
-        if JokCombatBranch.active or JokCombatBranch.ultimatePhase ~= nil then
-            JokCombatBranch.reset("native Reaction Command took priority")
-        end
+    local branchOwnsInput = JokCombatBranch.active
+    if nativeReaction ~= 0 and not branchOwnsInput then
         if trianglePressed then
             log(string.format(
                 "[branch] Y delegated to native Reaction 0x%04X; "
@@ -5769,17 +5774,9 @@ function JokCombatBranch.update(player, buttons, crossPressed,
         end
         return false
     end
-    if not HUD.nativeRootSelectionAvailable() then
-        if JokCombatBranch.active or JokCombatBranch.ultimatePhase ~= nil then
-            JokCombatBranch.reset("native command took priority")
-        end
+    if not HUD.nativeRootSelectionAvailable() and not branchOwnsInput then
         return false
     end
-
-    local ultimateHandled, ultimateConsumed =
-        JokCombatBranch.updateUltimateState(
-            player, crossPressed, trianglePressed)
-    if ultimateHandled then return ultimateConsumed end
 
     local requestAccepted = JokCombatBranch.observeRequest(player)
     if JokCombatBranch.waitingPath ~= nil then
@@ -5806,30 +5803,35 @@ function JokCombatBranch.update(player, buttons, crossPressed,
 
     if JokCombatBranch.path ~= nil then
         if player.animation ~= JokCombatBranch.animation then
-            JokCombatBranch.reset("active node ended or was interrupted",
-                false, false,
-                JokCombatBranch.ultimatePhase == "returning")
+            JokCombatBranch.reset("active node ended or was interrupted")
             return false
         end
 
         -- Retry a parent pre-arm while its native Action remains active. The
         -- normal case succeeds in observeRequest; this covers a transiently
-        -- busy root selector. A Y on the exact retry frame is consumed because
-        -- its control map was still suppressed at the start of that frame.
+        -- busy root selector. If the first final Y is the edge that makes the
+        -- selector ready, preserve that same edge through the native latch.
         local selectorWasOwned = JokCombatNativeLimit.selectorOwned()
         JokCombatBranch.prearmLimitChild(player)
         if JokCombatNativeLimit.selectorOwned() then
             if trianglePressed and not selectorWasOwned then
-                log("[branch] native Limit selector became ready on this "
-                    .. "frame; early Y discarded, press Y again.")
+                local limit = JokCombatNativeLimit.byId[
+                    JokCombatNativeLimit.activeId]
+                if limit ~= nil then
+                    JokCombatNativeLimit.acceptFinalInput(limit.id, player)
+                    log(string.format(
+                        "[branch] %s selector and first final Y latched "
+                            .. "on the same frame.", limit.path))
+                end
                 return true
             end
             if trianglePressed then
                 local limit = JokCombatNativeLimit.byId[
                     JokCombatNativeLimit.activeId]
                 if limit ~= nil then
+                    JokCombatNativeLimit.acceptFinalInput(limit.id, player)
                     log(string.format(
-                        "[branch] %s final Y delegated to native %s.",
+                        "[branch] %s first final Y buffered for native %s.",
                         limit.path, limit.name))
                 end
             end
@@ -5859,8 +5861,18 @@ function JokCombatBranch.update(player, buttons, crossPressed,
             return true
         end
         if childNode.kind == "limit" then
+            -- An early final Y is valid input, not a request to skip the
+            -- parent Action. Arm the real selector now and keep this one edge
+            -- pending until the native dispatcher reaches a legal state.
+            if JokCombatNativeLimit.acceptFinalInput(
+                    childNode.id, player) then
+                log("[branch] " .. child
+                    .. " accepted from its first final Y; native input "
+                    .. "latched through parent recovery.")
+                return true
+            end
             log("[branch] " .. child
-                .. " ignored: native Limit selector was not pre-armed; "
+                .. " ignored: native Limit selector could not be armed; "
                 .. "no fallback attack was substituted.")
             return true
         end
@@ -5882,7 +5894,7 @@ function JokCombatBranch.update(player, buttons, crossPressed,
     end
     JokCombatBranch.airFamily = player.airborne
         and root == JokCombatBranch.airFinisherPath
-    if root == "T" then return JokCombatBranch.execute(player, root) end
+    if root == "T" then return JokCombatBranch.armNeutralTriangle() end
     local consumed = JokCombatBranch.queue(player, root)
     if not JokCombatBranch.active then JokCombatBranch.airFamily = false end
     return consumed
@@ -6055,7 +6067,7 @@ local function updateAttackControlRouting(buttons, player)
 end
 
 local function updateDefenseRouting(buttons, guardAvailable, dodgeActive,
-        nativeLimitActive)
+        nativeLimitActive, player)
     -- KH1's native Limit state owns its complete input and recovery machine.
     -- Cancelling only the visible animation leaves raw70 >= 0x20 orphaned and
     -- permanently locks movement. Restore every custom defense route while a
@@ -6082,12 +6094,16 @@ local function updateDefenseRouting(buttons, guardAvailable, dodgeActive,
     local circleHeld = (buttons & BUTTON.CIRCLE) ~= 0
     local squareHeld = (buttons & BUTTON.SQUARE) ~= 0
     local actionModifierHeld = l2Held or r2Held
+    local playerAirborne = player ~= nil and player.airborne
     -- L1/R1 own KH1's native magic shortcut layer. Fixed Dodge must leave
     -- Square completely vanilla while either shortcut modifier is held.
     local nativeShortcutHeld = (buttons & (BUTTON.L1 | BUTTON.R1)) ~= 0
     local anyDodgeModifierHeld = actionModifierHeld or nativeShortcutHeld
     local guardChord = l2Held and not r2Held and circleHeld
-    local dodgeSquareHeld = squareHeld and not dodgeActive
+    local nativeSuperglideOwnsSquare =
+        CONFIG.nativeAirSuperglideOnSquare and playerAirborne
+    local dodgeSquareHeld = squareHeld and not nativeSuperglideOwnsSquare
+        and not dodgeActive
         and not anyDodgeModifierHeld
 
     local circleMap = NORMAL.circleControlMap
@@ -6105,13 +6121,11 @@ local function updateDefenseRouting(buttons, guardAvailable, dodgeActive,
         -- R2+Circle and R2+Square are configurable Action Ability slots.
         circleMap = 0xFE
         squareMap = 0xFE
-    end
-    if JokCombatAirJump ~= nil
+    elseif JokCombatAirJump ~= nil
         and JokCombatAirJump.ownsCircle ~= nil
         and JokCombatAirJump.ownsCircle(buttons) then
-        -- Once the second-jump charge is ready, physical B belongs to the
-        -- Kinetic Step adapter. Suppress Glide/contextual Circle so the same
-        -- edge cannot both jump and enter a native airborne Circle action.
+        -- B remains native during the first held High Jump. After release it
+        -- belongs to Kinetic Step, while aerial Square owns Superglide.
         circleMap = 0xFE
     end
     if dodgeActive and squareHeld and not anyDodgeModifierHeld then
@@ -6128,24 +6142,20 @@ local function updateDefenseRouting(buttons, guardAvailable, dodgeActive,
     setByte("guardSelection", ADDRESS.guardSelectionBranch,
         selectGuard and 0xEB or 0x74, { 0x74, 0xEB })
 
-    -- Universal Guard and Dodge both receive the airborne bypass while their
-    -- own forced input is active. forceGuardFrames disambiguates the shared
-    -- virtual Square/defense action used by the two routes.
+    -- Universal Guard keeps the airborne bypass. Dodge is deliberately
+    -- ground-only because physical Square owns native Superglide in the air.
     local allowAirGuard = CONFIG.universalGuardCancel
         and (guardChord or forceGuardFrames > 0)
-    local allowAirDodge = CONFIG.universalDodgeCancel
-        and forceGuardFrames == 0
-        and (dodgeSquareHeld
-            or (forceSquareFrames > 0 and not nativeShortcutHeld))
     setByte("airDefense", ADDRESS.airDefenseBranch,
-        (allowAirGuard or allowAirDodge) and 0x82 or 0x85,
+        allowAirGuard and 0x82 or 0x85,
         { 0x85, 0x82 })
 
     local guardAvailability = CONFIG.unlockDefensiveActions and 0x72 or 0x74
     -- Keep the roll route armed before the first Square frame. Previously it
     -- was selected only after Square was observed, so a stationary first press
     -- could already have entered Guard and a second press appeared to roll.
-    if CONFIG.fixedDodgeOnSquare and forceGuardFrames == 0
+    if CONFIG.fixedDodgeOnSquare and not playerAirborne
+        and forceGuardFrames == 0
         and (not anyDodgeModifierHeld
             or (forceSquareFrames > 0 and not nativeShortcutHeld)) then
         guardAvailability = 0xEB
@@ -6158,7 +6168,8 @@ local function updateDefenseRouting(buttons, guardAvailable, dodgeActive,
     -- enabling it on L2 alone caused the unwanted automatic Guard.
     if (CONFIG.guardOnL2Circle and guardChord)
         or (CONFIG.fixedDodgeOnSquare and dodgeSquareHeld)
-        or (forceSquareFrames > 0 and not nativeShortcutHeld) then
+        or (forceSquareFrames > 0 and not playerAirborne
+            and not nativeShortcutHeld) then
         setByte("forceSquare", ADDRESS.forceSquareBranch, 0x82,
             { 0x84, 0x82 })
     else
@@ -6179,6 +6190,7 @@ function _OnInit()
     HUD.overlayGroup = nil
     HUD.overlaySignature = nil
     HUD.nativeTokenBackups = {}
+    HUD.nativeCommandBackup = nil
     HUD.nativeSelectionOwned = false
     HUD.nativeSelectionOriginalSlot = nil
     HUD.nativeSelectionPreviousSlot = nil
@@ -6329,7 +6341,8 @@ function _OnInit()
     log(string.format(
         "native Limit combos ready: %d/5; Sonic/Ars/Strike/Ragnarok use "
             .. "temporary 0 MP costs, Trinity preserves party MP and requires "
-            .. "Donald + Goofy.", nativeLimitReadyCount))
+            .. "Donald + Goofy; first final Y uses one journaled native "
+            .. "input latch.", nativeLimitReadyCount))
     log("successful-Guard Counterattack detector "
         .. (guardCounterReady and "ready: read-only 0x10 signal -> A."
             or "disabled."))
@@ -6342,11 +6355,13 @@ function _OnInit()
         .. "defaults; overlay is currently "
         .. (HUD.enabled and "on." or "off."))
     log("family roles ready: Strong=burst, C2=pursuit, C3=crowd control, "
-        .. "C4=ground-air Ultimate, C5=execution.")
-    log("Combo Guide ready: C4 shows B Aerial Chase and its landing close; "
+        .. "C4=combo pressure, C5=execution.")
+    log("Combo Guide ready: C4 shows Slapshot -> Blitz -> Strike Raid; "
         .. "A otherwise stays a native physical continuation.")
-    log("fourth loadout row follows the native Summon unlock; early saves "
-        .. "show and edit the three rows KH1 currently renders.")
+    log("neutral Y arbitration ready: two released frames before Strong; "
+        .. "Reaction Commands and the first physical A keep native priority.")
+    log("fourth loadout row ready: locked Summon borrows a reversible visual "
+        .. "carrier; only a native 0xFF slot remains three-row.")
     log("native Ripple Drive/Stun Impact/Gravity Break/Zantetsuken "
         .. "selectors ready.")
     log("Action Ability context ready: Hurricane Blast is callable on ground "
@@ -6356,8 +6371,10 @@ function _OnInit()
         .. (JokCombatAirJump.enabled and "ready" or "disabled")
         .. ": one charge after a real first jump; B routes animation 0x0F, "
         .. "applies the bounded Critical Mix lift and restarts air hit 1.")
-    log("native free-fall brake ready: first/second Fall 0x06 downward "
-        .. "delta x0.45; the factor is applied once per frame.")
+    log("native air Superglide ready: hold Square after either jump; "
+        .. "Dodge Roll is forced only while grounded.")
+    log("native free-fall brake ready: base Fall 0x06 / High Jump Fall "
+        .. "0x0B downward delta x0.45; the factor is applied once per frame.")
     log("native aerial attack descent brake "
         .. (airAttackBrakeReady and "ready" or "disabled")
         .. ": CC/CD/CE downward delta x0.25; upward motion and D1/D6 "
@@ -6367,9 +6384,6 @@ function _OnInit()
             .. "all special actions remain at native playback.",
         JokCombatAttackSpeed.enabled and "ready" or "disabled",
         CONFIG.normalAttackSpeedMultiplier))
-    log("ground-air Ultimate ready: AAAY Slapshot -> B real jump -> "
-        .. "Y/Y/Y aerial family -> natural landing -> Y Blitz -> "
-        .. "Y Strike Raid.")
     if staleSyntheticAttack then
         log("cleared stale synthetic Attack flags during reload.")
     end
@@ -6482,7 +6496,7 @@ function _OnFrame()
         forceTriangleAttackFrames = 0
         setByte("forceCircle", ADDRESS.forceCircleBranch,
             NORMAL.forceCircle, { 0x74, 0x72 })
-        updateDefenseRouting(buttons, false, false, true)
+        updateDefenseRouting(buttons, false, false, true, player)
         updateLoadoutMenuRouting(false, false)
         setByte("triangleControlMap", ADDRESS.triangleControlMap,
             NORMAL.triangleControlMap, { 0xFF, 0xFE })
@@ -6539,7 +6553,7 @@ function _OnFrame()
         -- retaining it would let a new Square edge restart the same roll.
         forceSquareFrames = 0
     end
-    updateDefenseRouting(buttons, guardAvailable, dodgeActive, false)
+    updateDefenseRouting(buttons, guardAvailable, dodgeActive, false, player)
     updateModifierFaceRouting(buttons)
     updateAttackControlRouting(buttons, player)
     if faulted then
@@ -6587,7 +6601,7 @@ function _OnFrame()
         actionConsumed = true
     elseif circlePressed and not l2Held and not r2Held
         and not nativeShortcutHeld then
-        if player.airborne then
+        if player.airborne and not JokCombatAirJump.releaseRequired then
             -- The second jump is the only universal offensive jump cancel. It
             -- closes the current Pirate family first, then Kinetic Step owns
             -- one byte-only aerial route and one synthetic Attack edge.
@@ -6601,23 +6615,7 @@ function _OnFrame()
                 restoreActionRoutes()
                 JokCombatAirJump.begin(player)
             end
-        elseif JokCombatBranch.ultimateLauncherActive(player) then
-            -- Slapshot is the only authored launcher gateway. Its B follow-up
-            -- is still KH1's real jump; JokCombat merely opens the late cancel
-            -- and remembers that the aerial family belongs to C4.
-            actionConsumed = true
-            if JokCombatBranch.beginUltimate(player) then
-                if JokCombatBranch.ultimatePhase == "jumping" then
-                    JokCombatGuardCounter.reset("C4 Aerial Chase", true)
-                    clearComboIntent()
-                    clearTransitionCheck()
-                    clearDeferredAttackCommand()
-                    restoreActionRoutes()
-                    cancelPlayer(player, "ultimate-aerial-chase")
-                    forceCircleFrames = CONFIG.forcedInputFrames
-                end
-            end
-        else
+        elseif not player.airborne then
             -- Every other normal jump breaks the local chain. It only cancels
             -- an attack after the configured link window; it is not universal.
             JokCombatBranch.reset("jump")
@@ -6634,6 +6632,7 @@ function _OnFrame()
             end
         end
     elseif CONFIG.fixedDodgeOnSquare and squarePressed and dodgeAvailable
+        and not player.airborne
         and not l2Held and not r2Held and not nativeShortcutHeld then
         actionConsumed = true
         if dodgeActive then
