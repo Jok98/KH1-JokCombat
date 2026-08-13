@@ -21,6 +21,13 @@ local CONFIG = {
     -- remains below only as a disabled rollback path.
     nativeNormalAttacks = true,
 
+    -- Give only KH1's seven native physical combo animations a light speed
+    -- increase. Action Abilities, Limits, magic, defense, jumps and locomotion
+    -- retain their authored playback speed. The controller snapshots the live
+    -- value, applies a multiplier, and restores only its exact owned value.
+    normalAttackSpeedup = true,
+    normalAttackSpeedMultiplier = 1.15,
+
     -- Modifier-free Triangle selects the Pirate-style Strong/C2/C3/C4/C5
     -- family. Eight ground Action Abilities and all five native Limits form
     -- five role-specific branches; Cross after a named move closes the family
@@ -1995,6 +2002,10 @@ local function updateActionRoutes(player)
 end
 
 local function restoreAllPatches()
+    if JokCombatAttackSpeed ~= nil
+        and JokCombatAttackSpeed.restore ~= nil then
+        JokCombatAttackSpeed.restore("patch restore", true)
+    end
     if JokCombatAirJump ~= nil
         and JokCombatAirJump.restoreRoutes ~= nil then
         JokCombatAirJump.restoreRoutes("patch restore", true)
@@ -3567,6 +3578,210 @@ function JokCombatAirAttackBrake.observe(player, nativeLimitActive)
         JokCombatAirAttackBrake.rawMaximum, rawDelta)
     JokCombatAirAttackBrake.correctedMaximum = math.max(
         JokCombatAirAttackBrake.correctedMaximum, correctedDelta)
+end
+
+-- C8-CB and CC-CE are KH1's complete native ground and aerial physical
+-- strings. This controller changes only their per-player animation playback
+-- field. It never changes global game speed or any Action/Limit record, so
+-- native hit events and combo-time windows continue to advance with the
+-- animation instead of being bypassed by an early cancel.
+JokCombatAttackSpeed = {
+    enabled = false,
+    multiplier = 1.0,
+    epsilon = 0.001,
+    playerPointer = nil,
+    originalSpeed = nil,
+    ownedSpeed = nil,
+    owned = false,
+    cycleBlocked = false,
+    sampleLogged = false,
+    faultLogged = false,
+}
+
+function JokCombatAttackSpeed.same(left, right)
+    return left ~= nil and right ~= nil
+        and math.abs(left - right) <= JokCombatAttackSpeed.epsilon
+end
+
+function JokCombatAttackSpeed.valid(value)
+    return value == value and value >= 0.05 and value <= 4.0
+end
+
+function JokCombatAttackSpeed.ownsAnimation(player)
+    if player == nil or player.animation < 0xC8
+        or player.animation > 0xCE then
+        return false
+    end
+    -- C8-CA with a low secondary ID are reused by native Limit contexts.
+    return not (player.animation <= 0xCA and player.secondary <= 0x02)
+end
+
+function JokCombatAttackSpeed.clearOwnership(blockCycle)
+    JokCombatAttackSpeed.playerPointer = nil
+    JokCombatAttackSpeed.originalSpeed = nil
+    JokCombatAttackSpeed.ownedSpeed = nil
+    JokCombatAttackSpeed.owned = false
+    JokCombatAttackSpeed.cycleBlocked = blockCycle == true
+end
+
+function JokCombatAttackSpeed.restore(reason, quiet)
+    if not JokCombatAttackSpeed.owned then
+        JokCombatAttackSpeed.clearOwnership(false)
+        return true
+    end
+
+    local pointer = JokCombatAttackSpeed.playerPointer
+    local livePointer = ReadLong(ADDRESS.playerPointer)
+    local restored = true
+    if pointer ~= nil and livePointer == pointer
+        and isPlausiblePointer(pointer) then
+        local address = pointer + PLAYER.animationSpeed
+        local current = ReadFloat(address, true)
+        if JokCombatAttackSpeed.same(
+                current, JokCombatAttackSpeed.ownedSpeed) then
+            WriteFloat(address, JokCombatAttackSpeed.originalSpeed, true)
+            local observed = ReadFloat(address, true)
+            restored = JokCombatAttackSpeed.same(
+                observed, JokCombatAttackSpeed.originalSpeed)
+            if not restored and not quiet then
+                log("[attack-speed] original playback speed could not be "
+                    .. "verified during restore.")
+            end
+        elseif not JokCombatAttackSpeed.same(
+                current, JokCombatAttackSpeed.originalSpeed) and not quiet then
+            log("[attack-speed] playback speed changed externally; leaving "
+                .. "the newer value untouched.")
+        end
+    end
+
+    if not quiet and JokCombatAttackSpeed.owned then
+        log("[attack-speed] native combo playback restored"
+            .. (reason ~= nil and " (" .. reason .. ")." or "."))
+    end
+    JokCombatAttackSpeed.clearOwnership(false)
+    return restored
+end
+
+function JokCombatAttackSpeed.initialize()
+    JokCombatAttackSpeed.clearOwnership(false)
+    JokCombatAttackSpeed.enabled = false
+    JokCombatAttackSpeed.multiplier = CONFIG.normalAttackSpeedMultiplier
+    JokCombatAttackSpeed.sampleLogged = false
+    JokCombatAttackSpeed.faultLogged = false
+
+    if CONFIG.normalAttackSpeedup ~= true then return false end
+    if JokCombatAttackSpeed.multiplier ~= JokCombatAttackSpeed.multiplier
+        or JokCombatAttackSpeed.multiplier <= 1.0
+        or JokCombatAttackSpeed.multiplier > 2.0 then
+        log(string.format(
+            "[attack-speed] invalid multiplier %.3f; disabled.",
+            JokCombatAttackSpeed.multiplier))
+        return false
+    end
+
+    -- F1 reload normally calls the exit hook, but some loaders replace the
+    -- chunk directly. Normalize only our exact vanilla-derived 1.0x value so a
+    -- stale 1.15x cannot be adopted and multiplied a second time.
+    local pointer = ReadLong(ADDRESS.playerPointer)
+    if isPlausiblePointer(pointer) then
+        local address = pointer + PLAYER.animationSpeed
+        local current = ReadFloat(address, true)
+        if JokCombatAttackSpeed.same(
+                current, JokCombatAttackSpeed.multiplier) then
+            WriteFloat(address, 1.0, true)
+            if JokCombatAttackSpeed.same(ReadFloat(address, true), 1.0) then
+                log("[attack-speed] stale owned playback speed recovered.")
+            end
+        end
+    end
+
+    JokCombatAttackSpeed.enabled = true
+    return true
+end
+
+function JokCombatAttackSpeed.blockCycle(message)
+    if not JokCombatAttackSpeed.faultLogged then
+        log("[attack-speed] " .. message
+            .. "; speedup suspended until the current combo ends.")
+        JokCombatAttackSpeed.faultLogged = true
+    end
+    JokCombatAttackSpeed.clearOwnership(true)
+end
+
+function JokCombatAttackSpeed.observe(player, nativeLimitActive)
+    if not JokCombatAttackSpeed.enabled then return end
+
+    if JokCombatAttackSpeed.playerPointer ~= nil
+        and JokCombatAttackSpeed.playerPointer ~= player.pointer then
+        -- The old object is no longer the live Sora pointer and must not be
+        -- written. Its field dies with that object; begin clean on the new one.
+        JokCombatAttackSpeed.clearOwnership(false)
+    end
+
+    local normalPhysical = JokCombatAttackSpeed.ownsAnimation(player)
+    if nativeLimitActive or player.airborneState >= 0x20
+        or ReadByte(ADDRESS.world) == 0x09 or not normalPhysical then
+        if JokCombatAttackSpeed.owned then
+            JokCombatAttackSpeed.restore("native combo ended", false)
+        else
+            JokCombatAttackSpeed.cycleBlocked = false
+        end
+        return
+    end
+    if JokCombatAttackSpeed.cycleBlocked then return end
+
+    local address = player.pointer + PLAYER.animationSpeed
+    local current = ReadFloat(address, true)
+    if not JokCombatAttackSpeed.valid(current) then
+        JokCombatAttackSpeed.blockCycle("invalid playback-speed sample")
+        return
+    end
+
+    if not JokCombatAttackSpeed.owned then
+        local desired = current * JokCombatAttackSpeed.multiplier
+        if not JokCombatAttackSpeed.valid(desired) then
+            JokCombatAttackSpeed.blockCycle("multiplied playback speed is unsafe")
+            return
+        end
+
+        WriteFloat(address, desired, true)
+        local observed = ReadFloat(address, true)
+        if not JokCombatAttackSpeed.same(observed, desired) then
+            JokCombatAttackSpeed.blockCycle("playback-speed write was rejected")
+            return
+        end
+
+        JokCombatAttackSpeed.playerPointer = player.pointer
+        JokCombatAttackSpeed.originalSpeed = current
+        JokCombatAttackSpeed.ownedSpeed = desired
+        JokCombatAttackSpeed.owned = true
+        if not JokCombatAttackSpeed.sampleLogged then
+            log(string.format(
+                "[attack-speed] native C8-CE playback %.3f -> %.3f (x%.2f).",
+                current, desired, JokCombatAttackSpeed.multiplier))
+            JokCombatAttackSpeed.sampleLogged = true
+        end
+        return
+    end
+
+    if JokCombatAttackSpeed.same(current, JokCombatAttackSpeed.ownedSpeed) then
+        return
+    end
+    if JokCombatAttackSpeed.same(
+            current, JokCombatAttackSpeed.originalSpeed) then
+        -- KH1 may publish the baseline again at an internal combo transition.
+        WriteFloat(address, JokCombatAttackSpeed.ownedSpeed, true)
+        if not JokCombatAttackSpeed.same(
+                ReadFloat(address, true), JokCombatAttackSpeed.ownedSpeed) then
+            JokCombatAttackSpeed.blockCycle(
+                "playback speed could not be retained across the combo")
+        end
+        return
+    end
+
+    -- Never fight a newer owner. In particular, do not multiply an external
+    -- value on the next frame while this physical string is still active.
+    JokCombatAttackSpeed.blockCycle("playback speed changed externally")
 end
 
 local function actionKind(action)
@@ -6086,6 +6301,7 @@ function _OnInit()
     local airRouteValid = normalizeAirActionRoute()
     JokCombatAirJump.initialize(airRouteValid)
     local airAttackBrakeReady = JokCombatAirAttackBrake.initialize()
+    JokCombatAttackSpeed.initialize()
     local validActionRecordCount = validateCanonicalActionRecords()
     local branchValid, branchNodeCount, branchActionCount =
         JokCombatBranch.initialize()
@@ -6146,6 +6362,11 @@ function _OnInit()
         .. (airAttackBrakeReady and "ready" or "disabled")
         .. ": CC/CD/CE downward delta x0.25; upward motion and D1/D6 "
         .. "remain native.")
+    log(string.format(
+        "native physical combo speed %s: C8-CB + CC-CE x%.2f; "
+            .. "all special actions remain at native playback.",
+        JokCombatAttackSpeed.enabled and "ready" or "disabled",
+        CONFIG.normalAttackSpeedMultiplier))
     log("ground-air Ultimate ready: AAAY Slapshot -> B real jump -> "
         .. "Y/Y/Y aerial family -> natural landing -> Y Blitz -> "
         .. "Y Strike Raid.")
@@ -6208,6 +6429,7 @@ function _OnFrame()
     local dpad = ReadByte(ADDRESS.dpadButtons)
     JokCombatNativeLimit.update(player, buttons)
     local nativeLimitActive = JokCombatNativeLimit.activeState(player)
+    JokCombatAttackSpeed.observe(player, nativeLimitActive)
     JokCombatAirAttackBrake.observe(player, nativeLimitActive)
     JokCombatAirJump.observe(player, buttons)
     JokCombatGuardCounter.update(player, buttons)
