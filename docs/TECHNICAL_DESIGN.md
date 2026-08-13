@@ -164,8 +164,13 @@ into airborne actions.
 ## 9. Native Limit dispatch and MP policy
 
 The Action immediately before a Limit pre-arms one validated native Reaction
-Command. The final physical `Y` is then consumed by KH1's own Limit dispatcher,
-which owns targeting, movement, animation, VFX, damage, and follow-up inputs.
+Command. If the final physical `Y` arrives while that Action is still
+recovering, JokCombat records that one real edge and holds Steam Global's
+native Auto-Reaction level until KH1 can legally accept it. The level is
+journaled before ownership, bounded by the selector timeout, and cleared before
+Limit follow-ups begin. It does not manufacture a second raw-button press, so
+one final `Y` is sufficient while KH1's own Limit dispatcher still owns
+targeting, movement, animation, VFX, damage, and follow-up inputs.
 
 Sonic Blade, Ars Arcanum, Strike Raid, and Ragnarok temporarily borrow a zero
 cost only for the selected combo route and active native Limit. Their original

@@ -568,8 +568,10 @@ Ogni passaggio Action valido registra `[branch] <sequenza> requested` e poi
 `[branch] <sequenza> accepted`. Un input premuto troppo presto deve produrre
 `ignored before prebuffer`; un secondo input durante lo stesso buffer deve
 essere ignorato, non accodato. Per ogni Limit, il parent Action deve registrare
-`native <Limit> pre-armed`; l'ultimo `Y` deve registrare
-`delegated to native <Limit>` e poi `native <Limit> entered`. Verifica con MP a
+`native <Limit> pre-armed`; un solo ultimo `Y` deve registrare
+`first final Y latched once`, poi `native <Limit> entered`, anche quando viene
+premuto durante il recovery della Action precedente. Non deve essere richiesto
+un secondo edge fisico. Verifica con MP a
 zero che Sonic, Ars, Strike e Ragnarok partano comunque e che, terminata la
 sequenza, lo stesso Limit lanciato dal menu conservi il costo vanilla. Trinity
 deve lasciare invariati gli MP di Sora, Donald e Goofy; senza entrambi gli

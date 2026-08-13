@@ -171,6 +171,11 @@ local ADDRESS = {
     compactPointerSegments = 0x2EE3980,
     triggerMenu1 = 0x23D3F80,
     triggerMenu2 = 0x232DDC4,
+    -- Steam Global's native Auto-Reaction input level sits 0x1C bytes after
+    -- triggerMenu2. It is never used as a free-running macro: the Limit
+    -- adapter may hold it only after one real final-Y edge, with ownership
+    -- recorded in the existing recovery journal first.
+    autoReaction = 0x232DDE0,
     defenseAbilityFlags = 0x2D5EC10,
 
     -- Migration-only native magic fields. v0.10.6+ never writes them during
@@ -4290,6 +4295,11 @@ JokCombatNativeLimit = {
     activationFrames = 0,
     activationObserved = false,
     selectorRestored = false,
+    -- A real final Y may arrive while the parent Action still owns Sora. KH1
+    -- cannot consume that edge yet, so this bounded native input latch keeps
+    -- the same request alive until the Reaction dispatcher accepts it.
+    finalInputPending = false,
+    finalInputMarker = 0xA19C,
 }
 
 function JokCombatNativeLimit.buildIndex()
@@ -4318,6 +4328,7 @@ function JokCombatNativeLimit.writeIfOwned(address, owned, original)
 end
 
 function JokCombatNativeLimit.clearJournal()
+    WriteShort(ADDRESS.magicRecovery + 0x16, 0)
     WriteLong(ADDRESS.magicRecovery, 0)
 end
 
@@ -4384,6 +4395,7 @@ function JokCombatNativeLimit.publishJournal(limit, player)
     WriteByte(journal + 0x13, ally1MP)
     WriteByte(journal + 0x14, ally2MP)
     WriteByte(journal + 0x15, limit.restorePartyMP and 0xA6 or 0x00)
+    WriteShort(journal + 0x16, 0)
     WriteLong(journal, JokCombatNativeLimit.recoverySignature)
     return JokCombatNativeLimit.journalLimit() == limit
         and ReadShort(journal + 0x0A) == costOriginal
@@ -4409,6 +4421,90 @@ function JokCombatNativeLimit.restorePartyMpSnapshot()
     return restored
 end
 
+function JokCombatNativeLimit.finalInputOwned()
+    return JokCombatNativeLimit.journalLimit() ~= nil
+        and ReadShort(ADDRESS.magicRecovery + 0x16)
+            == JokCombatNativeLimit.finalInputMarker
+end
+
+function JokCombatNativeLimit.restoreFinalInputLatch()
+    local owned = JokCombatNativeLimit.finalInputOwned()
+    local restored = 0
+    if owned and ReadByte(ADDRESS.autoReaction) == 0x01 then
+        WriteByte(ADDRESS.autoReaction, 0x00)
+        if ReadByte(ADDRESS.autoReaction) == 0x00 then restored = 1 end
+    end
+    if owned then WriteShort(ADDRESS.magicRecovery + 0x16, 0) end
+    JokCombatNativeLimit.finalInputPending = false
+    return restored
+end
+
+function JokCombatNativeLimit.maintainFinalInputLatch()
+    if not JokCombatNativeLimit.finalInputPending
+        or JokCombatNativeLimit.activationObserved
+        or not JokCombatNativeLimit.journalValid() then return false end
+
+    if JokCombatNativeLimit.finalInputOwned() then
+        -- KH1 is allowed to consume the level. Reassert only the value that
+        -- this journal owns; any third-party value makes the latch stand down.
+        local current = ReadByte(ADDRESS.autoReaction)
+        if current == 0x00 then WriteByte(ADDRESS.autoReaction, 0x01) end
+        if ReadByte(ADDRESS.autoReaction) == 0x01 then return true end
+        JokCombatNativeLimit.finalInputPending = false
+        return false
+    end
+
+    local current = ReadByte(ADDRESS.autoReaction)
+    if current == 0x01 then
+        -- The physical edge may still own this frame. Wait for its native
+        -- level to fall before claiming the byte for the buffered request.
+        return false
+    end
+    if current ~= 0x00 then
+        JokCombatNativeLimit.finalInputPending = false
+        log(string.format(
+            "[limit] final-Y latch unavailable: Auto-Reaction=0x%02X.",
+            current))
+        return false
+    end
+
+    -- Journal first: an F1 reload between these two writes can safely restore
+    -- only the exact 0x01 level JokCombat subsequently owns.
+    WriteShort(ADDRESS.magicRecovery + 0x16,
+        JokCombatNativeLimit.finalInputMarker)
+    WriteByte(ADDRESS.autoReaction, 0x01)
+    if JokCombatNativeLimit.finalInputOwned()
+        and ReadByte(ADDRESS.autoReaction) == 0x01 then return true end
+    if ReadByte(ADDRESS.autoReaction) == 0x01 then
+        WriteByte(ADDRESS.autoReaction, 0x00)
+    end
+    WriteShort(ADDRESS.magicRecovery + 0x16, 0)
+    JokCombatNativeLimit.finalInputPending = false
+    return false
+end
+
+function JokCombatNativeLimit.acceptFinalInput(limitId, player)
+    if not JokCombatNativeLimit.armed then
+        if not JokCombatNativeLimit.arm(limitId, player) then return false end
+    end
+    if JokCombatNativeLimit.activeId ~= limitId
+        or JokCombatNativeLimit.activationObserved then return false end
+    local limit = JokCombatNativeLimit.byId[limitId]
+    if limit == nil then return false end
+    local firstRequest = not JokCombatNativeLimit.finalInputPending
+        and not JokCombatNativeLimit.finalInputOwned()
+    JokCombatNativeLimit.selectionFrames =
+        JokCombatNativeLimit.selectionGraceFrames
+    JokCombatNativeLimit.finalInputPending = true
+    JokCombatNativeLimit.maintainFinalInputLatch()
+    if firstRequest then
+        log(string.format(
+            "[limit:%s] first final Y latched once for native %s.",
+            limit.tag, limit.name))
+    end
+    return true
+end
+
 function JokCombatNativeLimit.restore(reason, quiet)
     local journal = ADDRESS.magicRecovery
     local limit = JokCombatNativeLimit.journalLimit()
@@ -4416,6 +4512,8 @@ function JokCombatNativeLimit.restore(reason, quiet)
     local active = JokCombatNativeLimit.byId[JokCombatNativeLimit.activeId]
     local restored = 0
     if ownsJournal then
+        restored = restored
+            + JokCombatNativeLimit.restoreFinalInputLatch()
         local reactionOriginal = ReadShort(journal + 0x0C)
         if JokCombatNativeLimit.writeIfOwned(
                 ADDRESS.reactionWriter,
@@ -4459,6 +4557,7 @@ function JokCombatNativeLimit.restore(reason, quiet)
     JokCombatNativeLimit.activationFrames = 0
     JokCombatNativeLimit.activationObserved = false
     JokCombatNativeLimit.selectorRestored = false
+    JokCombatNativeLimit.finalInputPending = false
     if wasArmed and not quiet then
         log(string.format(
             "[limit:%s] native selector restored (%s; %d owned fields).",
@@ -4536,6 +4635,7 @@ function JokCombatNativeLimit.initialize()
     JokCombatNativeLimit.buildIndex()
     JokCombatNativeLimit.activeId = nil
     JokCombatNativeLimit.armed = false
+    JokCombatNativeLimit.finalInputPending = false
     JokCombatNativeLimit.recoverLegacySonic()
     JokCombatNativeLimit.recoverStale()
     if ReadLong(ADDRESS.magicRecovery) ~= 0 then
@@ -4764,12 +4864,9 @@ function JokCombatNativeLimit.update(player, buttons)
 
     local triangleStarted = (buttons & BUTTON.TRIANGLE) ~= 0
         and (lastButtons & BUTTON.TRIANGLE) == 0
-    if triangleStarted and not JokCombatNativeLimit.activationObserved then
-        JokCombatNativeLimit.selectionFrames =
-            JokCombatNativeLimit.selectionGraceFrames
-        log(string.format(
-            "[limit:%s] final Y released to the native Reaction selector.",
-            limit.tag))
+    if triangleStarted and not JokCombatNativeLimit.activationObserved
+        and not limitActive then
+        JokCombatNativeLimit.acceptFinalInput(limit.id, player)
     end
 
     if limitActive then
@@ -4777,6 +4874,7 @@ function JokCombatNativeLimit.update(player, buttons)
             JokCombatNativeLimit.activationObserved = true
             JokCombatNativeLimit.frames =
                 JokCombatNativeLimit.limitTimeoutFrames
+            JokCombatNativeLimit.restoreFinalInputLatch()
             JokCombatNativeLimit.restoreSelectorOwned()
             JokCombatNativeLimit.restorePartyMpSnapshot()
             -- The Reaction has entered KH1's native Limit state. Close only
@@ -4800,6 +4898,8 @@ function JokCombatNativeLimit.update(player, buttons)
         end
         return true
     end
+
+    JokCombatNativeLimit.maintainFinalInputLatch()
 
     if JokCombatNativeLimit.activationObserved then
         JokCombatNativeLimit.restorePartyMpSnapshot()
@@ -5637,16 +5737,17 @@ function JokCombatBranch.update(player, buttons, crossPressed,
         end
         return false
     end
-    -- A Limit's immediate parent Action pre-arms its real Reaction one input
-    -- early. Do not consume or remap the final Y: KH1 must receive that
-    -- physical edge to enter the complete dispatcher and follow-up sequence.
+    -- A Limit's immediate parent Action pre-arms its real Reaction. One real
+    -- final-Y edge is then latched until KH1 can accept it; the player never
+    -- has to repeat Y merely because the parent Action is still recovering.
     if JokCombatNativeLimit.selectorOwned() then
         if trianglePressed then
             local limit = JokCombatNativeLimit.byId[
                 JokCombatNativeLimit.activeId]
             if limit ~= nil then
+                JokCombatNativeLimit.acceptFinalInput(limit.id, player)
                 log(string.format(
-                    "[branch] %s final Y delegated to native %s.",
+                    "[branch] %s first final Y buffered for native %s.",
                     limit.path, limit.name))
             end
         end
@@ -5708,22 +5809,29 @@ function JokCombatBranch.update(player, buttons, crossPressed,
 
         -- Retry a parent pre-arm while its native Action remains active. The
         -- normal case succeeds in observeRequest; this covers a transiently
-        -- busy root selector. A Y on the exact retry frame is consumed because
-        -- its control map was still suppressed at the start of that frame.
+        -- busy root selector. If the first final Y is the edge that makes the
+        -- selector ready, preserve that same edge through the native latch.
         local selectorWasOwned = JokCombatNativeLimit.selectorOwned()
         JokCombatBranch.prearmLimitChild(player)
         if JokCombatNativeLimit.selectorOwned() then
             if trianglePressed and not selectorWasOwned then
-                log("[branch] native Limit selector became ready on this "
-                    .. "frame; early Y discarded, press Y again.")
+                local limit = JokCombatNativeLimit.byId[
+                    JokCombatNativeLimit.activeId]
+                if limit ~= nil then
+                    JokCombatNativeLimit.acceptFinalInput(limit.id, player)
+                    log(string.format(
+                        "[branch] %s selector and first final Y latched "
+                            .. "on the same frame.", limit.path))
+                end
                 return true
             end
             if trianglePressed then
                 local limit = JokCombatNativeLimit.byId[
                     JokCombatNativeLimit.activeId]
                 if limit ~= nil then
+                    JokCombatNativeLimit.acceptFinalInput(limit.id, player)
                     log(string.format(
-                        "[branch] %s final Y delegated to native %s.",
+                        "[branch] %s first final Y buffered for native %s.",
                         limit.path, limit.name))
                 end
             end
@@ -5753,8 +5861,18 @@ function JokCombatBranch.update(player, buttons, crossPressed,
             return true
         end
         if childNode.kind == "limit" then
+            -- An early final Y is valid input, not a request to skip the
+            -- parent Action. Arm the real selector now and keep this one edge
+            -- pending until the native dispatcher reaches a legal state.
+            if JokCombatNativeLimit.acceptFinalInput(
+                    childNode.id, player) then
+                log("[branch] " .. child
+                    .. " accepted from its first final Y; native input "
+                    .. "latched through parent recovery.")
+                return true
+            end
             log("[branch] " .. child
-                .. " ignored: native Limit selector was not pre-armed; "
+                .. " ignored: native Limit selector could not be armed; "
                 .. "no fallback attack was substituted.")
             return true
         end
@@ -6223,7 +6341,8 @@ function _OnInit()
     log(string.format(
         "native Limit combos ready: %d/5; Sonic/Ars/Strike/Ragnarok use "
             .. "temporary 0 MP costs, Trinity preserves party MP and requires "
-            .. "Donald + Goofy.", nativeLimitReadyCount))
+            .. "Donald + Goofy; first final Y uses one journaled native "
+            .. "input latch.", nativeLimitReadyCount))
     log("successful-Guard Counterattack detector "
         .. (guardCounterReady and "ready: read-only 0x10 signal -> A."
             or "disabled."))

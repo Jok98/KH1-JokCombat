@@ -195,7 +195,16 @@ def assert_native_limits() -> None:
         "function JokCombatNativeLimit.forPrefix",
         "function JokCombatNativeLimit.arm",
         "function JokCombatNativeLimit.selectorOwned",
+        "function JokCombatNativeLimit.finalInputOwned",
+        "function JokCombatNativeLimit.restoreFinalInputLatch",
+        "function JokCombatNativeLimit.maintainFinalInputLatch",
+        "function JokCombatNativeLimit.acceptFinalInput",
         "function JokCombatNativeLimit.update",
+        "autoReaction = 0x232DDE0",
+        "finalInputMarker = 0xA19C",
+        "WriteShort(ADDRESS.magicRecovery + 0x16,",
+        "WriteByte(ADDRESS.autoReaction, 0x01)",
+        "JokCombatNativeLimit.restoreFinalInputLatch()",
         "if limit.costAddress ~= nil then WriteShort(limit.costAddress, 0) end",
         "WriteShort(ADDRESS.reactionCommandId, limit.reactionId)",
         "function JokCombatBranch.prearmLimitChild",
@@ -204,7 +213,10 @@ def assert_native_limits() -> None:
         "parent Action ended before final Y",
         "and JokCombatNativeLimit.selectionFrames <= 0",
         "branch closed before final Y",
-        '"[branch] %s final Y delegated to native %s."',
+        '"[branch] %s first final Y buffered for native %s."',
+        "accepted from its first final Y; native input",
+        "latched through parent recovery",
+        "first final Y latched once for native %s",
         "Final Y belongs to KH1",
         "native Limit combos ready: %d/5",
     )
@@ -213,6 +225,31 @@ def assert_native_limits() -> None:
     assert "observePhysicalLink" not in SOURCE
     assert "reverseWaiting" not in SOURCE
     assert "hasReadyDescendant" not in SOURCE
+    assert "early Y discarded, press Y again" not in SOURCE
+    assert "final Y released to the native Reaction selector" not in SOURCE
+
+    latch_start = SOURCE.index(
+        "function JokCombatNativeLimit.maintainFinalInputLatch"
+    )
+    latch_end = SOURCE.index(
+        "function JokCombatNativeLimit.acceptFinalInput", latch_start
+    )
+    latch = SOURCE[latch_start:latch_end]
+    claim = latch[latch.index("-- Journal first:") :]
+    assert claim.index("WriteShort(ADDRESS.magicRecovery + 0x16,") < claim.index(
+        "WriteByte(ADDRESS.autoReaction, 0x01)"
+    ), "the recovery marker must be published before the native latch"
+
+    active_start = SOURCE.index("if limitActive then", SOURCE.index(
+        "function JokCombatNativeLimit.update"
+    ))
+    active_end = SOURCE.index(
+        "if JokCombatNativeLimit.activationObserved then", active_start
+    )
+    active = SOURCE[active_start:active_end]
+    assert active.index("JokCombatNativeLimit.restoreFinalInputLatch()") < (
+        active.index("JokCombatNativeLimit.restoreSelectorOwned()")
+    ), "the final-Y level must clear before native Limit follow-ups begin"
 
 
 def assert_guard_counter() -> None:
