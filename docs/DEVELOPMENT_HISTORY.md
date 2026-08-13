@@ -8,8 +8,8 @@
 Mod combat-oriented sperimentale per **KINGDOM HEARTS FINAL MIX PC**. Il
 progetto mantiene storia, reward fissi, chest, synthesis, boss e world flags
 vanilla. Le sole eccezioni intenzionali sono il bootstrap nativo di High Jump,
-Combo Plus, Air Combo Plus e Combo Master e il moltiplicatore globale dei drop
-descritto sotto.
+Glide, Superglide, Combo Plus, Air Combo Plus e Combo Master e il moltiplicatore
+globale dei drop descritto sotto.
 
 ## Stato attuale
 
@@ -367,12 +367,12 @@ La repository contiene tre probe read-only e il primo prototipo combat:
   a KH1 e un bridge post-finisher per i cicli infiniti terra/aria, quattro slot
   R2 configurabili, otto Action Ability e cinque Limit nativi nelle famiglie
   Pirate terrestri, due Action aeree separate e Counterattack contestuale,
-  jump-cancel terra -> aria, Kinetic Step a carica singola, Guard
-  universale su L2 + Cerchio e Dodge Roll fisso su Quadrato;
-- `JokCombat_NativeAbilities.lua`: imposta 99 AP massimi, assegna High Jump
-  tramite la lista Shared nativa e mantiene nella lista personale di Sora le
-  quantita' massime vanilla richieste: quattro Combo Plus, due Air Combo Plus
-  e un Combo Master, tutte equipaggiate;
+  jump-cancel terra -> aria, Kinetic Step a carica singola, Guard universale su
+  L2 + Cerchio, Dodge Roll terrestre e Superglide nativo aereo su Quadrato;
+- `JokCombat_NativeAbilities.lua`: imposta 99 AP massimi, assegna High Jump,
+  Glide e Superglide tramite la lista Shared nativa e mantiene nella lista
+  personale di Sora le quantita' massime vanilla richieste: quattro Combo Plus,
+  due Air Combo Plus e un Combo Master, tutte equipaggiate;
 - `JokCombat_DropRate.lua`: imposta a `2.0x` sia il moltiplicatore degli item
   sia quello dei prize, con firma Steam verificata e ripristino condizionale;
 - `docs/JokCombat_BranchCombo_Mapping.md`: mappa Pirate terrestre di 13 nodi,
@@ -390,11 +390,12 @@ Counterattack usa invece una finestra breve aperta esclusivamente dal segnale
 reale di una Guard riuscita.
 
 Il loadout Action Ability resta runtime-only e non inserisce le undici mosse
-nel salvataggio. Guard e Dodge Roll restano comandi fissi; magie e Limit non
-compaiono nell'editor. I cinque Limit sono accessibili soltanto dalle combo
-Pirate e non vengono aggiunti alla lista abilità. High Jump e le tre famiglie
-passive costituiscono una scelta strutturale del moveset e vengono
-apprese/equipaggiate nativamente.
+nel salvataggio. Guard e Dodge Roll terrestre restano comandi fissi; Quadrato
+in aria rimane invece nativo per Superglide. Magie e Limit non compaiono
+nell'editor. I cinque Limit sono accessibili soltanto dalle combo
+Pirate e non vengono aggiunti alla lista abilità. High Jump, Glide, Superglide
+e le tre famiglie passive costituiscono una scelta strutturale del moveset e
+vengono apprese/equipaggiate nativamente.
 
 ## Abilita' native di movimento e combo
 
@@ -411,6 +412,8 @@ assegna quantità esatte di:
 
 - un `0x01` High Jump nella lista Shared; KH1FM non usa i livelli multipli di
   KH2, quindi questa singola voce e' il potenziamento nativo pieno;
+- un `0x03` Glide nella lista Shared;
+- un `0x04` Superglide nella lista Shared;
 - quattro `0x06` Combo Plus (`0x86` quando disattivata);
 - due `0x07` Air Combo Plus (`0x87` quando disattivata);
 - un `0x41` Combo Master (`0xC1` quando disattivata).
@@ -446,6 +449,13 @@ lista Shared e passa dall'animazione iniziale `0x09`, non dalla `0x04` del salto
 base. La v0.5.0 migra quindi l'eventuale `0x01` legacy nella lista Shared,
 preserva le altre abilita' condivise e riconosce entrambe le animazioni come
 primo salto. Kinetic Step resta una carica runtime separata.
+La v0.6.0 completa il set Shared con Glide e Superglide. Un primo tentativo
+manteneva Cerchio/B soppresso durante High Jump e sbloccava Superglide soltanto
+dopo Kinetic Step: il test live ha mostrato che cosi' KH1 interrompeva subito
+l'altezza variabile del primo salto. Il routing corretto lascia quindi il primo
+B completamente nativo fino al rilascio, riserva il B successivo a Kinetic Step
+e non rimappa la planata: Superglide usa gia' nativamente Quadrato in aria.
+JokCombat forza Dodge Roll su Quadrato soltanto a terra.
 Il test live ha verificato `groundMax=7` e `airMax=5`: a terra KH1 sceglie
 contestualmente `C8`, `C9` o `CA` nelle posizioni `1..6` e `CB` chiude alla 7;
 in aria le posizioni `1..4` hanno mostrato `CC/CD` e `CE` chiude alla 5. Poiché
@@ -453,8 +463,9 @@ lo stesso ID può comparire in posizioni diverse, il controller Pirate usa
 `comboPosition` per scegliere C2/C3/C4/C5 e l'animazione soltanto per il timing.
 
 Questa assegnazione e' intenzionalmente persistente: dopo un salvataggio High
-Jump e le passive fanno parte della partita. Prima del primo test e' stata creata una
-copia locale di `KHFM_WW.png` sotto `KH_mod/backups/saves`.
+Jump, Glide, Superglide e le passive fanno parte della partita. Prima del primo
+test e' stata creata una copia locale di `KHFM_WW.png` sotto
+`KH_mod/backups/saves`.
 
 ## Drop rate globale al 200%
 

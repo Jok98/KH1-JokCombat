@@ -248,6 +248,7 @@ def assert_native_second_jump() -> None:
         "secondJumpLiftAmount = 30.0",
         "secondJumpLiftEndTime = 25.0",
         "secondJumpSpeedDivisor = 1.1",
+        "nativeAirSuperglideOnSquare = true",
         "airFallBrakeFactor = 0.45",
         "gameSpeed = 0x233FBCC",
         "verticalPosition = 0x014",
@@ -285,6 +286,13 @@ def assert_native_second_jump() -> None:
         "the charge remains consumed until landing",
         "landing confirmed; second jump recharges",
         "Kinetic Step accepted",
+        "native air Superglide ready",
+        "if player.airborne and not JokCombatAirJump.releaseRequired then",
+        "local nativeSuperglideOwnsSquare =",
+        "CONFIG.nativeAirSuperglideOnSquare and playerAirborne",
+        "local dodgeSquareHeld = squareHeld and not nativeSuperglideOwnsSquare",
+        "CONFIG.fixedDodgeOnSquare and not playerAirborne",
+        "and not player.airborne",
         "air route 0x0F + Attack pulse armed",
         "releaseRequired = false",
         "first-jump B released; second-jump input unlocked",
@@ -309,6 +317,21 @@ def assert_native_second_jump() -> None:
     brake_end = adapter.index("function JokCombatAirJump.observe", brake_start)
     brake_source = adapter[brake_start:brake_end]
     assert "JokCombatAirJump.consumed" not in brake_source
+
+    owns_start = adapter.index("function JokCombatAirJump.ownsCircle")
+    owns_end = adapter.index("function JokCombatAirJump.begin", owns_start)
+    owns_source = adapter[owns_start:owns_end]
+    assert "and not JokCombatAirJump.releaseRequired" in owns_source
+    assert "or JokCombatAirJump.consumed" in owns_source
+    assert "or JokCombatAirJump.routeOwned or JokCombatAirJump.active" in owns_source
+    assert "superglideReady" not in adapter
+
+    defense_start = SOURCE.index("local function updateDefenseRouting")
+    defense_end = SOURCE.index("function _OnInit()", defense_start)
+    defense_source = SOURCE[defense_start:defense_end]
+    assert "circleMap = CONTROL_INDEX.SQUARE" not in defense_source
+    assert "allowAirDodge" not in defense_source
+    assert "allowAirGuard and 0x82 or 0x85" in defense_source
 
     first_jump_start = adapter.index(
         "if not JokCombatAirJump.wasAirborne"
@@ -349,13 +372,15 @@ def assert_native_second_jump() -> None:
     assert list(simulated_heads.values()).count(0x09) == 1
 
     native_guards = (
-        'VERSION = "v0.5.0"',
+        'VERSION = "v0.6.0"',
         "SHARED_ABILITY_SLOT_COUNT = 4",
         "sharedAbilitySlots = 0x2DE98F9",
-        "local SHARED_HIGH_JUMP = {",
-        "local function reconcileSharedHighJump",
+        "local SHARED_MOVEMENT = {",
+        '{ name = "Glide", base = 0x03',
+        '{ name = "Superglide", base = 0x04',
+        "local function reconcileSharedAbility",
         "local function removeLegacySoraHighJump",
-        "Shared High Jump + exact native counts 4/2/1",
+        "Shared High Jump/Glide/Superglide + exact native",
     )
     for guard in native_guards:
         assert guard in NATIVE_SOURCE, (
@@ -364,7 +389,7 @@ def assert_native_second_jump() -> None:
 
     passives_start = NATIVE_SOURCE.index("local PASSIVES = {")
     passives_end = NATIVE_SOURCE.index(
-        "local SHARED_HIGH_JUMP", passives_start
+        "local SHARED_MOVEMENT", passives_start
     )
     assert "High Jump" not in NATIVE_SOURCE[passives_start:passives_end], (
         "High Jump must not return to Sora's personal ability list"
@@ -424,7 +449,7 @@ def assert_integration() -> None:
         "if nativeLimitActive then",
         "native Limit owns input",
         "if configurationInputActive or nativeLimitActive then",
-        "updateDefenseRouting(buttons, false, false, true)",
+        "updateDefenseRouting(buttons, false, false, true, player)",
         "local nativeReaction = ReadShort(ADDRESS.reactionCommandId)",
         "if nativeReaction ~= 0 and not branchOwnsInput then",
         "Y delegated to native Reaction 0x%04X",

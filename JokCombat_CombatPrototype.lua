@@ -69,6 +69,10 @@ local CONFIG = {
     secondJumpLiftAmount = 30.0,
     secondJumpLiftEndTime = 25.0,
     secondJumpSpeedDivisor = 1.1,
+    -- High Jump keeps native variable-height B ownership. KH1 already maps
+    -- learned Superglide to held Square in midair, so the mod leaves that input
+    -- completely vanilla and limits its forced Square Dodge to the ground.
+    nativeAirSuperglideOnSquare = true,
     -- Slow the positive position delta of vanilla Fall 0x06 after either the
     -- first jump or Kinetic Step. The same controller owns both phases, so the
     -- factor is never applied twice after the second jump. Aerial attacks use
@@ -82,9 +86,9 @@ local CONFIG = {
     airAttackFallBrakeFactor = 0.25,
     defensiveCancels = true,
     universalGuardCancel = true,
-    universalDodgeCancel = true,
+    universalDodgeCancel = true, -- any ordinary ground action; never airborne
     guardOnL2Circle = true,
-    fixedDodgeOnSquare = true,
+    fixedDodgeOnSquare = true, -- ground X; airborne X is native Superglide
     -- Counterattack is contextual rather than part of an offensive branch.
     -- A real 0x10 Guard-connect event opens one short physical Cross window.
     guardCounterAttemptFrames = 120,
@@ -341,8 +345,8 @@ local NATIVE_FINISHER_ABILITY_MASK = RIPPLE_DRIVE_ABILITY_BIT
     | ZANTETSUKEN_ABILITY_BIT
 local NATIVE_FINISHER_ABILITY_CLEAR_MASK = 0xC3FFFFFF
 
--- Only Sora combat Action Abilities are exposed. Guard and Dodge Roll stay on
--- their fixed controls; support, shared and special/Limit abilities never enter
+-- Only Sora combat Action Abilities are exposed. Guard and ground Dodge Roll
+-- stay on their fixed controls; support, shared and special/Limit abilities never enter
 -- this catalog. The animation map is adapted from the authorized Critical Mix
 -- action dictionary; every complete record below was read from and signature-
 -- checked against the Steam action table. Gameplay effects and contextual
@@ -781,7 +785,7 @@ local function saveActionLoadout()
     end
 
     file:write("# JokCombat v0.9.9 Action Ability loadout\n")
-    file:write("# Guard remains fixed on L2+Circle; Dodge Roll on Square.\n")
+    file:write("# Guard: L2+Circle; ground Dodge: Square; air Superglide: hold Square.\n")
     file:write("# Only the four exact-R2 Action Ability slots are active.\n")
     file:write("# action_overlay controls both loadout labels and Combo Guide.\n")
     file:write("action_overlay=", HUD.enabled and "true" or "false", "\n")
@@ -3469,8 +3473,12 @@ function JokCombatAirJump.ownsCircle(buttons)
     if (buttons & (BUTTON.L1 | BUTTON.R1 | BUTTON.L2 | BUTTON.R2)) ~= 0 then
         return false
     end
+    -- While the first B is still held, High Jump must remain completely native
+    -- or KH1 cuts its variable-height ascent short. Once that B is released,
+    -- reserve later B input for Kinetic Step and suppress post-Kinetic B Glide.
     return (JokCombatAirJump.available
             and not JokCombatAirJump.releaseRequired)
+        or JokCombatAirJump.consumed
         or JokCombatAirJump.routeOwned or JokCombatAirJump.active
 end
 
@@ -5941,7 +5949,7 @@ local function updateAttackControlRouting(buttons, player)
 end
 
 local function updateDefenseRouting(buttons, guardAvailable, dodgeActive,
-        nativeLimitActive)
+        nativeLimitActive, player)
     -- KH1's native Limit state owns its complete input and recovery machine.
     -- Cancelling only the visible animation leaves raw70 >= 0x20 orphaned and
     -- permanently locks movement. Restore every custom defense route while a
@@ -5968,12 +5976,16 @@ local function updateDefenseRouting(buttons, guardAvailable, dodgeActive,
     local circleHeld = (buttons & BUTTON.CIRCLE) ~= 0
     local squareHeld = (buttons & BUTTON.SQUARE) ~= 0
     local actionModifierHeld = l2Held or r2Held
+    local playerAirborne = player ~= nil and player.airborne
     -- L1/R1 own KH1's native magic shortcut layer. Fixed Dodge must leave
     -- Square completely vanilla while either shortcut modifier is held.
     local nativeShortcutHeld = (buttons & (BUTTON.L1 | BUTTON.R1)) ~= 0
     local anyDodgeModifierHeld = actionModifierHeld or nativeShortcutHeld
     local guardChord = l2Held and not r2Held and circleHeld
-    local dodgeSquareHeld = squareHeld and not dodgeActive
+    local nativeSuperglideOwnsSquare =
+        CONFIG.nativeAirSuperglideOnSquare and playerAirborne
+    local dodgeSquareHeld = squareHeld and not nativeSuperglideOwnsSquare
+        and not dodgeActive
         and not anyDodgeModifierHeld
 
     local circleMap = NORMAL.circleControlMap
@@ -5991,13 +6003,11 @@ local function updateDefenseRouting(buttons, guardAvailable, dodgeActive,
         -- R2+Circle and R2+Square are configurable Action Ability slots.
         circleMap = 0xFE
         squareMap = 0xFE
-    end
-    if JokCombatAirJump ~= nil
+    elseif JokCombatAirJump ~= nil
         and JokCombatAirJump.ownsCircle ~= nil
         and JokCombatAirJump.ownsCircle(buttons) then
-        -- Once the second-jump charge is ready, physical B belongs to the
-        -- Kinetic Step adapter. Suppress Glide/contextual Circle so the same
-        -- edge cannot both jump and enter a native airborne Circle action.
+        -- B remains native during the first held High Jump. After release it
+        -- belongs to Kinetic Step, while aerial Square owns Superglide.
         circleMap = 0xFE
     end
     if dodgeActive and squareHeld and not anyDodgeModifierHeld then
@@ -6014,24 +6024,20 @@ local function updateDefenseRouting(buttons, guardAvailable, dodgeActive,
     setByte("guardSelection", ADDRESS.guardSelectionBranch,
         selectGuard and 0xEB or 0x74, { 0x74, 0xEB })
 
-    -- Universal Guard and Dodge both receive the airborne bypass while their
-    -- own forced input is active. forceGuardFrames disambiguates the shared
-    -- virtual Square/defense action used by the two routes.
+    -- Universal Guard keeps the airborne bypass. Dodge is deliberately
+    -- ground-only because physical Square owns native Superglide in the air.
     local allowAirGuard = CONFIG.universalGuardCancel
         and (guardChord or forceGuardFrames > 0)
-    local allowAirDodge = CONFIG.universalDodgeCancel
-        and forceGuardFrames == 0
-        and (dodgeSquareHeld
-            or (forceSquareFrames > 0 and not nativeShortcutHeld))
     setByte("airDefense", ADDRESS.airDefenseBranch,
-        (allowAirGuard or allowAirDodge) and 0x82 or 0x85,
+        allowAirGuard and 0x82 or 0x85,
         { 0x85, 0x82 })
 
     local guardAvailability = CONFIG.unlockDefensiveActions and 0x72 or 0x74
     -- Keep the roll route armed before the first Square frame. Previously it
     -- was selected only after Square was observed, so a stationary first press
     -- could already have entered Guard and a second press appeared to roll.
-    if CONFIG.fixedDodgeOnSquare and forceGuardFrames == 0
+    if CONFIG.fixedDodgeOnSquare and not playerAirborne
+        and forceGuardFrames == 0
         and (not anyDodgeModifierHeld
             or (forceSquareFrames > 0 and not nativeShortcutHeld)) then
         guardAvailability = 0xEB
@@ -6044,7 +6050,8 @@ local function updateDefenseRouting(buttons, guardAvailable, dodgeActive,
     -- enabling it on L2 alone caused the unwanted automatic Guard.
     if (CONFIG.guardOnL2Circle and guardChord)
         or (CONFIG.fixedDodgeOnSquare and dodgeSquareHeld)
-        or (forceSquareFrames > 0 and not nativeShortcutHeld) then
+        or (forceSquareFrames > 0 and not playerAirborne
+            and not nativeShortcutHeld) then
         setByte("forceSquare", ADDRESS.forceSquareBranch, 0x82,
             { 0x84, 0x82 })
     else
@@ -6245,6 +6252,8 @@ function _OnInit()
         .. (JokCombatAirJump.enabled and "ready" or "disabled")
         .. ": one charge after a real first jump; B routes animation 0x0F, "
         .. "applies the bounded Critical Mix lift and restarts air hit 1.")
+    log("native air Superglide ready: hold Square after either jump; "
+        .. "Dodge Roll is forced only while grounded.")
     log("native free-fall brake ready: base Fall 0x06 / High Jump Fall "
         .. "0x0B downward delta x0.45; the factor is applied once per frame.")
     log("native aerial attack descent brake "
@@ -6368,7 +6377,7 @@ function _OnFrame()
         forceTriangleAttackFrames = 0
         setByte("forceCircle", ADDRESS.forceCircleBranch,
             NORMAL.forceCircle, { 0x74, 0x72 })
-        updateDefenseRouting(buttons, false, false, true)
+        updateDefenseRouting(buttons, false, false, true, player)
         updateLoadoutMenuRouting(false, false)
         setByte("triangleControlMap", ADDRESS.triangleControlMap,
             NORMAL.triangleControlMap, { 0xFF, 0xFE })
@@ -6425,7 +6434,7 @@ function _OnFrame()
         -- retaining it would let a new Square edge restart the same roll.
         forceSquareFrames = 0
     end
-    updateDefenseRouting(buttons, guardAvailable, dodgeActive, false)
+    updateDefenseRouting(buttons, guardAvailable, dodgeActive, false, player)
     updateModifierFaceRouting(buttons)
     updateAttackControlRouting(buttons, player)
     if faulted then
@@ -6473,7 +6482,7 @@ function _OnFrame()
         actionConsumed = true
     elseif circlePressed and not l2Held and not r2Held
         and not nativeShortcutHeld then
-        if player.airborne then
+        if player.airborne and not JokCombatAirJump.releaseRequired then
             -- The second jump is the only universal offensive jump cancel. It
             -- closes the current Pirate family first, then Kinetic Step owns
             -- one byte-only aerial route and one synthetic Attack edge.
@@ -6487,7 +6496,7 @@ function _OnFrame()
                 restoreActionRoutes()
                 JokCombatAirJump.begin(player)
             end
-        else
+        elseif not player.airborne then
             -- Every other normal jump breaks the local chain. It only cancels
             -- an attack after the configured link window; it is not universal.
             JokCombatBranch.reset("jump")
@@ -6504,6 +6513,7 @@ function _OnFrame()
             end
         end
     elseif CONFIG.fixedDodgeOnSquare and squarePressed and dodgeAvailable
+        and not player.airborne
         and not l2Held and not r2Held and not nativeShortcutHeld then
         actionConsumed = true
         if dodgeActive then

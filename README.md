@@ -18,10 +18,10 @@ an extended ground-to-air cycle, universal defense, and faster progression.
   available after any normal aerial hit.
 - One configurable `R2` Action Ability group, shown and edited through KH1's
   own Command Menu.
-- Universal Guard on `L2 + B`, Dodge Roll on `X`, and Counterattack after a
-  successful Guard.
-- High Jump, a once-per-airtime Kinetic Step second jump, and reduced descent
-  during free fall and ordinary aerial attacks.
+- Universal Guard on `L2 + B`, ground Dodge Roll on `X`, and Counterattack
+  after a successful Guard.
+- High Jump, a once-per-airtime Kinetic Step second jump, native Superglide on
+  held airborne `X`, and reduced descent during free fall and aerial attacks.
 - Fixed `200%` item and prize drop multipliers.
 
 Normal magic shortcuts, Reaction Commands, story progression, rewards,
@@ -36,8 +36,8 @@ The documentation uses Xbox-style face-button labels:
 |---|---|
 | `A` | Native KH1 attack and normal combo continuation |
 | `Y` | Contextual JokCombat branch based on the preceding `A` count |
-| `B` | Native jump; one additional Kinetic Step while airborne |
-| `X` | Dodge Roll |
+| `B` | Native jump; release and press again for Kinetic Step |
+| `X` | Dodge Roll while grounded; hold for native Superglide while airborne |
 | `L2 + B` | Universal Guard |
 | `R2 + A/Y/X/B` | Configured Action Ability |
 | Hold `R2`, then D-pad | Select a slot with Up/Down and change its ability with Left/Right |
@@ -48,6 +48,11 @@ Magic and Reaction Commands keep priority over JokCombat inputs. A neutral `Y`
 is left native through a two-frame release check before Strong opens, so Talk,
 Examine, Save, and the following `A` confirmation are not captured by the combo
 controller. Native magic shortcuts such as `R1 + X` do not trigger Dodge Roll.
+
+High Jump keeps its native variable height: hold the first `B` for the full
+ascent, release it, and press it again for Kinetic Step. Superglide already has
+a separate native command in KH1, so hold `X` while airborne after either jump.
+JokCombat never forces Dodge Roll while Sora is airborne.
 
 The complete ground, aerial, and Limit routes are documented in
 [the combo map](docs/JokCombat_BranchCombo_Mapping.md).
@@ -95,12 +100,13 @@ and are not required for normal play.
 
 ## Save-file changes
 
-`JokCombat_NativeAbilities.lua` grants native High Jump through KH1's Shared
-ability list, equips four Combo Plus, two Air Combo Plus, and Combo Master in
-Sora's ability list, and sets Sora's maximum AP to `99`. These changes become
-part of the save after KH1 saves normally. The combat controller, Action
-Ability loadout, Kinetic Step second jump, descent tuning, Limit cost borrowing,
-and drop-rate patch are runtime-only.
+`JokCombat_NativeAbilities.lua` grants native High Jump, Glide, and Superglide
+through KH1's Shared ability list, equips four Combo Plus, two Air Combo Plus,
+and Combo Master in Sora's ability list, and sets Sora's maximum AP to `99`.
+These changes become part of the save after KH1 saves normally. The combat
+controller's ground-Dodge/air-Superglide ownership rule, Action Ability
+loadout, second jump, descent tuning, Limit cost borrowing, and drop-rate patch
+are runtime-only.
 
 ## Compatibility and known limits
 

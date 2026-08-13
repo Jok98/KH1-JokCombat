@@ -1,15 +1,16 @@
 LUAGUI_NAME = "JokCombat Native Abilities"
 LUAGUI_AUTH = "Jok; Critical Mix reference by Xendra"
-LUAGUI_DESC = "Keeps Shared High Jump and JokCombat's native combo passives learned and equipped."
+LUAGUI_DESC = "Keeps JokCombat's Shared movement abilities and native combo passives learned and equipped."
 
 -- JokCombat native ability grant for the current Steam Global build.
 --
 -- This intentionally follows KH1's two real ability stores instead of routing
--- around native checks. High Jump belongs to the four-byte Shared list, while
--- Combo Plus, Air Combo Plus and Combo Master belong to Sora's contiguous
--- 48-byte Character list. Critical Mix's authorized reference distinguishes
--- the same stores. Preserving each list's order matters because entries after
--- the first terminator are not guaranteed to be visited by KH1.
+-- around native checks. High Jump, Glide and Superglide belong to the four-byte
+-- Shared list, while Combo Plus, Air Combo Plus and Combo Master belong to
+-- Sora's contiguous 48-byte Character list. Critical Mix's authorized
+-- reference distinguishes the same stores. Preserving each list's order
+-- matters because entries after the first terminator are not guaranteed to be
+-- visited by KH1.
 --
 -- The Steam save block starts at 0x2DE9360. Its four-byte save header is
 -- followed by Sora's 0x74-byte Character record: AP max is Character+0x05
@@ -21,14 +22,17 @@ LUAGUI_DESC = "Keeps Shared High Jump and JokCombat's native combo passives lear
 -- Unlike the retired NativePassiveTest, these are deliberate progression
 -- writes. Once the player saves, the equipped abilities become part of that
 -- save. JokCombat keeps the exact vanilla maxima requested by the combat
--- design: Shared High Jump, four Combo Plus, two Air Combo Plus and one Combo
--- Master. KH1FM has one High Jump entry rather than KH2-style levels. A
+-- design: Shared High Jump/Glide/Superglide, four Combo Plus, two Air Combo
+-- Plus and one Combo Master. KH1FM has one High Jump entry rather than
+-- KH2-style levels. Glide and Superglide remain native records. The combat
+-- controller preserves variable-height B for High Jump, reserves a later B
+-- edge for Kinetic Step and leaves native airborne Square to Superglide. A
 -- pre-v0.5.0 JokCombat build incorrectly placed 0x01 in Sora's personal list;
 -- this version first guarantees the Shared copy, then removes only that legacy
 -- misplaced entry. Later vanilla rewards are reconciled without touching any
 -- unrelated ability.
 
-local VERSION = "v0.5.0"
+local VERSION = "v0.6.0"
 local EXPECTED_GAME_ID = 0xAF71841E
 local FINGERPRINT = 0x7265737563697065 -- "epicures", little endian
 local ABILITY_SLOT_COUNT = 48
@@ -85,12 +89,15 @@ local PASSIVES = {
         unequipped = 0xC1, targetCopies = 1 },
 }
 
-local SHARED_HIGH_JUMP = {
-    name = "High Jump",
-    base = 0x01,
-    equipped = 0x01,
-    targetCopies = 1,
+local SHARED_MOVEMENT = {
+    { name = "High Jump", base = 0x01, equipped = 0x01,
+        targetCopies = 1 },
+    { name = "Glide", base = 0x03, equipped = 0x03,
+        targetCopies = 1 },
+    { name = "Superglide", base = 0x04, equipped = 0x04,
+        targetCopies = 1 },
 }
+local SHARED_HIGH_JUMP = SHARED_MOVEMENT[1]
 
 local canRun = false
 local applied = false
@@ -231,13 +238,13 @@ local function removeSharedAbilitySlot(index)
     return true
 end
 
-local function verifySharedHighJump()
-    local slots = collectSharedAbilitySlots(SHARED_HIGH_JUMP.base)
-    if #slots ~= SHARED_HIGH_JUMP.targetCopies then
+local function verifySharedAbility(sharedAbility)
+    local slots = collectSharedAbilitySlots(sharedAbility.base)
+    if #slots ~= sharedAbility.targetCopies then
         return false, slots, string.format(
-            "copy count %d/%d", #slots, SHARED_HIGH_JUMP.targetCopies)
+            "copy count %d/%d", #slots, sharedAbility.targetCopies)
     end
-    if slots[1].value ~= SHARED_HIGH_JUMP.equipped then
+    if slots[1].value ~= sharedAbility.equipped then
         return false, slots, string.format(
             "slot %d has non-canonical value 0x%02X",
             slots[1].index, slots[1].value)
@@ -245,49 +252,53 @@ local function verifySharedHighJump()
     return true, slots, nil
 end
 
-local function reconcileSharedHighJump()
+local function reconcileSharedAbility(sharedAbility)
     local changed = false
-    local slots = collectSharedAbilitySlots(SHARED_HIGH_JUMP.base)
+    local slots = collectSharedAbilitySlots(sharedAbility.base)
 
-    while #slots > SHARED_HIGH_JUMP.targetCopies do
+    while #slots > sharedAbility.targetCopies do
         local surplus = slots[#slots]
         local ok, errorMessage = removeSharedAbilitySlot(surplus.index)
         if not ok then return false, errorMessage end
         log(string.format(
-            "Shared High Jump surplus removed from slot %d; list compacted.",
-            surplus.index))
+            "Shared %s surplus removed from slot %d; list compacted.",
+            sharedAbility.name, surplus.index))
         changed = true
-        slots = collectSharedAbilitySlots(SHARED_HIGH_JUMP.base)
+        slots = collectSharedAbilitySlots(sharedAbility.base)
     end
 
     if #slots == 0 then
         local index = findFirstEmptySharedSlot()
         if index == nil then
-            return false, "High Jump missing but Shared ability list is full"
+            return false, sharedAbility.name
+                .. " missing but Shared ability list is full"
         end
         WriteByte(ADDRESS.sharedAbilitySlots + index,
-            SHARED_HIGH_JUMP.equipped)
+            sharedAbility.equipped)
         if ReadByte(ADDRESS.sharedAbilitySlots + index)
-            ~= SHARED_HIGH_JUMP.equipped then
+            ~= sharedAbility.equipped then
             return false, string.format(
-                "Shared High Jump write failed at slot %d", index)
+                "Shared %s write failed at slot %d",
+                sharedAbility.name, index)
         end
         log(string.format(
-            "High Jump learned in native Shared slot %d: 0x01.", index))
+            "%s learned in native Shared slot %d: 0x%02X.",
+            sharedAbility.name, index, sharedAbility.equipped))
         changed = true
-        slots = collectSharedAbilitySlots(SHARED_HIGH_JUMP.base)
-    elseif slots[1].value ~= SHARED_HIGH_JUMP.equipped then
+        slots = collectSharedAbilitySlots(sharedAbility.base)
+    elseif slots[1].value ~= sharedAbility.equipped then
         WriteByte(ADDRESS.sharedAbilitySlots + slots[1].index,
-            SHARED_HIGH_JUMP.equipped)
+            sharedAbility.equipped)
         if ReadByte(ADDRESS.sharedAbilitySlots + slots[1].index)
-            ~= SHARED_HIGH_JUMP.equipped then
+            ~= sharedAbility.equipped then
             return false, string.format(
-                "Shared High Jump normalization failed at slot %d",
-                slots[1].index)
+                "Shared %s normalization failed at slot %d",
+                sharedAbility.name, slots[1].index)
         end
         log(string.format(
-            "High Jump normalized in Shared slot %d: 0x%02X -> 0x01.",
-            slots[1].index, slots[1].value))
+            "%s normalized in Shared slot %d: 0x%02X -> 0x%02X.",
+            sharedAbility.name, slots[1].index, slots[1].value,
+            sharedAbility.equipped))
         changed = true
     end
 
@@ -446,15 +457,18 @@ local function ensureNativePassives()
         changed = true
     end
 
-    -- High Jump is a Shared movement ability, not a Sora Character passive.
-    -- Guarantee the real native record before removing the misplaced 0x01
-    -- written by JokCombat v0.4.0 and earlier.
-    local sharedOk, sharedChangedOrError = reconcileSharedHighJump()
-    if not sharedOk then
-        log("ERROR: " .. sharedChangedOrError .. ".")
-        return false
+    -- Movement abilities belong to the Shared list, not Sora's Character
+    -- passives. Guarantee all three native records before removing the
+    -- misplaced personal 0x01 written by JokCombat v0.4.0 and earlier.
+    for _, sharedAbility in ipairs(SHARED_MOVEMENT) do
+        local sharedOk, sharedChangedOrError =
+            reconcileSharedAbility(sharedAbility)
+        if not sharedOk then
+            log("ERROR: " .. sharedChangedOrError .. ".")
+            return false
+        end
+        if sharedChangedOrError then changed = true end
     end
-    if sharedChangedOrError then changed = true end
 
     local migrationOk, migrationChangedOrError =
         removeLegacySoraHighJump()
@@ -484,13 +498,17 @@ local function ensureNativePassives()
         end
     end
 
-    local sharedValid, sharedSlots, sharedError = verifySharedHighJump()
-    if not sharedValid then
-        log(string.format(
-            "ERROR: Shared High Jump failed final verification: %s; "
-                .. "slots=[%s].",
-            sharedError, describeSlotIndices(sharedSlots)))
-        return false
+    for _, sharedAbility in ipairs(SHARED_MOVEMENT) do
+        local sharedValid, sharedSlots, sharedError =
+            verifySharedAbility(sharedAbility)
+        if not sharedValid then
+            log(string.format(
+                "ERROR: Shared %s failed final verification: %s; "
+                    .. "slots=[%s].",
+                sharedAbility.name, sharedError,
+                describeSlotIndices(sharedSlots)))
+            return false
+        end
     end
     local misplaced = collectAbilitySlots(SHARED_HIGH_JUMP.base)
     if #misplaced ~= 0 then
@@ -503,8 +521,8 @@ local function ensureNativePassives()
     if changed then
         log("native ability grant complete; changes will persist when KH1 saves.")
     else
-        log("Shared High Jump and native passive counts already exact and "
-            .. "equipped (1 + 4/2/1); no writes.")
+        log("Shared movement set and native passive counts already exact "
+            .. "and equipped (3 + 4/2/1); no writes.")
     end
     applied = true
     pendingReport = true
@@ -514,12 +532,15 @@ end
 
 local function reportNativeState()
     local details = {}
-    local sharedValid, sharedSlots = verifySharedHighJump()
-    table.insert(details, string.format(
-        "Shared High Jump=%d/1 %s@[%s]",
-        #sharedSlots,
-        sharedValid and "on" or "off",
-        describeSlotIndices(sharedSlots)))
+    for _, sharedAbility in ipairs(SHARED_MOVEMENT) do
+        local sharedValid, sharedSlots = verifySharedAbility(sharedAbility)
+        table.insert(details, string.format(
+            "Shared %s=%d/1 %s@[%s]",
+            sharedAbility.name,
+            #sharedSlots,
+            sharedValid and "on" or "off",
+            describeSlotIndices(sharedSlots)))
+    end
     for _, passive in ipairs(PASSIVES) do
         local valid, slots = verifyPassive(passive)
         table.insert(details, string.format(
@@ -563,8 +584,8 @@ function _OnInit()
 
     canRun = true
     log("Native Abilities " .. VERSION
-        .. " ready: Shared High Jump + exact native counts 4/2/1 "
-        .. "+ persistent grant.")
+        .. " ready: Shared High Jump/Glide/Superglide + exact native "
+        .. "counts 4/2/1 + persistent grant.")
 end
 
 function _OnFrame()
@@ -597,9 +618,15 @@ function _OnFrame()
         return
     end
 
-    local sharedValid = verifySharedHighJump()
-    if not sharedValid
-        or #collectAbilitySlots(SHARED_HIGH_JUMP.base) ~= 0 then
+    for _, sharedAbility in ipairs(SHARED_MOVEMENT) do
+        local sharedValid = verifySharedAbility(sharedAbility)
+        if not sharedValid then
+            applied = false
+            pendingReport = false
+            return
+        end
+    end
+    if #collectAbilitySlots(SHARED_HIGH_JUMP.base) ~= 0 then
         applied = false
         pendingReport = false
         return

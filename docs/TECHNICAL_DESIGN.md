@@ -29,7 +29,7 @@ combo-magic adapter proved unable to reproduce KH1's complete cast path.
 | File | Release role |
 |---|---|
 | `JokCombat_CombatPrototype.lua` | Main v1.0.0 combat, input, HUD, movement, Action, and Limit controller. The historical filename is retained to avoid breaking existing installations. |
-| `JokCombat_NativeAbilities.lua` | Persistent native grant of Shared High Jump, four Combo Plus, two Air Combo Plus, Combo Master, and 99 maximum AP. |
+| `JokCombat_NativeAbilities.lua` | Persistent native grant of Shared High Jump, Glide, Superglide, four Combo Plus, two Air Combo Plus, Combo Master, and 99 maximum AP. |
 | `JokCombat_DropRate.lua` | Runtime-only 2.0x item and prize drop patch. |
 
 `JokCombat_StateProbe.lua`, `JokCombat_InputProbe.lua`, and
@@ -65,8 +65,9 @@ The central architectural choice is to give each action to one owner:
   the selected complete native Action record.
 - KH1 owns native magic, Reaction Commands, menu confirmation, and every
   internal follow-up after a Limit has begun.
-- JokCombat owns universal Guard/Dodge admission, the successful-Guard
-  Counterattack window, the R2 Action loadout, and the Kinetic Step request.
+- JokCombat owns universal Guard, ground-only Dodge admission, the
+  successful-Guard Counterattack window, the R2 Action loadout, and the
+  Kinetic Step request. KH1 owns native airborne Square/Superglide.
 - KH1 still executes the resulting Guard, Dodge, Counterattack, Action,
   jump, and Limit through native records or dispatchers.
 
@@ -82,6 +83,8 @@ finisher. The release instead leaves every normal `A` press to KH1.
 The native ability module equips the exact intended maxima:
 
 - Shared High Jump x1;
+- Shared Glide x1;
+- Shared Superglide x1;
 - Combo Plus x4;
 - Air Combo Plus x2;
 - Combo Master x1.
@@ -202,9 +205,11 @@ and Guide persistently.
 ## 11. Defense and contextual Counterattack
 
 Universal Guard is fixed to `L2 + B` and may cancel other ordinary actions.
-Dodge Roll is fixed to `X`, may cancel ordinary actions, and cannot cancel
-itself. Native magic shortcut modifiers take priority, so `R1 + X` remains a
-magic input rather than a Dodge request.
+Dodge Roll is fixed to grounded `X`, may cancel ordinary ground actions, and
+cannot cancel itself. While airborne, JokCombat neither forces the Dodge
+selector nor enables its air bypass: `X` stays entirely native for Superglide.
+Native magic shortcut modifiers also keep priority, so `R1 + X` remains a magic
+input rather than a Dodge request.
 
 Counterattack is not an offensive combo node. A short `A` window opens only
 after all three native conditions are observed: JokCombat accepted Guard,
@@ -213,20 +218,26 @@ event. A whiffed Guard never exposes Counterattack.
 
 ## 12. Jump and descent model
 
-High Jump is a persistent native Shared ability. Kinetic Step is a separate
-runtime-only second jump with one charge per airtime. The detector accepts both
-the base Jump entry (`0x04`) and High Jump entry (`0x09`) as the real first
-jump:
+High Jump, Glide, and Superglide are persistent native Shared abilities.
+Kinetic Step is a separate runtime-only second jump with one charge per
+airtime. The detector accepts both the base Jump entry (`0x04`) and High Jump
+entry (`0x09`) as the real first jump:
 
 1. a native first jump arms the charge;
-2. after the first `B` is released, a new airborne `B` may cancel an ordinary
-   aerial action;
-3. a bounded native air-action route enters the Kinetic Step animation and
+2. holding that first `B` remains native for the complete variable-height High
+   Jump, and releasing it arms input ownership for Kinetic Step;
+3. a new airborne `B` may cancel an ordinary aerial action;
+4. a bounded native air-action route enters the Kinetic Step animation and
    applies its validated lift;
-4. landing is the only normal charge refill.
+5. after either jump, held airborne `X` remains KH1's native Superglide command;
+6. landing is the only normal second-jump charge refill.
 
-The controller never creates a third jump and resets on player changes,
-special aerial states, Limits, faults, and reloads.
+The controller suppresses later native Circle/Glide input only after the first
+`B` is released, because that physical command is reserved for Kinetic Step.
+It never remaps Square to Circle: Superglide already owns Square natively. A
+timed-out second-jump request remains consumed until landing. The controller
+never creates a third jump and resets on player changes, special aerial states,
+Limits, faults, and reloads.
 
 Descent is tuned through downward transform deltas only. Base Jump falls in
 `0x06`, while Shared High Jump falls in `0x0B`; both feed the same controller:
@@ -245,17 +256,18 @@ factor from being multiplied twice after Kinetic Step.
 | Change | Persistence |
 |---|---|
 | 99 maximum AP | Saved by KH1 after a normal save |
-| Shared High Jump and exact 4/2/1 combo passive counts | Saved by KH1 after a normal save |
+| Shared High Jump, Glide, Superglide, and exact 4/2/1 combo passive counts | Saved by KH1 after a normal save |
 | R2 Action Ability assignments | Local `JokCombat_ActionLoadout.cfg` |
-| Branch state, Action routes, Limit selectors, second jump, descent tuning | Process only |
+| Branch state, Action routes, Limit selectors, second jump, input ownership, descent tuning | Process only |
 | 2.0x item/prize drop multipliers | Process only |
 
 The native ability writer treats KH1's two stores separately. It preserves the
-four-byte Shared movement list for High Jump and the contiguous 48-byte Sora
-ability list for combo passives. It inserts only missing entries, equips
-disabled personal copies in place, and removes later vanilla surplus beyond
-the configured maxima without discarding unrelated entries. Because those
-changes can persist, the installation instructions require a save backup.
+four-byte Shared movement list for High Jump, Glide, and Superglide and the
+contiguous 48-byte Sora ability list for combo passives. It inserts only
+missing entries, equips disabled personal copies in place, and removes later
+vanilla surplus beyond the configured maxima without discarding unrelated
+entries. Because those changes can persist, the installation instructions
+require a save backup.
 
 ## 14. Drop-rate policy
 

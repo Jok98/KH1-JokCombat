@@ -98,12 +98,21 @@ local function collectShared(baseId)
     return slots
 end
 
-local function assertSharedHighJump()
-    local slots = collectShared(0x01)
-    assert(#slots == 1, string.format(
-        "Shared High Jump count: expected 1, got %d", #slots))
-    assert(slots[1].value == 0x01, string.format(
-        "Shared High Jump is non-canonical: 0x%02X", slots[1].value))
+local function assertSharedMovement()
+    local expected = {
+        { name = "High Jump", id = 0x01 },
+        { name = "Glide", id = 0x03 },
+        { name = "Superglide", id = 0x04 },
+    }
+    for _, ability in ipairs(expected) do
+        local slots = collectShared(ability.id)
+        assert(#slots == 1, string.format(
+            "Shared %s count: expected 1, got %d",
+            ability.name, #slots))
+        assert(slots[1].value == ability.id, string.format(
+            "Shared %s is non-canonical: 0x%02X",
+            ability.name, slots[1].value))
+    end
     assert(#collect(0x01) == 0,
         "legacy High Jump remained in Sora's Character list")
 end
@@ -129,7 +138,7 @@ for _, message in ipairs(logs) do
 end
 
 assert(ReadByte(SORA_MAX_AP) == 99, "Sora AP max was not raised to 99")
-assertSharedHighJump()
+assertSharedMovement()
 assertExactActive(0x06, 4, "Combo Plus")
 assertExactActive(0x07, 2, "Air Combo Plus")
 assertExactActive(0x41, 1, "Combo Master")
@@ -149,16 +158,23 @@ assert(ReadByte(ABILITY_BASE + 14) == 0x3E,
 assert(ReadByte(ABILITY_BASE + 15) == 0,
     "ability-list compaction did not restore the terminator")
 
--- Simulate a duplicate vanilla Shared reward before Glide. Reconciliation
--- removes only the newest High Jump and preserves the following movement item.
+-- Simulate a full Shared list containing an unrelated movement ability, a
+-- duplicate vanilla High Jump and Glide. Reconciliation removes only the
+-- newest High Jump, compacts the list and restores the missing Superglide.
+memory[SHARED_ABILITY_BASE + 0] = 0x02
 memory[SHARED_ABILITY_BASE + 1] = 0x01
-memory[SHARED_ABILITY_BASE + 2] = 0x03
+memory[SHARED_ABILITY_BASE + 2] = 0x01
+memory[SHARED_ABILITY_BASE + 3] = 0x03
 assert(ensureNativePassives(), "Shared surplus reconciliation failed")
-assertSharedHighJump()
-assert(ReadByte(SHARED_ABILITY_BASE + 1) == 0x03,
+assertSharedMovement()
+assert(ReadByte(SHARED_ABILITY_BASE + 0) == 0x02,
+    "Shared compaction did not preserve the unrelated movement ability")
+assert(ReadByte(SHARED_ABILITY_BASE + 1) == 0x01,
+    "Shared compaction did not preserve High Jump")
+assert(ReadByte(SHARED_ABILITY_BASE + 2) == 0x03,
     "Shared compaction did not preserve Glide")
-assert(ReadByte(SHARED_ABILITY_BASE + 2) == 0,
-    "Shared compaction did not restore its terminator")
+assert(ReadByte(SHARED_ABILITY_BASE + 3) == 0x04,
+    "Shared reconciliation did not restore Superglide")
 
 -- Simulate the ability menu disabling an existing Air Combo Plus.
 local airSlots = collect(0x07)
@@ -167,5 +183,5 @@ assert(ensureNativePassives(), "Air Combo Plus re-equip failed")
 assertExactActive(0x07, 2, "Air Combo Plus after menu disable")
 
 print(string.format(
-    "PASS: Shared High Jump migration + exact native counts 4/2/1, surplus compaction and re-equip (%d logs)",
+    "PASS: Shared movement migration + exact native counts 4/2/1, surplus compaction and re-equip (%d logs)",
     #logs))
