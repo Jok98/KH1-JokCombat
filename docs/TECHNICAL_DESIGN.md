@@ -184,9 +184,12 @@ Holding `R2` opens the only configurable Action group:
 - releasing `R2` saves the configuration once to
   `JokCombat_ActionLoadout.cfg` beside the script.
 
-Guard remains fixed and cannot be replaced. The fourth visual row depends on
-KH1 naturally unlocking the Summon row; its bound R2 action remains executable
-before the row becomes visible.
+Guard remains fixed and cannot be replaced. If the four-row root exposes
+locked Summon as command `0x00` (or unlocked Summon as `0x36`), JokCombat
+temporarily substitutes command `0x06` only as a visual carrier for the fourth
+R2 Action label. The original command byte is stored in the signed recovery
+journal and restored conditionally when the overlay closes or after F1 reload.
+An actual `0xFF` fourth slot remains a three-row surface.
 
 During a combo, the same Command Menu surface becomes a read-only Combo Guide
 that lists only the valid future `Y` actions. The native `A` continuation is
@@ -276,7 +279,8 @@ ability, or Reaction structures is unsupported even with conditional restore.
 - Steam Global is the only validated executable.
 - Summons and combo magic are intentionally excluded.
 - Perfect Guard and a dedicated enemy launcher are not implemented.
-- The fourth Command Menu row is naturally gated by KH1's Summon unlock.
+- A build or save that publishes no fourth root slot (`0xFF`) still exposes
+  only three overlay rows; locked `0x00` and unlocked `0x36` rows are handled.
 - The project uses fixed executable addresses and therefore requires a new
   validation pass after any game executable update.
 

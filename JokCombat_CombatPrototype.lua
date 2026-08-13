@@ -695,8 +695,14 @@ local HUD = {
     dpadReleaseLock = false,
     controlChordHeld = false,
     controlChordUsed = false,
+    -- KH1 renders locked Summon as command 0x00. While the R2 overlay owns all
+    -- four face inputs, command 0x06 is borrowed only as a normal visual
+    -- carrier for row four and is restored conditionally when the overlay ends.
+    nativeFallbackCommandId = 0x06,
+    nativeCommandBackup = nil,
     nativeRecoveryAddress = 0x2DB7940,
     nativeRecoverySignature = 0x31574F524E4B4F4A, -- "JOKNROW1"
+    nativeCarrierSignature = 0x31444D43524B4A, -- "JKRCMD1\0"
     -- Legacy markers are read only during initialization. The current marker
     -- records the temporary visual/logical cursor pair alongside the token
     -- redirects.
@@ -1018,7 +1024,8 @@ function HUD.observeNativeSelection()
         HUD.nativeSelectionPendingFrames = 0
         HUD.nativeDpadPassMask = 0
         if #HUD.nativeTokenBackups > 0 then
-            HUD.writeNativeRecovery(HUD.nativeTokenBackups)
+            HUD.writeNativeRecovery(
+                HUD.nativeTokenBackups, HUD.nativeCommandBackup)
         end
         return true
     end
@@ -1130,7 +1137,7 @@ function HUD.clearNativeRecovery()
     WriteLong(HUD.nativeRecoveryAddress + 0x40, 0)
 end
 
-function HUD.writeNativeRecovery(patches)
+function HUD.writeNativeRecovery(patches, commandPatch)
     if patches == nil or #patches < 1 or #patches > 4 then return false end
     HUD.clearNativeRecovery()
     WriteInt(HUD.nativeRecoveryAddress + 0x08, #patches)
@@ -1152,6 +1159,20 @@ function HUD.writeNativeRecovery(patches)
         WriteInt(address, patch.address)
         WriteInt(address + 0x04, patch.original)
         WriteInt(address + 0x08, patch.patched)
+    end
+    if commandPatch ~= nil then
+        -- This secondary signed record ends before the separate recovery block
+        -- at +0x70. The primary marker is still published last below.
+        WriteLong(HUD.nativeRecoveryAddress + 0x48,
+            commandPatch.menuObject)
+        WriteByte(HUD.nativeRecoveryAddress + 0x50,
+            commandPatch.original)
+        WriteByte(HUD.nativeRecoveryAddress + 0x51,
+            commandPatch.patched)
+        WriteByte(HUD.nativeRecoveryAddress + 0x52, 0x17)
+        WriteByte(HUD.nativeRecoveryAddress + 0x53, 0xC6)
+        WriteLong(HUD.nativeRecoveryAddress + 0x40,
+            HUD.nativeCarrierSignature)
     end
     -- Publish the marker last so a partial recovery record is never accepted.
     WriteLong(HUD.nativeRecoveryAddress, HUD.nativeRecoverySignature)
@@ -1270,19 +1291,35 @@ function HUD.recoverStaleNativeRows()
                 and ReadByte(ADDRESS.commandMenuSlot) == original
         end
     end
+    local carrierRestored = false
+    if ReadLong(HUD.nativeRecoveryAddress + 0x40)
+            == HUD.nativeCarrierSignature
+        and ReadByte(HUD.nativeRecoveryAddress + 0x52) == 0x17
+        and ReadByte(HUD.nativeRecoveryAddress + 0x53) == 0xC6 then
+        local menuObject = ReadLong(HUD.nativeRecoveryAddress + 0x48)
+        local original = ReadByte(HUD.nativeRecoveryAddress + 0x50)
+        local patched = ReadByte(HUD.nativeRecoveryAddress + 0x51)
+        if menuObject >= BASE_ADDR
+            and menuObject < BASE_ADDR + HUD.moduleSize
+            and ReadByte(menuObject + 0x17, true) == patched then
+            WriteByte(menuObject + 0x17, original, true)
+            carrierRestored = true
+        end
+    end
     HUD.clearNativeRecovery()
     if restored > 0 or commandRestored or recordRestored or summonRestored
-        or selectionRestored or rowLoopRestored then
-        log(string.format("Command Menu recovery: labels=%d%s%s%s%s%s.",
+        or selectionRestored or carrierRestored or rowLoopRestored then
+        log(string.format("Command Menu recovery: labels=%d%s%s%s%s%s%s.",
             restored,
             commandRestored and " carrier=restored" or "",
             recordRestored and " record=restored" or "",
             summonRestored and " summon-slot=restored" or "",
             selectionRestored and " cursor=restored" or "",
+            carrierRestored and " row4=restored" or "",
             rowLoopRestored and " row-loop=restored" or ""))
     end
     return restored > 0 or commandRestored or recordRestored or summonRestored
-        or selectionRestored or rowLoopRestored
+        or selectionRestored or carrierRestored or rowLoopRestored
 end
 
 function HUD.restoreNativeRows()
@@ -1293,7 +1330,14 @@ function HUD.restoreNativeRows()
             restored = restored + 1
         end
     end
+    local commandPatch = HUD.nativeCommandBackup
+    if commandPatch ~= nil
+        and ReadByte(commandPatch.address, true) == commandPatch.patched then
+        WriteByte(commandPatch.address, commandPatch.original, true)
+        restored = restored + 1
+    end
     HUD.nativeTokenBackups = {}
+    HUD.nativeCommandBackup = nil
     HUD.clearNativeRecovery()
     HUD.overlayGroup = nil
     HUD.overlaySignature = nil
@@ -1339,11 +1383,30 @@ function HUD.showOverlay(groupId, suppliedEntries, suppliedLabel)
     for index = 1, 4 do
         commands[index] = ReadByte(menuObject + 0x13 + index, true)
     end
-    -- A zero/FF fourth ID means the native Summon row has not been unlocked
-    -- yet. Patch only rows the game already owns; once KH1 supplies a real
-    -- fourth ID, the changed signature automatically expands this to four.
-    local visibleCount = (commands[4] == 0x00 or commands[4] == 0xFF)
-        and 3 or 4
+    local activeCommandPatch = HUD.nativeCommandBackup
+    if activeCommandPatch ~= nil
+        and activeCommandPatch.address == menuObject + 0x17
+        and commands[4] == activeCommandPatch.patched then
+        commands[4] = activeCommandPatch.original
+    end
+    -- A real four-row root may expose locked Summon as command 0x00. The row
+    -- already exists visually, so borrow a normal command only while the R2
+    -- overlay owns it. Only 0xFF means KH1 published no fourth row at all.
+    local visibleCount = commands[4] == 0xFF and 3 or 4
+    local displayCommands = {
+        commands[1], commands[2], commands[3], commands[4],
+    }
+    local commandPatch = nil
+    if visibleCount == 4
+        and (commands[4] == 0x00 or commands[4] == 0x36) then
+        displayCommands[4] = HUD.nativeFallbackCommandId
+        commandPatch = {
+            address = menuObject + 0x17,
+            menuObject = menuObject,
+            original = commands[4],
+            patched = displayCommands[4],
+        }
+    end
     local signature = string.format("%s|%X|%02X%02X%02X%02X|%s",
         groupId, menuObject, commands[1], commands[2], commands[3],
         commands[4], table.concat(entries, "|"))
@@ -1352,6 +1415,16 @@ function HUD.showOverlay(groupId, suppliedEntries, suppliedLabel)
         for _, patch in ipairs(HUD.nativeTokenBackups) do
             stillPatched = stillPatched
                 and (ReadInt(patch.address) & 0xFFFFFFFF) == patch.patched
+        end
+        if commandPatch ~= nil then
+            stillPatched = stillPatched and activeCommandPatch ~= nil
+                and activeCommandPatch.address == commandPatch.address
+                and activeCommandPatch.original == commandPatch.original
+                and activeCommandPatch.patched == commandPatch.patched
+                and ReadByte(commandPatch.address, true)
+                    == commandPatch.patched
+        else
+            stillPatched = stillPatched and activeCommandPatch == nil
         end
         if stillPatched then return true end
     end
@@ -1373,7 +1446,7 @@ function HUD.showOverlay(groupId, suppliedEntries, suppliedLabel)
     local usedAddresses = {}
     for index = 1, visibleCount do
         local messageAddress, messageIndex =
-            HUD.commandMessageTokenAddress(commands[index])
+            HUD.commandMessageTokenAddress(displayCommands[index])
         local textToken = HUD.pointerTokenForAbsolute(
             BASE_ADDR + lineAddresses[index])
         if messageAddress == nil or textToken == nil then
@@ -1395,20 +1468,25 @@ function HUD.showOverlay(groupId, suppliedEntries, suppliedLabel)
     for index = 1, 4 do
         WriteArray(lineAddresses[index], getKHSCII(entries[index], 0x20))
     end
-    if not HUD.writeNativeRecovery(patches) then
+    if not HUD.writeNativeRecovery(patches, commandPatch) then
         return HUD.nativeOverlayFailure("recovery record rejected")
     end
     for _, patch in ipairs(patches) do
         WriteInt(patch.address, patch.patched)
     end
+    if commandPatch ~= nil then
+        WriteByte(commandPatch.address, commandPatch.patched, true)
+    end
     HUD.nativeTokenBackups = patches
+    HUD.nativeCommandBackup = commandPatch
     HUD.nativeFailureKey = nil
     HUD.overlayGroup = groupId
     HUD.overlaySignature = signature
     log(string.format(
-        "native Command Menu labels active: %s ids=%02X/%02X/%02X/%02X visible=%d/4%s.",
+        "native Command Menu labels active: %s ids=%02X/%02X/%02X/%02X visible=%d/4%s%s.",
         groupLabel, commands[1], commands[2], commands[3], commands[4],
-        visibleCount, visibleCount == 3 and " (Summon locked)" or ""))
+        visibleCount, visibleCount == 3 and " (fourth row unavailable)" or "",
+        commandPatch ~= nil and " row4-carrier=06" or ""))
     return true
 end
 
@@ -2186,7 +2264,7 @@ function HUD.visibleEditableCount(groupId)
         and ReadInt(menuObject, true) == 0
         and ReadInt(menuObject + 0x10, true) == 4 then
         local fourthCommand = ReadByte(menuObject + 0x17, true)
-        if fourthCommand ~= 0x00 and fourthCommand ~= 0xFF then
+        if fourthCommand ~= 0xFF then
             return maximum
         end
     end
@@ -6179,6 +6257,7 @@ function _OnInit()
     HUD.overlayGroup = nil
     HUD.overlaySignature = nil
     HUD.nativeTokenBackups = {}
+    HUD.nativeCommandBackup = nil
     HUD.nativeSelectionOwned = false
     HUD.nativeSelectionOriginalSlot = nil
     HUD.nativeSelectionPreviousSlot = nil

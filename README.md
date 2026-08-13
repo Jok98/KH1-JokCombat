@@ -105,8 +105,10 @@ borrowing, and drop-rate patch are runtime-only.
 - Do not load another combat overhaul that patches the same KH1 action,
   command, input, or ability structures.
 - Combo magic and Summons are intentionally excluded from JokCombat branches.
-- The fourth Command Menu row becomes visible when KH1 naturally unlocks
-  Summon; its assigned `R2` action remains callable before that point.
+- When KH1 exposes locked Summon as an existing fourth placeholder row,
+  JokCombat temporarily borrows a normal command record so all four `R2`
+  Action assignments remain visible and editable. The native row is restored
+  as soon as the overlay closes.
 - Perfect Guard and an enemy-launcher system are not part of v1.0.0.
 
 ## Documentation
