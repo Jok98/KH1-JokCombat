@@ -112,10 +112,10 @@ returns to native physical continuation.
 
 | Family | Prefix | Role | Route |
 |---|---|---|---|
-| Strong | `Y` | Burst | Vortex -> Gravity Break -> Ragnarok |
+| Strong | `Y` | Burst | Blitz -> Gravity Break -> Ragnarok |
 | C2 | `A Y` | Pursuit | Sliding Dash -> Sonic Blade |
 | C3 | `A A Y` | Crowd control | Stun Impact -> Ripple Drive -> Trinity Limit |
-| C4 | `A A A Y` | Combo pressure | Slapshot -> Blitz -> Strike Raid |
+| C4 | `A A A Y` | Combo pressure | Slapshot -> Vortex -> Strike Raid |
 | C5 | `A A A A Y` | Execution | Zantetsuken -> Ars Arcanum |
 
 The five families contain eight unique ground Action Abilities and all five

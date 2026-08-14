@@ -23,7 +23,7 @@ Input abbreviati: `A` = Croce, `Y` = Triangolo
 6. I Reaction Command hanno priorità su `Y`. Da neutrale il bordo fisico resta
    prima a KH1; Strong si apre soltanto dopo due frame a `Y` rilasciato senza un
    Reaction ID, un menu non-root o una successiva `A` di conferma. Salva, Esamina
-   e Parla non possono quindi armare per errore `Y -> Vortex`, mentre un valore
+   e Parla non possono quindi armare per errore `Y -> Blitz`, mentre un valore
    Reaction transitorio pubblicato da una Action già accettata non chiude la
    propria famiglia. Magie, menu, shortcut e costi MP vanilla non vengono
    modificati. Summon è esclusa.
@@ -34,7 +34,7 @@ Input abbreviati: `A` = Croce, `Y` = Triangolo
 
 | Sequenza | Mossa |
 |---|---|
-| `Y` | Vortex |
+| `Y` | Blitz |
 | `Y Y` | Gravity Break |
 | `Y Y Y` | Ragnarok |
 
@@ -66,7 +66,7 @@ né sostituisce Trinity.
 | Sequenza | Mossa |
 |---|---|
 | `A A A Y` | Slapshot |
-| `A A A Y Y` | Blitz |
+| `A A A Y Y` | Vortex |
 | `A A A Y Y Y` | Strike Raid |
 
 Strike Raid è terminale. C4 usa le stesse regole di concatenazione e le stesse
@@ -137,7 +137,7 @@ hitbox, danno e follow-up.
 | Strong | Gravity Break | Ragnarok | `0x005A` |
 | C2 | Sliding Dash | Sonic Blade | `0x004B` |
 | C3 | Ripple Drive | Trinity Limit | `0x0052` |
-| C4 | Blitz | Strike Raid | `0x005E` |
+| C4 | Vortex | Strike Raid | `0x005E` |
 | C5 | Zantetsuken | Ars Arcanum | `0x0057` |
 
 Sonic Blade, Ars Arcanum, Strike Raid e Ragnarok prendono in prestito a zero
@@ -193,7 +193,7 @@ Dopo Sliding Dash:
 Dopo Slapshot:
 
 ```text
-[Y] Blitz
+[Y] Vortex
 [Y][Y] Strike Raid
 -
 -

@@ -19,7 +19,7 @@ NATIVE_SOURCE = (ROOT / "JokCombat_NativeAbilities.lua").read_text(
 
 EXPECTED = {
     # Strong / energy.
-    "T": ("action", "vortex"),
+    "T": ("action", "blitz"),
     "TT": ("action", "gravity_break"),
     "TTT": ("limit", "ragnarok"),
     # C2 / pursuit.
@@ -31,7 +31,7 @@ EXPECTED = {
     "XXTTT": ("limit", "trinity_limit"),
     # C4 / combo pressure.
     "XXXT": ("action", "slapshot"),
-    "XXXTT": ("action", "blitz"),
+    "XXXTT": ("action", "vortex"),
     "XXXTTT": ("limit", "strike_raid"),
     # C5 / execution.
     "XXXXT": ("action", "zantetsuken"),
@@ -501,8 +501,8 @@ def assert_integration() -> None:
         "Strong=burst, C2=pursuit, C3=crowd control",
         "C4=combo pressure, C5=execution",
         "standard C4",
-        "Slapshot/Blitz/Strike Raid",
-        "C4 shows Slapshot -> Blitz -> Strike Raid",
+        "Slapshot/Vortex/Strike Raid",
+        "C4 shows Slapshot -> Vortex -> Strike Raid",
     )
     for guard in guards:
         assert guard in SOURCE, f"missing integration guard: {guard}"
@@ -575,7 +575,7 @@ def main() -> None:
     assert_integration()
     print(
         "PASS: 13-node ground map; 8 ground Actions + 5 native Limits; "
-        "standard C4 Slapshot/Blitz/Strike Raid; native aerial descent brake; "
+        "standard C4 Slapshot/Vortex/Strike Raid; native aerial descent brake; "
         "Counterattack gated by successful Guard"
     )
 

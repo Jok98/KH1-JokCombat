@@ -32,7 +32,7 @@ local CONFIG = {
     -- family. Eight ground Action Abilities and all five native Limits form
     -- five standard role-specific branches; Cross after a named move closes
     -- the family and remains a physical continuation. C4 is now an ordinary
-    -- Slapshot -> Blitz -> Strike Raid route with no jump/landing state machine.
+    -- Slapshot -> Vortex -> Strike Raid route with no jump/landing state machine.
     -- The failed reverse-magic adapter is retired: normal menu/R1 magic remains
     -- entirely native. All five unique Limit leaves use the validated native
     -- Reaction dispatcher; no Limit animation, hitbox or follow-up is imitated.
@@ -5043,7 +5043,7 @@ end
 JokCombatBranch = {
     nodes = {
         -- Strong / energy: Y Y Y.
-        T = { kind = "action", id = "vortex", triangle = "TT" },
+        T = { kind = "action", id = "blitz", triangle = "TT" },
         TT = { kind = "action", id = "gravity_break", triangle = "TTT" },
         TTT = { kind = "limit", id = "ragnarok" },
 
@@ -5060,7 +5060,7 @@ JokCombatBranch = {
         -- C4 / combo pressure: A A A Y Y Y.
         XXXT = { kind = "action", id = "slapshot",
             triangle = "XXXTT" },
-        XXXTT = { kind = "action", id = "blitz",
+        XXXTT = { kind = "action", id = "vortex",
             triangle = "XXXTTT" },
         XXXTTT = { kind = "limit", id = "strike_raid" },
 
@@ -5281,7 +5281,7 @@ function JokCombatBranch.initialize()
         or JokCombatBranch.nodes.XXXTT.triangle ~= "XXXTTT"
         or JokCombatBranch.nodes.XXXTTT == nil then
         ConsolePrint("[JokCombat:branch:fault] standard C4 "
-            .. "Slapshot/Blitz/Strike Raid topology is incomplete.")
+            .. "Slapshot/Vortex/Strike Raid topology is incomplete.")
         valid = false
     end
     if valid and #ACTION_CATALOG - 1 ~= 11 then valid = false end
@@ -5761,7 +5761,8 @@ function JokCombatBranch.update(player, buttons, crossPressed,
     -- Native contextual commands (Save, Examine, Talk, etc.) own Triangle.
     -- Only a Reaction that exists while JokCombat owns no active node may gate
     -- a new family. Some complete Action records publish a transient non-zero
-    -- value after entry; treating that as a world interaction closed Vortex
+    -- value after entry; treating that as a world interaction closed the first
+    -- Strong Action
     -- immediately and left its controls suppressed. Neutral Y uses the short
     -- arbitration above to catch Talk/Examine/Save before Strong is dispatched.
     local nativeReaction = ReadShort(ADDRESS.reactionCommandId)
@@ -6356,7 +6357,7 @@ function _OnInit()
         .. (HUD.enabled and "on." or "off."))
     log("family roles ready: Strong=burst, C2=pursuit, C3=crowd control, "
         .. "C4=combo pressure, C5=execution.")
-    log("Combo Guide ready: C4 shows Slapshot -> Blitz -> Strike Raid; "
+    log("Combo Guide ready: C4 shows Slapshot -> Vortex -> Strike Raid; "
         .. "A otherwise stays a native physical continuation.")
     log("neutral Y arbitration ready: two released frames before Strong; "
         .. "Reaction Commands and the first physical A keep native priority.")

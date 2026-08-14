@@ -2,6 +2,13 @@
 
 All notable player-facing changes to JokCombat are recorded here.
 
+## Unreleased
+
+### Changed
+
+- Moved Blitz to the first neutral `Y` in Strong and moved Vortex to C4's
+  second Action slot, preserving one unique route for every Action Ability.
+
 ## 2.0.0 - 2026-08-13
 
 ### Added
