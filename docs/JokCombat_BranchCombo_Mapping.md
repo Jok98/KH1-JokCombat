@@ -16,14 +16,15 @@ Input abbreviati: `A` = Croce, `Y` = Triangolo
    una continuazione fisica vanilla. Non esistono prefissi reverse nascosti.
 4. Ogni `Y` produce subito la mossa indicata: la sequenza non è una password
    attesa fino all'ultimo tasto.
-5. Ogni Action Ability ha un solo ruolo contestuale: Strong è burst, C2
-   inseguimento, C3 controllo area, C4 pressione combo e C5 esecuzione.
+5. Ogni Action Ability ha un solo ruolo contestuale: Strong è la catena
+   caratteristica completa, C2 inseguimento, C3 controllo area, C4 attacco
+   a distanza e C5 potenza gravitazionale.
    Hurricane Blast e Aerial Sweep restano nella famiglia aerea condivisa;
    Counterattack appartiene alla Guard riuscita.
 6. I Reaction Command hanno priorità su `Y`. Da neutrale il bordo fisico resta
    prima a KH1; Strong si apre soltanto dopo due frame a `Y` rilasciato senza un
    Reaction ID, un menu non-root o una successiva `A` di conferma. Salva, Esamina
-   e Parla non possono quindi armare per errore `Y -> Blitz`, mentre un valore
+   e Parla non possono quindi armare per errore `Y -> Slapshot`, mentre un valore
    Reaction transitorio pubblicato da una Action già accettata non chiude la
    propria famiglia. Magie, menu, shortcut e costi MP vanilla non vengono
    modificati. Summon è esclusa.
@@ -33,15 +34,17 @@ Input abbreviati: `A` = Croce, `Y` = Triangolo
 
 ## 2. Mappa terrestre completa
 
-### Strong — energia
+### Strong — catena caratteristica
 
 | Sequenza | Mossa |
 |---|---|
-| `Y` | Blitz |
-| `Y Y` | Gravity Break |
-| `Y Y Y` | Ragnarok |
+| `Y` | Slapshot |
+| `Y Y` | Vortex |
+| `Y Y Y` | Blitz |
+| `Y Y Y Y` | Zantetsuken |
+| `Y Y Y Y Y` | Ars Arcanum |
 
-Ragnarok è terminale.
+Ars Arcanum è terminale.
 
 ### C2 — inseguimento
 
@@ -62,26 +65,23 @@ Sonic Blade è terminale.
 Ripple Drive è terminale. Trinity Limit è escluso dalla mappa perché la sua
 sequenza nativa controlla anche Paperino e Pippo.
 
-### C4 — pressione combo
+### C4 — attacco a distanza
 
 | Sequenza | Mossa |
 |---|---|
-| `A A A Y` | Slapshot |
-| `A A A Y Y` | Vortex |
-| `A A A Y Y Y` | Strike Raid |
+| `A A A Y` | Strike Raid |
 
-Strike Raid è terminale. C4 usa le stesse regole di concatenazione e le stesse
-finestre sicure delle altre famiglie, senza salto obbligatorio o stato
-terra-aria-terra dedicato.
+Strike Raid è terminale. Essendo il primo nodo della famiglia, il suo selettore
+nativo viene armato e riceve lo stesso `Y` fisico sul medesimo frame.
 
-### C5 — esecuzione
+### C5 — potenza gravitazionale
 
 | Sequenza | Mossa |
 |---|---|
-| `A A A A Y` | Zantetsuken |
-| `A A A A Y Y` | Ars Arcanum |
+| `A A A A Y` | Gravity Break |
+| `A A A A Y Y` | Ragnarok |
 
-Ars Arcanum è terminale. Se Combo Plus porta la stringa oltre il quarto `A`,
+Ragnarok è terminale. Se Combo Plus porta la stringa oltre il quarto `A`,
 le posizioni successive restano vanilla: la mappa non inventa C6/C7.
 
 ### Copertura terrestre
@@ -131,14 +131,15 @@ il segnale di contatto.
 
 L'Action immediatamente precedente pre-arma una sola Reaction nativa; il `Y`
 finale rimane fisico e KH1 gestisce bersaglio, movimento, animazione, VFX,
-hitbox, danno e follow-up.
+hitbox, danno e follow-up. Strike Raid è l'unica eccezione strutturale: apre C4
+direttamente, quindi selettore e primo `Y` vengono agganciati nello stesso frame.
 
 | Famiglia | Parent Action | Limit | Reaction |
 |---|---|---|---:|
-| Strong | Gravity Break | Ragnarok | `0x005A` |
+| Strong | Zantetsuken | Ars Arcanum | `0x0057` |
 | C2 | Sliding Dash | Sonic Blade | `0x004B` |
-| C4 | Vortex | Strike Raid | `0x005E` |
-| C5 | Zantetsuken | Ars Arcanum | `0x0057` |
+| C4 | radice diretta | Strike Raid | `0x005E` |
+| C5 | Gravity Break | Ragnarok | `0x005A` |
 
 Sonic Blade, Ars Arcanum, Strike Raid e Ragnarok prendono in prestito a zero
 soltanto il proprio costo durante la selezione e lo stato Limit. Trinity non è
@@ -195,9 +196,9 @@ Dopo Slapshot:
 
 ```text
 [Y] Vortex
-[Y][Y] Strike Raid
--
--
+[Y][Y] Blitz
+[Y][Y][Y] Zantetsuken
+[Y][Y][Y][Y] Ars Arcanum
 ```
 
 Durante la finestra di una Guard riuscita:
@@ -219,11 +220,11 @@ Una mossa terminale completata prepara la famiglia successiva:
 
 | Terminale completato | `A` nativo successivo + `Y` apre |
 |---|---|
-| Ragnarok | C2 — Sliding Dash |
+| Ars Arcanum | C2 — Sliding Dash |
 | Sonic Blade | C3 — Stun Impact |
-| Ripple Drive | C4 — Slapshot |
-| Strike Raid | C5 — Zantetsuken |
-| Ars Arcanum | nessuna: C5 chiude la catena |
+| Ripple Drive | C4 — Strike Raid |
+| Strike Raid | C5 — Gravity Break |
+| Ragnarok | nessuna: C5 chiude la catena |
 
 Il primo `A` non viene simulato e non modifica `comboPosition`: KH1 deve entrare
 realmente in `C8`, `C9` o `CA`. Se viene premuto nella coda sicura di una Action

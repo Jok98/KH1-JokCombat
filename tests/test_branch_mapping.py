@@ -18,30 +18,30 @@ NATIVE_SOURCE = (ROOT / "JokCombat_NativeAbilities.lua").read_text(
 
 
 EXPECTED = {
-    # Strong / energy.
-    "T": ("action", "blitz"),
-    "TT": ("action", "gravity_break"),
-    "TTT": ("limit", "ragnarok"),
+    # Strong / signature chain.
+    "T": ("action", "slapshot"),
+    "TT": ("action", "vortex"),
+    "TTT": ("action", "blitz"),
+    "TTTT": ("action", "zantetsuken"),
+    "TTTTT": ("limit", "ars_arcanum"),
     # C2 / pursuit.
     "XT": ("action", "sliding_dash"),
     "XTT": ("limit", "sonic_blade"),
     # C3 / area.
     "XXT": ("action", "stun_impact"),
     "XXTT": ("action", "ripple_drive"),
-    # C4 / combo pressure.
-    "XXXT": ("action", "slapshot"),
-    "XXXTT": ("action", "vortex"),
-    "XXXTTT": ("limit", "strike_raid"),
-    # C5 / execution.
-    "XXXXT": ("action", "zantetsuken"),
-    "XXXXTT": ("limit", "ars_arcanum"),
+    # C4 / ranged raid.
+    "XXXT": ("limit", "strike_raid"),
+    # C5 / gravity burst.
+    "XXXXT": ("action", "gravity_break"),
+    "XXXXTT": ("limit", "ragnarok"),
 }
 
 LIMITS = {
     "sonic_blade": ("XTT", "XT", "0x004B"),
-    "ars_arcanum": ("XXXXTT", "XXXXT", "0x0057"),
-    "strike_raid": ("XXXTTT", "XXXTT", "0x005E"),
-    "ragnarok": ("TTT", "TT", "0x005A"),
+    "ars_arcanum": ("TTTTT", "TTTT", "0x0057"),
+    "strike_raid": ("XXXT", "XXX", "0x005E"),
+    "ragnarok": ("XXXXTT", "XXXXT", "0x005A"),
 }
 
 
@@ -109,16 +109,17 @@ def assert_map(nodes: dict[str, dict[str, str]]) -> None:
     assert set(nodes) == {
         path
         for family in (
-            ("T", "TT", "TTT"),
+            ("T", "TT", "TTT", "TTTT", "TTTTT"),
             ("XT", "XTT"),
             ("XXT", "XXTT"),
-            ("XXXT", "XXXTT", "XXXTTT"),
+            ("XXXT",),
             ("XXXXT", "XXXXTT"),
         )
         for path in family
     }
-    assert nodes["XXXT"]["triangle"] == "XXXTT"
-    assert nodes["XXXTT"]["triangle"] == "XXXTTT"
+    assert nodes["T"]["triangle"] == "TT"
+    assert nodes["TTTT"]["triangle"] == "TTTTT"
+    assert "triangle" not in nodes["XXXT"]
 
 
 def assert_action_partition(nodes: dict[str, dict[str, str]]) -> None:
@@ -154,13 +155,13 @@ def assert_post_special_depth(nodes: dict[str, dict[str, str]]) -> None:
     terminal_paths = {
         path for path, node in nodes.items() if "triangle" not in node
     }
-    assert terminal_paths == {"TTT", "XTT", "XXTT", "XXXTTT", "XXXXTT"}
+    assert terminal_paths == {"TTTTT", "XTT", "XXTT", "XXXT", "XXXXTT"}
 
     expected_next = {
-        "TTT": "XT",
+        "TTTTT": "XT",
         "XTT": "XXT",
         "XXTT": "XXXT",
-        "XXXTTT": "XXXXT",
+        "XXXT": "XXXXT",
         "XXXXTT": None,
     }
     for path, expected in expected_next.items():
@@ -181,7 +182,8 @@ def assert_post_special_depth(nodes: dict[str, dict[str, str]]) -> None:
     assert 'deferredLinkKind:sub(1, 12) == "musou-light:"' in controller
     assert "clearDeferredAttackCommand()" in controller
     assert "native A won the handoff; deferred fallback cancelled" in controller
-    assert "local carryPath = limit.prefix" in SOURCE
+    assert "local carryPath = limit.carryPath or limit.prefix" in SOURCE
+    assert 'carryPath = "XXXT"' in SOURCE
     assert "JokCombatNativeLimit.continuationCrossPending" in SOURCE
     assert "and player.secondary <= 0x02 then return false end" in controller
     armed_start = controller.index('if state == "armed" then')
@@ -560,11 +562,14 @@ def assert_integration() -> None:
         'if path == "T" then return nil end',
         'return HUD.showOverlay("guide", guideEntries, "Combo Guide")',
         "legacy combo-magic recovery ready; no combo path can cast magic.",
-        "Strong=burst, C2=pursuit, C3=crowd control",
-        "C4=combo pressure, C5=execution",
-        "standard C4",
-        "Slapshot/Vortex/Strike Raid",
-        "C4 shows Slapshot -> Vortex -> Strike Raid",
+        "Strong=signature chain, C2=pursuit",
+        "C4=ranged raid, C5=gravity burst",
+        "requested Y/C4/C5",
+        "Y=Slapshot/Vortex/Blitz/Zantetsuken/Ars",
+        "C4=Strike Raid; C5=Gravity Break/Ragnarok",
+        "function JokCombatBranch.executeRootLimit",
+        "root Limit selector and final Y latched on the same frame",
+        "JokCombatBranch.executeRootLimit(player, trianglePressed)",
         "branchDepthCarryFrames = 360",
         "branchDepthConfirmFrames = 30",
         "function JokCombatBranch.pathDepth",
@@ -591,15 +596,20 @@ def assert_integration() -> None:
     reaction_gate = branch_update.index(
         "local nativeReaction = ReadShort(ADDRESS.reactionCommandId)"
     )
+    root_limit = branch_update.index(
+        "JokCombatBranch.executeRootLimit(player, trianglePressed)",
+        reaction_gate,
+    )
     arbitration = branch_update.index(
         "JokCombatBranch.resolveNeutralTriangle("
     )
     strong_arm = branch_update.index(
         'if root == "T" then return JokCombatBranch.armNeutralTriangle() end'
     )
-    assert selector_gate < arbitration < reaction_gate < strong_arm, (
+    assert selector_gate < arbitration < reaction_gate < root_limit < strong_arm, (
         "native Limit must keep priority; an already pending neutral Y must "
-        "resolve before the idle Reaction gate and a new Strong request"
+        "resolve before the idle Reaction gate, a direct C4 Limit, and a new "
+        "Strong request"
     )
 
     resolver_start = SOURCE.index(
@@ -653,7 +663,8 @@ def main() -> None:
     assert_integration()
     print(
         "PASS: 12-node ground map; 8 ground Actions + 4 active native Limits; "
-        "standard C4 Slapshot/Vortex/Strike Raid; native aerial descent brake; "
+        "five-step Y signature chain + direct C4 Strike Raid; "
+        "native aerial descent brake; "
         "Counterattack gated by successful Guard"
     )
 

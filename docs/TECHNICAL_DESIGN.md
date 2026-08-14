@@ -112,11 +112,11 @@ returns to native physical continuation.
 
 | Family | Prefix | Role | Route |
 |---|---|---|---|
-| Strong | `Y` | Burst | Blitz -> Gravity Break -> Ragnarok |
+| Strong | `Y` | Signature chain | Slapshot -> Vortex -> Blitz -> Zantetsuken -> Ars Arcanum |
 | C2 | `A Y` | Pursuit | Sliding Dash -> Sonic Blade |
 | C3 | `A A Y` | Crowd control | Stun Impact -> Ripple Drive |
-| C4 | `A A A Y` | Combo pressure | Slapshot -> Vortex -> Strike Raid |
-| C5 | `A A A A Y` | Execution | Zantetsuken -> Ars Arcanum |
+| C4 | `A A A Y` | Ranged raid | Strike Raid |
+| C5 | `A A A A Y` | Gravity burst | Gravity Break -> Ragnarok |
 
 The five families contain eight unique ground Action Abilities and four active
 native Limits without duplicate named moves. The full input map, independent
@@ -177,6 +177,11 @@ cost only for the selected combo route and active native Limit. Their original
 costs are journaled and restored conditionally on completion, cancel, timeout,
 fault, exit, or script reload. Launching the same Limit from KH1's menu keeps
 its vanilla cost.
+
+Sonic Blade, Ars Arcanum, and Ragnarok are pre-armed by their parent Actions.
+Strike Raid begins C4 directly, so its selector and the same physical final-`Y`
+edge are journaled and latched together before the generic root dispatcher can
+reject an unprepared Limit.
 
 Trinity Limit is excluded from the active combo map because its native sequence
 owns Donald and Goofy. Its former catalog descriptor remains recovery-only so

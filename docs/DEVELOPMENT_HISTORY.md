@@ -13,14 +13,15 @@ globale dei drop descritto sotto.
 
 ## Modifiche post-v2.0.0
 
-> **Profondità persistente e Trinity ritirato:** il primo `Y` dello Strong usa
-> Blitz e Vortex occupa il secondo nodo di C4. Trinity Limit viene rimosso dalla
-> mappa attiva perché la sua sequenza nativa controlla Paperino e Pippo; il suo
-> descrittore resta soltanto per recuperare un eventuale journal v2.0.0 durante
-> `F1`. Dopo Ragnarok, Sonic Blade, Ripple Drive o Strike Raid, un solo `A`
-> realmente accettato da KH1 conserva la profondità logica e apre rispettivamente
-> C2, C3, C4 o C5. Nessuna scrittura modifica `comboPosition`; Ars Arcanum chiude
-> la catena.
+> **Nuova catena Y e profondità persistente:** Strong usa ora Slapshot -> Vortex
+> -> Blitz -> Zantetsuken -> Ars Arcanum. C4 esegue direttamente Strike Raid;
+> non avendo una Action parent, il selettore Reaction e il primo `Y` vengono
+> agganciati nello stesso frame. La vecchia C5 di Zantetsuken/Ars diventa Gravity
+> Break -> Ragnarok. Trinity Limit resta escluso perché controlla Paperino e
+> Pippo; il descrittore precedente serve soltanto al recupero del journal v2.0.0.
+> Dopo Ars Arcanum, Sonic Blade, Ripple Drive o Strike Raid, un solo `A` realmente
+> accettato da KH1 conserva la profondità logica e apre C2, C3, C4 o C5. Nessuna
+> scrittura modifica `comboPosition`; Ragnarok chiude la catena.
 
 ## Stato attuale
 

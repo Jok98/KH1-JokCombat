@@ -6,7 +6,7 @@ LUAGUI_DESC = "Native Cross combo, Musou-style Y Action/Limit families, one-cycl
 -- Critical Mix was used as an authorized technical reference. This script is
 -- intentionally limited to combat/input state and does not persist changes to
 -- story flags, rewards, inventory, AP, levels, worlds, chests, or synthesis.
--- All five Musou combo Limits are exposed through KH1's native Reaction/Limit
+-- Four Musou combo Limits are exposed through KH1's native Reaction/Limit
 -- dispatcher. Their MP state and dispatcher bytes are borrowed only while the
 -- selected combo Limit is owned, then restored conditionally before normal
 -- play resumes.
@@ -31,12 +31,14 @@ local CONFIG = {
     -- Modifier-free Triangle selects the Musou-style Strong/C2/C3/C4/C5
     -- family. Eight ground Action Abilities and four native Limits form
     -- five standard role-specific branches; Cross after a named move closes
-    -- the family and remains a physical continuation. C4 is now an ordinary
-    -- Slapshot -> Vortex -> Strike Raid route with no jump/landing state machine.
+    -- the family and remains a physical continuation. The pure Y family owns
+    -- Slapshot -> Vortex -> Blitz -> Zantetsuken -> Ars Arcanum; C4 opens
+    -- Strike Raid directly and C5 owns Gravity Break -> Ragnarok.
     -- The failed reverse-magic adapter is retired: normal menu/R1 magic remains
-    -- entirely native. The four Limit leaves use the validated native Reaction
-    -- dispatcher; no Limit animation, hitbox or follow-up is imitated. Trinity
-    -- Limit is excluded because its native sequence owns Donald and Goofy.
+    -- entirely native. The three Limit leaves and direct C4 root use the
+    -- validated native Reaction dispatcher; no Limit animation, hitbox or
+    -- follow-up is imitated. Trinity Limit is excluded because its native
+    -- sequence owns Donald and Goofy.
     branchCombos = true,
     branchActionAbilities = true,
     branchLimits = true,
@@ -4264,15 +4266,16 @@ JokCombatNativeLimit = {
             reactionId = 0x004B, costAddress = ADDRESS.sonicBladeCost,
             context = "ground" },
         { id = "ars_arcanum", index = 2, tag = "ars",
-            name = "Ars Arcanum", path = "XXXXTT", prefix = "XXXXT",
+            name = "Ars Arcanum", path = "TTTTT", prefix = "TTTT",
             reactionId = 0x0057, costAddress = ADDRESS.arsArcanumCost,
             context = "ground" },
         { id = "strike_raid", index = 3, tag = "raid",
-            name = "Strike Raid", path = "XXXTTT", prefix = "XXXTT",
+            name = "Strike Raid", path = "XXXT", prefix = "XXX",
+            carryPath = "XXXT",
             reactionId = 0x005E, costAddress = ADDRESS.strikeRaidCost,
             context = "both" },
         { id = "ragnarok", index = 4, tag = "ragnarok",
-            name = "Ragnarok", path = "TTT", prefix = "TT",
+            name = "Ragnarok", path = "XXXXTT", prefix = "XXXXT",
             reactionId = 0x005A, costAddress = ADDRESS.ragnarokCost,
             context = "both" },
         { id = "trinity_limit", index = 5, tag = "trinity",
@@ -4941,7 +4944,7 @@ function JokCombatNativeLimit.update(player, buttons)
         if JokCombatNativeLimit.frames <= 0 then
             JokCombatNativeLimit.finish("native Limit safety timeout")
         elseif JokCombatNativeLimit.activationFrames <= 0 then
-            local carryPath = limit.prefix
+            local carryPath = limit.carryPath or limit.prefix
             local carryName = limit.name
             local carryCross =
                 JokCombatNativeLimit.continuationCrossPending
@@ -5077,17 +5080,20 @@ end
 -- Lua 5.3 limits a chunk to 200 local variables and this controller already
 -- carries the validated loadout, HUD and route state in the same chunk.
 -- Every named move ends in T. X before the first T chooses Strong/C2/C3/C4/C5;
--- X after a named move returns to the vanilla physical string. Strong is
--- energy/burst, C2 is pursuit, C3 is crowd control, C4 is combo pressure and
--- C5 is single-target execution. Counterattack remains contextual to a
--- successful Guard; the aerial Y family remains independent of every ground
--- branch.
+-- X after a named move returns to the vanilla physical string. Strong is the
+-- five-step signature chain, C2 is pursuit, C3 is crowd control, C4 is a
+-- direct ranged Limit and C5 is gravity burst. Counterattack remains
+-- contextual to a successful Guard; the aerial Y family remains independent
+-- of every ground branch.
 JokCombatBranch = {
     nodes = {
-        -- Strong / energy: Y Y Y.
-        T = { kind = "action", id = "blitz", triangle = "TT" },
-        TT = { kind = "action", id = "gravity_break", triangle = "TTT" },
-        TTT = { kind = "limit", id = "ragnarok" },
+        -- Strong / signature chain: Y Y Y Y Y.
+        T = { kind = "action", id = "slapshot", triangle = "TT" },
+        TT = { kind = "action", id = "vortex", triangle = "TTT" },
+        TTT = { kind = "action", id = "blitz", triangle = "TTTT" },
+        TTTT = { kind = "action", id = "zantetsuken",
+            triangle = "TTTTT" },
+        TTTTT = { kind = "limit", id = "ars_arcanum" },
 
         -- C2 / pursuit: A Y Y.
         XT = { kind = "action", id = "sliding_dash", triangle = "XTT" },
@@ -5098,17 +5104,13 @@ JokCombatBranch = {
         XXT = { kind = "action", id = "stun_impact", triangle = "XXTT" },
         XXTT = { kind = "action", id = "ripple_drive" },
 
-        -- C4 / combo pressure: A A A Y Y Y.
-        XXXT = { kind = "action", id = "slapshot",
-            triangle = "XXXTT" },
-        XXXTT = { kind = "action", id = "vortex",
-            triangle = "XXXTTT" },
-        XXXTTT = { kind = "limit", id = "strike_raid" },
+        -- C4 / ranged raid: A A A Y.
+        XXXT = { kind = "limit", id = "strike_raid" },
 
-        -- C5 / execution: A A A A Y Y.
-        XXXXT = { kind = "action", id = "zantetsuken",
+        -- C5 / gravity burst: A A A A Y Y.
+        XXXXT = { kind = "action", id = "gravity_break",
             triangle = "XXXXTT" },
-        XXXXTT = { kind = "limit", id = "ars_arcanum" },
+        XXXXTT = { kind = "limit", id = "ragnarok" },
     },
 
     -- `open` accepts exactly one buffered edge; `release` is the earliest
@@ -5188,11 +5190,11 @@ JokCombatBranch = {
     },
     airFamily = false,
     familyRoles = {
-        T = "Strong / burst",
+        T = "Strong / signature chain",
         XT = "C2 / pursuit",
         XXT = "C3 / crowd control",
-        XXXT = "C4 / combo pressure",
-        XXXXT = "C5 / execution",
+        XXXT = "C4 / ranged raid",
+        XXXXT = "C5 / gravity burst",
     },
 }
 
@@ -5428,6 +5430,36 @@ function JokCombatBranch.prearmLimitChild(player)
     return JokCombatNativeLimit.arm(limit.id, player)
 end
 
+function JokCombatBranch.executeRootLimit(player, trianglePressed)
+    if not trianglePressed or JokCombatBranch.active
+        or JokCombatBranch.pendingPath ~= nil
+        or JokCombatBranch.waitingPath ~= nil then
+        return false
+    end
+    local path = JokCombatBranch.rootPath(player)
+    local node = JokCombatBranch.nodeForPath(path)
+    if node == nil or node.kind ~= "limit" then return false end
+    if not JokCombatBranch.nodeReady(node, player, path) then
+        log("[branch] " .. tostring(path)
+            .. " root Limit is unavailable in the current context.")
+        return true
+    end
+    if not JokCombatNativeLimit.arm(node.id, player) then
+        log("[branch] " .. path
+            .. " root Limit selector could not be armed; Y discarded.")
+        return true
+    end
+    if not JokCombatNativeLimit.acceptFinalInput(node.id, player) then
+        JokCombatNativeLimit.restore("root Limit final Y latch failed")
+        log("[branch] " .. path
+            .. " root Limit final Y could not be latched.")
+        return true
+    end
+    log("[branch] " .. path
+        .. " root Limit selector and final Y latched on the same frame.")
+    return true
+end
+
 function JokCombatBranch.initialize()
     JokCombatBranch.reset(nil, true, true)
     local count = 0
@@ -5488,13 +5520,22 @@ function JokCombatBranch.initialize()
             .. "nodes=%d/12 actions=%d/8.", count, actionCount))
         valid = false
     end
-    if JokCombatBranch.nodes.XXXT == nil
-        or JokCombatBranch.nodes.XXXT.triangle ~= "XXXTT"
-        or JokCombatBranch.nodes.XXXTT == nil
-        or JokCombatBranch.nodes.XXXTT.triangle ~= "XXXTTT"
-        or JokCombatBranch.nodes.XXXTTT == nil then
-        ConsolePrint("[JokCombat:branch:fault] standard C4 "
-            .. "Slapshot/Vortex/Strike Raid topology is incomplete.")
+    if JokCombatBranch.nodes.T == nil
+        or JokCombatBranch.nodes.T.triangle ~= "TT"
+        or JokCombatBranch.nodes.TT == nil
+        or JokCombatBranch.nodes.TT.triangle ~= "TTT"
+        or JokCombatBranch.nodes.TTT == nil
+        or JokCombatBranch.nodes.TTT.triangle ~= "TTTT"
+        or JokCombatBranch.nodes.TTTT == nil
+        or JokCombatBranch.nodes.TTTT.triangle ~= "TTTTT"
+        or JokCombatBranch.nodes.TTTTT == nil
+        or JokCombatBranch.nodes.XXXT == nil
+        or JokCombatBranch.nodes.XXXT.kind ~= "limit"
+        or JokCombatBranch.nodes.XXXXT == nil
+        or JokCombatBranch.nodes.XXXXT.triangle ~= "XXXXTT"
+        or JokCombatBranch.nodes.XXXXTT == nil then
+        ConsolePrint("[JokCombat:branch:fault] requested Y/C4/C5 "
+            .. "topology is incomplete.")
         valid = false
     end
     if valid and #ACTION_CATALOG - 1 ~= 11 then valid = false end
@@ -5977,9 +6018,10 @@ function JokCombatBranch.update(player, buttons, crossPressed,
         end
         return false
     end
-    -- A Limit's immediate parent Action pre-arms its real Reaction. One real
-    -- final-Y edge is then latched until KH1 can accept it; the player never
-    -- has to repeat Y merely because the parent Action is still recovering.
+    -- A Limit's immediate parent Action normally pre-arms its real Reaction.
+    -- One real final-Y edge is then latched until KH1 can accept it; the player
+    -- never has to repeat Y merely because the parent Action is recovering.
+    -- The direct C4 Strike Raid root is armed below on its own final-Y edge.
     if JokCombatNativeLimit.selectorOwned() then
         if trianglePressed then
             local limit = JokCombatNativeLimit.byId[
@@ -6017,6 +6059,14 @@ function JokCombatBranch.update(player, buttons, crossPressed,
     end
     if not HUD.nativeRootSelectionAvailable() and not branchOwnsInput then
         return false
+    end
+    -- C4 now begins directly with Strike Raid rather than an Action parent.
+    -- The physical final Y is still present on this frame, so publish the
+    -- native selector and latch that same edge before the generic root queue
+    -- can reject an un-prearmed Limit.
+    if not branchOwnsInput
+        and JokCombatBranch.executeRootLimit(player, trianglePressed) then
+        return true
     end
 
     local requestAccepted = JokCombatBranch.observeRequest(player)
@@ -6614,10 +6664,10 @@ function _OnInit()
         .. "release L1+R1+L2+R2 to toggle it; add D-pad Down to reset "
         .. "defaults; overlay is currently "
         .. (HUD.enabled and "on." or "off."))
-    log("family roles ready: Strong=burst, C2=pursuit, C3=crowd control, "
-        .. "C4=combo pressure, C5=execution.")
-    log("Combo Guide ready: C4 shows Slapshot -> Vortex -> Strike Raid; "
-        .. "A otherwise stays a native physical continuation.")
+    log("family roles ready: Strong=signature chain, C2=pursuit, "
+        .. "C3=crowd control, C4=ranged raid, C5=gravity burst.")
+    log("Combo Guide ready: Y=Slapshot/Vortex/Blitz/Zantetsuken/Ars; "
+        .. "C4=Strike Raid; C5=Gravity Break/Ragnarok.")
     log("post-special depth ready: a completed terminal move plus one real A "
         .. "opens the following ground family; C5 remains terminal.")
     log("neutral Y arbitration ready: two released frames before Strong; "

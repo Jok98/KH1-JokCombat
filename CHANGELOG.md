@@ -6,8 +6,10 @@ All notable player-facing changes to JokCombat are recorded here.
 
 ### Changed
 
-- Moved Blitz to the first neutral `Y` in Strong and moved Vortex to C4's
-  second Action slot, preserving one unique route for every Action Ability.
+- Rebuilt the ground families without duplicate moves: the pure `Y` chain is
+  now Slapshot -> Vortex -> Blitz -> Zantetsuken -> Ars Arcanum, C4 opens
+  Strike Raid directly, and C5 is Gravity Break -> Ragnarok.
+- Added same-frame native selector latching for the direct C4 Strike Raid root.
 - Added a virtual post-special depth carry: after a completed terminal move,
   one real native `A` advances to the following ground family without writing
   KH1's combo counter. An `A` buffered in the safe recovery tail of a terminal
