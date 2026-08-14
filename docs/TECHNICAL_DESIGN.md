@@ -1,8 +1,8 @@
-# JokCombat v2.0.0 Technical Design
+# JokCombat v2.1.0 Technical Design
 
 Status: release design for KH1 Final Mix, Steam Global.
 
-This document records the implementation choices behind JokCombat v2.0.0.
+This document records the implementation choices behind JokCombat v2.1.0.
 It describes the current design rather than every experiment that preceded it.
 The complete experimental record remains available in
 `DEVELOPMENT_HISTORY.md`.
@@ -31,7 +31,7 @@ complete cast path.
 
 | File | Release role |
 |---|---|
-| `JokCombat_CombatPrototype.lua` | Main v2.0.0 combat, input, HUD, movement, Action, and Limit controller. The historical filename is retained to avoid breaking existing installations. |
+| `JokCombat_CombatPrototype.lua` | Main v2.1.0 combat, input, HUD, movement, Action, and Limit controller. The historical filename is retained to avoid breaking existing installations. |
 | `JokCombat_NativeAbilities.lua` | Persistent native grant of Shared High Jump, Glide, Superglide, four Combo Plus, two Air Combo Plus, Combo Master, and 99 maximum AP. |
 | `JokCombat_NativeKeyblades.lua` | Persistent native grant of the 17 genuine Sora Keyblades other than Ultima Weapon, plus Save the Queen and Save the King, with unique-count reconciliation. |
 | `JokCombat_DropRate.lua` | Runtime-only 2.0x item and prize drop patch. |
@@ -40,7 +40,7 @@ complete cast path.
 `JokCombat_CommandMenuProbe.lua` are read-only development tools. They are not
 runtime dependencies and are not part of the normal release installation.
 
-The bundle is versioned as v2.0.0. Helper modules retain independent internal
+The bundle is versioned as v2.1.0. Helper modules retain independent internal
 versions because their memory contracts and release cadence are separate from
 the main combat controller.
 
@@ -57,7 +57,7 @@ from the validated baseline, the relevant subsystem disables itself instead of
 attempting a best-effort write.
 
 The Epic Games Store executable and other regional builds use different
-addresses and are not supported by v2.0.0.
+addresses and are not supported by v2.1.0.
 
 ## 4. Ownership boundaries
 
@@ -356,7 +356,7 @@ the retired combo-magic and fake-ground systems are not active code paths.
 Running another combat overhaul against the same input, action, command,
 ability, or Reaction structures is unsupported even with conditional restore.
 
-## 16. Known v2.0.0 limits
+## 16. Known v2.1.0 limits
 
 - Steam Global is the only validated executable.
 - Summons and combo magic are intentionally excluded.
@@ -381,13 +381,14 @@ python tests/test_release_metadata.py
 The distributable archive and checksum are built with:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File tools/Build-Release.ps1 -Version v2.0.0
+powershell -ExecutionPolicy Bypass -File tools/Build-Release.ps1 -Version v2.1.0
 ```
 
-The v2.0.0 gameplay baseline has also been tested live for native ground and
-aerial strings, all five branch families, the original five Limits, the independent
-aerial family, R2 Actions, Guard/Dodge/Counterattack, Kinetic Step, both descent profiles, and
-the fixed drop multiplier.
+The v2.1.0 gameplay baseline has also been tested live for native ground and
+aerial strings, all five branch families, all four active combo Limits, the
+independent aerial family, R2 Actions, Guard/Dodge/Counterattack, Kinetic Step,
+both descent profiles, intentional ground-to-air entry, and the fixed drop
+multiplier.
 
 ## 18. Attribution
 

@@ -1,6 +1,6 @@
 # JokCombat — mappa combo contestuale A / Y
 
-Stato: **v2.0.0 — 5 FAMIGLIE; ACTION 8/8 + LIMIT NATIVI 4/4**
+Stato: **v2.1.0 — 5 FAMIGLIE; ACTION 8/8 + LIMIT NATIVI 4/4**
 
 Ambito: KH1 Final Mix, Steam Global, Sora
 Input abbreviati: `A` = Croce, `Y` = Triangolo

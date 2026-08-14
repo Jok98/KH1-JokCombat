@@ -1,6 +1,6 @@
 # KH1 JokCombat
 
-**Version 2.0.0**
+**Version 2.1.0**
 
 JokCombat is a combat overhaul for **KINGDOM HEARTS FINAL MIX** on the Steam
 Global release. It keeps KH1's native attacks at the center of combat, then
@@ -103,21 +103,21 @@ Other regional builds and the Epic Games Store executable are not supported.
    ```
 
 5. Start KH1 or press `F1` in the LuaBackend console to reload all scripts.
-   A successful load reports `JokCombat v2.0.0`, Native Abilities, Native
+   A successful load reports `JokCombat v2.1.0`, Native Abilities, Native
    Keyblades, and the `200%` Drop Rate module.
 
 The three probe scripts in this repository are optional developer diagnostics
 and are not required for normal play.
 
-## Upgrading from 1.0.0
+## Upgrading
 
 Back up the save, then replace the old runtime files with all four files listed
-above. Version 2.0.0 adds `JokCombat_NativeKeyblades.lua`; do not omit it when
-upgrading. The existing `JokCombat_ActionLoadout.cfg` remains compatible and
-does not need to be deleted. Native abilities and equipment granted by the mod
-can persist after KH1 saves, so removing the scripts does not automatically
-undo those save-file changes. See the [changelog](CHANGELOG.md) for the full
-1.0.0-to-2.0.0 summary.
+above. Users upgrading directly from 1.0.0 must also copy
+`JokCombat_NativeKeyblades.lua`, introduced in 2.0.0. The existing
+`JokCombat_ActionLoadout.cfg` remains compatible and does not need to be
+deleted. Native abilities and equipment granted by the mod can persist after
+KH1 saves, so removing the scripts does not automatically undo those save-file
+changes. See the [changelog](CHANGELOG.md) for the complete release history.
 
 ## Save-file changes
 
@@ -143,7 +143,7 @@ and drop-rate patch are runtime-only.
   JokCombat temporarily borrows a normal command record so all four `R2`
   Action assignments remain visible and editable. The native row is restored
   as soon as the overlay closes.
-- Perfect Guard and an enemy-launcher system are not part of v2.0.0.
+- Perfect Guard and a dedicated enemy-launcher system are not part of v2.1.0.
 
 ## Documentation
 

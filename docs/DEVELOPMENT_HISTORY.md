@@ -2,7 +2,7 @@
 
 > Archived development log. This document preserves the experiments,
 > live test results, rejected approaches, and migration notes that led to the
-> stable v2.0.0 design. For current installation and usage, see the repository
+> stable v2.1.0 design. For current installation and usage, see the repository
 > README. For the release architecture, see `TECHNICAL_DESIGN.md`.
 
 Mod combat-oriented sperimentale per **KINGDOM HEARTS FINAL MIX PC**. Il
@@ -11,7 +11,7 @@ vanilla. Le sole eccezioni intenzionali sono il bootstrap nativo di High Jump,
 Glide, Superglide, Combo Plus, Air Combo Plus e Combo Master e il moltiplicatore
 globale dei drop descritto sotto.
 
-## Modifiche post-v2.0.0
+## Modifiche incluse in v2.1.0
 
 > **Nuova catena Y e profondità persistente:** Strong usa ora Slapshot -> Vortex
 > -> Blitz -> Zantetsuken -> Ars Arcanum. C4 esegue direttamente Strike Raid;

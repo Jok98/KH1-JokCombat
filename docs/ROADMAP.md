@@ -2,7 +2,7 @@
 
 This roadmap records planned work and research candidates. It does not promise
 a release date, and every runtime patch must pass the same fingerprint,
-ownership, restoration, and live-game validation rules used by v2.0.0.
+ownership, restoration, and live-game validation rules used by v2.1.0.
 
 ## Planned: Epic Games Store support
 

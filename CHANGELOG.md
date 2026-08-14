@@ -4,6 +4,8 @@ All notable player-facing changes to JokCombat are recorded here.
 
 ## Unreleased
 
+## 2.1.0 - 2026-08-14
+
 ### Changed
 
 - Rebuilt the ground families without duplicate moves: the pure `Y` chain is
