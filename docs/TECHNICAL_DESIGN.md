@@ -148,6 +148,24 @@ the current ground branch, while the second jump deliberately resets the air
 string so it can begin again. No airborne flag or fake altitude is written to
 force a ground-to-air transition.
 
+Steam Global's native Attack candidate builder reaches RVA `0x2A70D5` after a
+grounded target vector crosses its vertical threshold. Its stock seven-byte
+block chooses candidate `0` (`D6`, Aerial Sweep) when transient ability bit
+`0x02` is active, or candidate `1` (`CD`, the ordinary aerial hit) otherwise.
+Clearing the bit only changes the selected aerial move and cannot prevent the
+leap.
+
+While Sora is grounded, JokCombat replaces that exact signed instruction with
+`E9 01 01 00 00 90 90`, a near jump to KH1's existing ground-candidate scan at
+`0x2A71DB`. The original bytes `F6 05 34 7B AB 02 02` are restored as soon as
+Sora is genuinely airborne and during cleanup or unsupported contexts. Every
+write validates either the exact stock or exact owned signature. No target
+pointer, ability bit, airborne state, position or action record is modified,
+and the complete native aerial selector remains available after a real jump. A
+second state-machine guard releases all branch input ownership if a grounded
+request was already committed before the gate changed, preventing the resulting
+state from trapping both `A` and `Y` until Dodge Roll.
+
 ## 8. Native Action Ability dispatch
 
 An Action Ability is routed by copying its complete validated 0x14-byte native
@@ -290,7 +308,7 @@ factor from being multiplied twice after Kinetic Step.
 | One total copy of each genuine non-Ultima Keyblade | Saved by KH1 after a normal save |
 | Save the Queen and Save the King | Saved by KH1 after a normal save |
 | R2 Action Ability assignments | Local `JokCombat_ActionLoadout.cfg` |
-| Branch state, Action routes, Limit selectors, second jump, input ownership, descent tuning | Process only |
+| Branch state, Action routes, Limit selectors, grounded high-target branch bypass, second jump, input ownership, descent tuning | Process only |
 | 2.0x item/prize drop multipliers | Process only |
 
 The native ability writer treats KH1's two stores separately. It preserves the

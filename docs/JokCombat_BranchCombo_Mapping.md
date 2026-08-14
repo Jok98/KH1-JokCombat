@@ -109,6 +109,13 @@ La catena usa i nodi virtuali `AIR_CE -> AIR_D1 -> AIR_D6`. Hurricane Blast e
 Aerial Sweep puntano ai loro record canonici, ma non occupano nodi della mappa
 terrestre. Il salto normale chiude qualsiasi famiglia terrestre; la famiglia
 aerea parte soltanto quando il flag airborne nativo è realmente visibile.
+Da terra, il selettore nativo può scegliere il candidato `D6` quando Aerial
+Sweep è attivo oppure il normale colpo aereo `CD` quando non lo è. JokCombat
+bypassa l'intero ramo di inseguimento verticale soltanto finché Sora è a terra,
+lasciando al motore la scansione dei candidati terrestri. Il branch originale
+viene ripristinato dopo un salto reale; se una transizione già accettata sfugge
+al gate, il ramo terrestre rilascia immediatamente `A` e `Y` senza richiedere un
+Dodge Roll.
 Restano disabilitati fake-ground, sospensione, scritture di quota e
 manipolazione dello stick.
 

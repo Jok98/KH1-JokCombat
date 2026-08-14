@@ -527,6 +527,78 @@ def assert_air_attack_descent_brake() -> None:
     assert "PLAYER.animationSpeed" not in controller
 
 
+def assert_intentional_air_entry() -> None:
+    guards = (
+        "intentionalAirEntry = true",
+        "groundAirTargetSelector = 0x2A70D5",
+        "JokCombatGroundIntent = {",
+        "address = ADDRESS.groundAirTargetSelector",
+        "normal = { 0xF6, 0x05, 0x34, 0x7B, 0xAB, 0x02, 0x02 }",
+        "blocked = { 0xE9, 0x01, 0x01, 0x00, 0x00, 0x90, 0x90 }",
+        "function JokCombatGroundIntent.matches",
+        "function JokCombatGroundIntent.initialize",
+        "function JokCombatGroundIntent.restore",
+        "function JokCombatGroundIntent.update",
+        "and not player.airborne",
+        "WriteArray(JokCombatGroundIntent.address,",
+        "JokCombatGroundIntent.update(player, nativeLimitActive)",
+        'JokCombatGroundIntent.restore("patch restore", true)',
+        "native D6/CD high-target leap disabled",
+        "air entry now requires a real jump",
+        "JokCombatBranch.active and not JokCombatBranch.airFamily",
+        "and player.airborne then",
+        "unexpected ground-to-air selector transition",
+        "branch input ownership released",
+        "clearTransitionCheck()",
+        "clearDeferredAttackCommand()",
+        'log("intentional air-entry gate "',
+        "groundIntentReady and \"ready\" or \"disabled\"",
+        "The patch is restored as soon as Sora enters the air",
+        "No target pointer, ability bit, airborne state, position or action record",
+    )
+    for guard in guards:
+        assert guard in SOURCE, f"missing intentional-air-entry guard: {guard}"
+
+    start = SOURCE.index("JokCombatGroundIntent = {")
+    end = SOURCE.index(
+        "-- Musou-style modifier-free X/T families", start
+    )
+    controller = SOURCE[start:end]
+    assert "ReadInt(ADDRESS.defenseAbilityFlags" not in controller
+    assert "WriteInt(ADDRESS.defenseAbilityFlags" not in controller
+    assert "WriteByte(" not in controller
+    assert "WriteFloat(" not in controller
+    assert "WriteInt(player.pointer + PLAYER.airborneState" not in SOURCE
+
+    # E9 is relative to the end of its five-byte instruction. The two NOPs
+    # cover the remainder of the stock seven-byte TEST without moving code.
+    selector_rva = 0x2A70D5
+    relative = int.from_bytes(bytes((0x01, 0x01, 0x00, 0x00)), "little")
+    assert selector_rva + 5 + relative == 0x2A71DB
+    assert controller.count("WriteArray(JokCombatGroundIntent.address,") == 3
+    assert "JokCombatGroundIntent.normal)" in controller
+    assert "JokCombatGroundIntent.blocked)" in controller
+    assert "JokCombatGroundIntent.ready = false" in controller
+    assert "selector signature mismatch" in controller
+    assert "conditional restore left it untouched" in controller
+
+    branch_start = SOURCE.index(
+        "function JokCombatBranch.update(player, buttons, crossPressed,"
+    )
+    branch_end = SOURCE.index(
+        "local function updateCrossActionPrime", branch_start
+    )
+    branch = SOURCE[branch_start:branch_end]
+    recovery = branch.index(
+        "unexpected ground-to-air selector transition"
+    )
+    depth = branch.index("JokCombatBranch.updateDepthCarry")
+    assert recovery < depth, (
+        "unexpected ground-to-air ownership must be released before any "
+        "branch/depth input can be consumed"
+    )
+
+
 def assert_integration() -> None:
     guards = (
         'VERSION = "v2.0.0"',
@@ -660,11 +732,12 @@ def main() -> None:
     assert_guard_counter()
     assert_native_second_jump()
     assert_air_attack_descent_brake()
+    assert_intentional_air_entry()
     assert_integration()
     print(
         "PASS: 12-node ground map; 8 ground Actions + 4 active native Limits; "
         "five-step Y signature chain + direct C4 Strike Raid; "
-        "native aerial descent brake; "
+        "intentional-only ground-to-air entry; native aerial descent brake; "
         "Counterattack gated by successful Guard"
     )
 

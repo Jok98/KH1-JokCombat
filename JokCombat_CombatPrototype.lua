@@ -21,6 +21,12 @@ local CONFIG = {
     -- remains below only as a disabled rollback path.
     nativeNormalAttacks = true,
 
+    -- KH1's native Attack selector enables either Aerial Sweep D6 or the
+    -- ordinary aerial hit CD when a grounded target vector crosses its height
+    -- threshold. Bypass only that high-target branch while Sora is grounded;
+    -- the complete native aerial selector is restored after a real jump.
+    intentionalAirEntry = true,
+
     -- Give only KH1's seven native physical combo animations a light speed
     -- increase. Action Abilities, Limits, magic, defense, jumps and locomotion
     -- retain their authored playback speed. The controller snapshots the live
@@ -279,6 +285,11 @@ local ADDRESS = {
     -- v0.9.6 never arms 0x73; initialization still restores a stale older build
     -- to vanilla 0x74 before enabling the native-air-only policy.
     airGroundActionBranch = 0x2A376D,   -- 74 normal, 73 bridged
+    -- Native high-target Attack selector. At this point candidate 0 is D6
+    -- (Aerial Sweep) and candidate 1 is CD (ordinary aerial hit). The signed
+    -- runtime patch jumps to the existing ground-candidate scan at 0x2A71DB;
+    -- it is installed only while Sora is genuinely grounded.
+    groundAirTargetSelector = 0x2A70D5,
     guardAvailabilityBranch = 0x2A7BFD, -- 74 normal, 72 enabled, EB choose roll
     guardSelectionBranch = 0x2A7C01,    -- 74 normal, EB choose guard
     dodgeAvailabilityBranch = 0x2A7C1F, -- 84 normal, 82 enabled
@@ -2121,6 +2132,10 @@ local function restoreAllPatches()
     clearSyntheticAttackCommand(false)
     restoreActionRoutes()
     restoreNativeFinisherSelection()
+    if JokCombatGroundIntent ~= nil
+        and JokCombatGroundIntent.restore ~= nil then
+        JokCombatGroundIntent.restore("patch restore", true)
+    end
     HUD.hideOverlay()
     restoreIfKnown(ADDRESS.forceCircleBranch, NORMAL.forceCircle,
         { 0x74, 0x72 })
@@ -5076,6 +5091,132 @@ function JokCombatGuardCounter.dispatch(player)
     return requested
 end
 
+-- KH1's ground Attack candidate builder reaches RVA 0x2A70D5 only after the
+-- selected target crosses its native vertical threshold. The stock block then
+-- chooses candidate 0 (D6 Aerial Sweep) when ability bit 0x02 is active, or
+-- candidate 1 (CD ordinary aerial hit) when it is not. Clearing that ability
+-- bit therefore cannot disable the leap: it merely changes D6 into CD.
+--
+-- While Sora is genuinely grounded, replace the seven-byte TEST instruction
+-- with a signed near jump to KH1's existing ground-candidate scan at 0x2A71DB.
+-- The patch is restored as soon as Sora enters the air through a real jump, so
+-- the native aerial selector and the explicit AIR_D6 family remain untouched.
+-- No target pointer, ability bit, airborne state, position or action record is
+-- modified. The exact stock/owned byte sequences are checked before every
+-- write and restore.
+-- Keep this controller global because the Lua 5.3 chunk is already close to
+-- its 200-local limit.
+JokCombatGroundIntent = {
+    address = ADDRESS.groundAirTargetSelector,
+    normal = { 0xF6, 0x05, 0x34, 0x7B, 0xAB, 0x02, 0x02 },
+    blocked = { 0xE9, 0x01, 0x01, 0x00, 0x00, 0x90, 0x90 },
+    ready = false,
+    owned = false,
+    suppressionLogged = false,
+    failureLogged = false,
+}
+
+function JokCombatGroundIntent.matches(expected)
+    for index = 1, #expected do
+        if ReadByte(JokCombatGroundIntent.address + index - 1)
+            ~= expected[index] then
+            return false
+        end
+    end
+    return true
+end
+
+function JokCombatGroundIntent.initialize()
+    JokCombatGroundIntent.ready = false
+    JokCombatGroundIntent.owned = false
+    JokCombatGroundIntent.suppressionLogged = false
+    JokCombatGroundIntent.failureLogged = false
+
+    -- F1 may reload while the previous instance still owns the jump. Recover
+    -- that exact byte sequence before accepting the executable signature.
+    if JokCombatGroundIntent.matches(JokCombatGroundIntent.blocked) then
+        WriteArray(JokCombatGroundIntent.address,
+            JokCombatGroundIntent.normal)
+    end
+    if not JokCombatGroundIntent.matches(JokCombatGroundIntent.normal) then
+        ConsolePrint(string.format(
+            "[JokCombat:ground-intent] selector signature mismatch at "
+            .. "RVA=0x%X; intentional air-entry gate disabled.",
+            JokCombatGroundIntent.address))
+        return false
+    end
+
+    JokCombatGroundIntent.ready = true
+    return true
+end
+
+function JokCombatGroundIntent.restore(reason, quiet)
+    if not JokCombatGroundIntent.owned
+        and not JokCombatGroundIntent.matches(
+            JokCombatGroundIntent.blocked) then return end
+
+    if JokCombatGroundIntent.matches(JokCombatGroundIntent.blocked) then
+        WriteArray(JokCombatGroundIntent.address,
+            JokCombatGroundIntent.normal)
+    elseif not JokCombatGroundIntent.matches(JokCombatGroundIntent.normal)
+        and not JokCombatGroundIntent.failureLogged then
+        JokCombatGroundIntent.failureLogged = true
+        ConsolePrint("[JokCombat:ground-intent] selector changed by another "
+            .. "writer; conditional restore left it untouched.")
+    end
+    JokCombatGroundIntent.owned = false
+    if not quiet then
+        log("[ground-intent] native high-target Attack selector restored"
+            .. (reason ~= nil and ": " .. reason or "."))
+    end
+end
+
+function JokCombatGroundIntent.update(player, nativeLimitActive)
+    local unsupportedContext = player == nil or nativeLimitActive
+        or player.airborneState >= 0x20
+        or ReadByte(ADDRESS.world) == 0x09
+    local shouldSuppress = JokCombatGroundIntent.ready
+        and CONFIG.intentionalAirEntry and not unsupportedContext
+        and not player.airborne
+    if not shouldSuppress then
+        JokCombatGroundIntent.restore("unsupported gameplay context", true)
+        return
+    end
+
+    if JokCombatGroundIntent.matches(JokCombatGroundIntent.blocked) then
+        JokCombatGroundIntent.owned = true
+        return
+    end
+    if not JokCombatGroundIntent.matches(JokCombatGroundIntent.normal) then
+        if not JokCombatGroundIntent.failureLogged then
+            JokCombatGroundIntent.failureLogged = true
+            ConsolePrint("[JokCombat:ground-intent] selector changed by "
+                .. "another writer; intentional air-entry gate disabled.")
+        end
+        JokCombatGroundIntent.ready = false
+        return
+    end
+
+    WriteArray(JokCombatGroundIntent.address,
+        JokCombatGroundIntent.blocked)
+    if not JokCombatGroundIntent.matches(JokCombatGroundIntent.blocked) then
+        if not JokCombatGroundIntent.failureLogged then
+            JokCombatGroundIntent.failureLogged = true
+            ConsolePrint("[JokCombat:ground-intent] native high-target "
+                .. "selector could not be patched; recovery guard remains active.")
+        end
+        JokCombatGroundIntent.ready = false
+        return
+    end
+    JokCombatGroundIntent.owned = true
+
+    if not JokCombatGroundIntent.suppressionLogged then
+        JokCombatGroundIntent.suppressionLogged = true
+        log("[ground-intent] native D6/CD high-target leap disabled while "
+            .. "grounded; air entry now requires a real jump.")
+    end
+end
+
 -- Musou-style modifier-free X/T families. Keep this as one global table:
 -- Lua 5.3 limits a chunk to 200 local variables and this controller already
 -- carries the validated loadout, HUD and route state in the same chunk.
@@ -6005,6 +6146,24 @@ function JokCombatBranch.update(player, buttons, crossPressed,
         trianglePressed)
     if not CONFIG.branchCombos or not JokCombatBranch.valid then return false end
 
+    -- The signed selector branch above is the primary protection. If KH1 had
+    -- already
+    -- committed an old/stale grounded request before suppression, never let
+    -- that unexpected air transition retain ownership of X and Y. Releasing
+    -- only JokCombat's route/input state preserves the native animation while
+    -- guaranteeing that the next physical input works without a Dodge Roll.
+    if JokCombatBranch.active and not JokCombatBranch.airFamily
+        and player.airborne then
+        log("[ground-intent] unexpected grounded branch entered the air; "
+            .. "branch input ownership released.")
+        JokCombatBranch.reset("unexpected ground-to-air selector transition")
+        clearComboIntent()
+        clearTransitionCheck()
+        clearDeferredAttackCommand()
+        restoreActionRoutes()
+        return false
+    end
+
     if JokCombatBranch.updateDepthCarry(
             player, buttons, crossPressed, trianglePressed) then
         return true
@@ -6627,6 +6786,7 @@ function _OnInit()
     local validActionRecordCount = validateCanonicalActionRecords()
     local branchValid, branchNodeCount, branchActionCount =
         JokCombatBranch.initialize()
+    local groundIntentReady = JokCombatGroundIntent.initialize()
     local guardCounterReady = JokCombatGuardCounter.initialize()
     loadActionLoadout()
     HUD.initialize()
@@ -6679,6 +6839,10 @@ function _OnInit()
     log("Action Ability context ready: Hurricane Blast is callable on ground "
         .. "and in air; airborne family is native CE -> Hurricane Blast -> "
         .. "Aerial Sweep terminal, with fake-ground disabled.")
+    log("intentional air-entry gate "
+        .. (groundIntentReady and "ready" or "disabled")
+        .. ": grounded D6/CD target-follow is bypassed; jump and Kinetic Step "
+        .. "remain the only air entries.")
     log("Kinetic Step second-jump adapter "
         .. (JokCombatAirJump.enabled and "ready" or "disabled")
         .. ": one charge after a real first jump; B routes animation 0x0F, "
@@ -6776,6 +6940,7 @@ function _OnFrame()
         restoreAllPatches()
         return
     end
+    JokCombatGroundIntent.update(player, nativeLimitActive)
     updateLoadoutMenuRouting(configurationInputActive, dpadOwned)
     HUD.updateOverlay(buttons, player)
     if faulted then

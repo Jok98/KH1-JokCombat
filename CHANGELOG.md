@@ -20,6 +20,14 @@ All notable player-facing changes to JokCombat are recorded here.
   Donald and Goofy. Its old journal descriptor remains recovery-only so an
   interrupted v2.0.0 invocation can still be restored safely after reload.
 
+### Fixed
+
+- Prevented grounded `A` attacks and newly opened `Y` families from selecting
+  either native Aerial Sweep `D6` or the normal aerial hit `CD` when the enemy
+  is above Sora. A signature-checked branch bypass is active only while Sora is
+  grounded; an independent recovery guard also releases branch input ownership
+  if KH1 had already committed a stale airborne transition.
+
 ## 2.0.0 - 2026-08-13
 
 ### Added

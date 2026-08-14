@@ -19,6 +19,8 @@ an extended ground-to-air cycle, universal defense, and faster progression.
   can advance into the following ground family; C5 remains the endpoint.
 - Five direct ground families and a separate three-step aerial branch
   available after any normal aerial hit.
+- Ground attacks never auto-chase an airborne target: a normal jump or Kinetic
+  Step is required before the explicit aerial family becomes available.
 - One configurable `R2` Action Ability group, shown and edited through KH1's
   own Command Menu.
 - Universal Guard on `L2 + B`, ground Dodge Roll on `X`, and Counterattack
