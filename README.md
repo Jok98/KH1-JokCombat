@@ -118,7 +118,8 @@ undo those save-file changes. See the [changelog](CHANGELOG.md) for the full
 
 `JokCombat_NativeAbilities.lua` grants native High Jump, Glide, and Superglide
 through KH1's Shared ability list, equips four Combo Plus, two Air Combo Plus,
-and Combo Master in Sora's ability list, and sets Sora's maximum AP to `99`.
+and Combo Master in Sora's ability list, and sets the maximum AP of Sora,
+Donald, and Goofy to `99` each.
 `JokCombat_NativeKeyblades.lua` adds exactly one total copy of every genuine
 Sora Keyblade except Ultima Weapon. It does not grant the Dream weapons or
 Wooden Sword. The same module grants Save the Queen to Donald and Save the King

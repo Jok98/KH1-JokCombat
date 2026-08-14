@@ -2,6 +2,12 @@
 
 All notable player-facing changes to JokCombat are recorded here.
 
+## Unreleased
+
+### Changed
+
+- Set Donald and Goofy's native maximum AP to `99`, matching Sora.
+
 ## 2.0.0 - 2026-08-13
 
 ### Added

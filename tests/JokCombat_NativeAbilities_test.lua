@@ -40,6 +40,8 @@ local FINGERPRINT = 0x7265737563697065
 local PLAYER_POINTER_ADDRESS = 0x2537E48
 local PLAYER_POINTER = 0x100000
 local SORA_MAX_AP = 0x2DE9369
+local DONALD_MAX_AP = 0x2DE93DD
+local GOOFY_MAX_AP = 0x2DE9451
 local ABILITY_BASE = 0x2DE93A4
 local SHARED_ABILITY_BASE = 0x2DE98F9
 local GROUND_MAX = 0x2D5CCE4
@@ -50,6 +52,8 @@ memory[PLAYER_POINTER_ADDRESS] = PLAYER_POINTER
 memory[PLAYER_POINTER + 0x06C] = 0xCC10
 memory[PLAYER_POINTER + 0x16C] = 0.0
 memory[SORA_MAX_AP] = 3
+memory[DONALD_MAX_AP] = 4
+memory[GOOFY_MAX_AP] = 5
 memory[GROUND_MAX] = 7
 memory[AIR_MAX] = 5
 
@@ -138,6 +142,10 @@ for _, message in ipairs(logs) do
 end
 
 assert(ReadByte(SORA_MAX_AP) == 99, "Sora AP max was not raised to 99")
+assert(ReadByte(DONALD_MAX_AP) == 99,
+    "Donald AP max was not raised to 99")
+assert(ReadByte(GOOFY_MAX_AP) == 99,
+    "Goofy AP max was not raised to 99")
 assertSharedMovement()
 assertExactActive(0x06, 4, "Combo Plus")
 assertExactActive(0x07, 2, "Air Combo Plus")
@@ -182,6 +190,12 @@ memory[ABILITY_BASE + airSlots[1].index] = 0x87
 assert(ensureNativePassives(), "Air Combo Plus re-equip failed")
 assertExactActive(0x07, 2, "Air Combo Plus after menu disable")
 
+-- A later save/menu transition must not leave an ally's AP max reverted.
+memory[DONALD_MAX_AP] = 12
+assert(ensureNativePassives(), "Donald AP reconciliation failed")
+assert(ReadByte(DONALD_MAX_AP) == 99,
+    "Donald AP max was not restored after drift")
+
 print(string.format(
-    "PASS: Shared movement migration + exact native counts 4/2/1, surplus compaction and re-equip (%d logs)",
+    "PASS: party AP 99/99/99 + Shared movement migration + exact native counts 4/2/1, surplus compaction and re-equip (%d logs)",
     #logs))

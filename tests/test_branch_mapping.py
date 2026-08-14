@@ -409,7 +409,10 @@ def assert_native_second_jump() -> None:
     assert list(simulated_heads.values()).count(0x09) == 1
 
     native_guards = (
-        'VERSION = "v0.6.0"',
+        'VERSION = "v0.7.0"',
+        "donaldMaxAP = 0x2DE93DD",
+        "goofyMaxAP = 0x2DE9451",
+        "local function reconcilePartyMaxAP",
         "SHARED_ABILITY_SLOT_COUNT = 4",
         "sharedAbilitySlots = 0x2DE98F9",
         "local SHARED_MOVEMENT = {",
