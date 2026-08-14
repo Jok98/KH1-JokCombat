@@ -1,6 +1,6 @@
 # JokCombat — mappa combo contestuale A / Y
 
-Stato: **v2.0.0 — RUOLI DISTINTI; 5 FAMIGLIE STANDARD; ACTION 8/8 + LIMIT NATIVI 5/5**
+Stato: **v2.0.0 — 5 FAMIGLIE; ACTION 8/8 + LIMIT NATIVI 4/4**
 
 Ambito: KH1 Final Mix, Steam Global, Sora
 Input abbreviati: `A` = Croce, `Y` = Triangolo
@@ -27,6 +27,9 @@ Input abbreviati: `A` = Croce, `Y` = Triangolo
    Reaction transitorio pubblicato da una Action già accettata non chiude la
    propria famiglia. Magie, menu, shortcut e costi MP vanilla non vengono
    modificati. Summon è esclusa.
+7. Dopo una mossa terminale completata, il primo `A` terrestre realmente
+   accettato da KH1 conserva la profondità logica e apre con `Y` la famiglia
+   successiva. Il contatore combo nativo non viene scritto; C5 resta terminale.
 
 ## 2. Mappa terrestre completa
 
@@ -55,11 +58,9 @@ Sonic Blade è terminale.
 |---|---|
 | `A A Y` | Stun Impact |
 | `A A Y Y` | Ripple Drive |
-| `A A Y Y Y` | Trinity Limit |
 
-Trinity Limit è terminale ed è disponibile soltanto a terra con Donald e Goofy
-nel party. Se manca uno dei due, la Guide termina su Ripple Drive e non propone
-né sostituisce Trinity.
+Ripple Drive è terminale. Trinity Limit è escluso dalla mappa perché la sua
+sequenza nativa controlla anche Paperino e Pippo.
 
 ### C4 — pressione combo
 
@@ -88,8 +89,8 @@ le posizioni successive restano vanilla: la mappa non inventa C6/C7.
 | Tipo | Quantità |
 |---|---:|
 | Action Ability nella mappa | 8 |
-| Limit nativi | 5 |
-| Nodi terrestri totali | **13** |
+| Limit nativi | 4 |
+| Nodi terrestri totali | **12** |
 
 Non ci sono mosse duplicate e nessuna mossa nominata viene eseguita da `A`.
 
@@ -136,14 +137,14 @@ hitbox, danno e follow-up.
 |---|---|---|---:|
 | Strong | Gravity Break | Ragnarok | `0x005A` |
 | C2 | Sliding Dash | Sonic Blade | `0x004B` |
-| C3 | Ripple Drive | Trinity Limit | `0x0052` |
 | C4 | Vortex | Strike Raid | `0x005E` |
 | C5 | Zantetsuken | Ars Arcanum | `0x0057` |
 
 Sonic Blade, Ars Arcanum, Strike Raid e Ragnarok prendono in prestito a zero
-soltanto il proprio costo durante la selezione e lo stato Limit. Trinity salva
-gli MP runtime di Sora, Donald e Goofy e ripristina il consumo nativo. Il
-journal conserva sempre gli originali prima di scrivere e ripristina soltanto
+soltanto il proprio costo durante la selezione e lo stato Limit. Trinity non è
+armabile dalla mappa corrente; il suo descrittore precedente resta soltanto per
+ripristinare in sicurezza un journal v2.0.0 durante `F1`. Il journal dei Limit
+attivi conserva sempre gli originali prima di scrivere e ripristina soltanto
 campi ancora posseduti da JokCombat, anche con cancel, timeout o `F1`/reload.
 I Limit lanciati dal menu conservano il costo vanilla.
 
@@ -172,12 +173,12 @@ i `Y` ancora disponibili. Dopo un `A`:
 -
 ```
 
-Dopo due `A` con Donald e Goofy:
+Dopo due `A`:
 
 ```text
 [Y] Stun Impact
 [Y][Y] Ripple Drive
-[Y][Y][Y] Trinity Limit
+-
 -
 ```
 
@@ -212,7 +213,30 @@ La continuazione vanilla su `A` resta implicita. La Guide non copre il Command
 Menu mentre Sora è neutrale; lo Strong appare dopo il primo `Y`. Il toggle
 condiviso resta `L1 + R1 + L2 + R2` rilasciato senza D-pad.
 
-## 7. Timing e sicurezza
+## 7. Continuazione della profondità
+
+Una mossa terminale completata prepara la famiglia successiva:
+
+| Terminale completato | `A` nativo successivo + `Y` apre |
+|---|---|
+| Ragnarok | C2 — Sliding Dash |
+| Sonic Blade | C3 — Stun Impact |
+| Ripple Drive | C4 — Slapshot |
+| Strike Raid | C5 — Zantetsuken |
+| Ars Arcanum | nessuna: C5 chiude la catena |
+
+Il primo `A` non viene simulato e non modifica `comboPosition`: KH1 deve entrare
+realmente in `C8`, `C9` o `CA`. Se viene premuto nella coda sicura di una Action
+terminale, lo stesso `A` viene mantenuto durante il rilascio dell'animazione:
+non serve premerlo una seconda volta una volta tornati neutrali. Quando KH1 lo
+accetta direttamente, l'impulso di riserva viene annullato: `Y` resta disponibile
+e non parte un secondo attacco dopo la recovery. La profondità
+viene cancellata da un secondo
+`A`, danno, salto, Guard, Dodge, modificatori, menu o timeout. Un `A` respinto
+non la consuma: resta possibile riprovare entro la stessa finestra. La Guide usa
+la profondità virtuale soltanto durante l'attacco confermato.
+
+## 8. Timing e sicurezza
 
 - Ogni Action concatenabile conserva la propria finestra di prebuffer/release
   e accetta al massimo un input.

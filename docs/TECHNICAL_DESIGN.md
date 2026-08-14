@@ -114,11 +114,11 @@ returns to native physical continuation.
 |---|---|---|---|
 | Strong | `Y` | Burst | Blitz -> Gravity Break -> Ragnarok |
 | C2 | `A Y` | Pursuit | Sliding Dash -> Sonic Blade |
-| C3 | `A A Y` | Crowd control | Stun Impact -> Ripple Drive -> Trinity Limit |
+| C3 | `A A Y` | Crowd control | Stun Impact -> Ripple Drive |
 | C4 | `A A A Y` | Combo pressure | Slapshot -> Vortex -> Strike Raid |
 | C5 | `A A A A Y` | Execution | Zantetsuken -> Ars Arcanum |
 
-The five families contain eight unique ground Action Abilities and all five
+The five families contain eight unique ground Action Abilities and four active
 native Limits without duplicate named moves. The full input map, independent
 aerial family, availability rules, and Combo Guide examples are maintained in
 `JokCombat_BranchCombo_Mapping.md`.
@@ -178,13 +178,29 @@ costs are journaled and restored conditionally on completion, cancel, timeout,
 fault, exit, or script reload. Launching the same Limit from KH1's menu keeps
 its vanilla cost.
 
-Trinity Limit is available only with Donald and Goofy present. Instead of
-inventing a shared cost record, JokCombat snapshots the party MP state and
-restores the native consumption for the combo invocation.
+Trinity Limit is excluded from the active combo map because its native sequence
+owns Donald and Goofy. Its former catalog descriptor remains recovery-only so
+an F1 reload can still restore a v2.0.0 journal safely; it can never be armed by
+the current branch controller.
 
 Once KH1 exposes an active Limit state, JokCombat stops intercepting combat
 inputs until native recovery completes. This boundary prevents the orphaned
 Limit state that can otherwise leave Sora unable to move.
+
+After a terminal ground special completes, JokCombat preserves only its logical
+family depth. The next modifier-free physical `A` remains entirely native and
+must visibly enter a normal `C8`-`CA` attack before the following `Y` may select
+the next family. If that `A` is buffered inside the safe recovery tail of a
+terminal Action, the existing release/pulse pipeline carries the same depth;
+the player does not have to press it again after the animation reaches neutral.
+If the physical edge itself already opens `C8`-`CA`, that confirmation cancels
+the still-pending target-free pulse before it can block `Y` or create a duplicate
+attack after recovery.
+The native `comboPosition` byte is never written. A timeout,
+damage, jump, Guard, Dodge, shortcut, menu, timeout, or second physical `A`
+clears the carry. A rejected `A` does not consume the saved depth; the
+controller waits for another real native attempt within the same timeout. C5
+is terminal and returns to a fresh vanilla chain.
 
 ## 10. Command Menu overlay and R2 loadout
 
@@ -346,7 +362,7 @@ powershell -ExecutionPolicy Bypass -File tools/Build-Release.ps1 -Version v2.0.0
 ```
 
 The v2.0.0 gameplay baseline has also been tested live for native ground and
-aerial strings, all five branch families, all five Limits, the independent
+aerial strings, all five branch families, the original five Limits, the independent
 aerial family, R2 Actions, Guard/Dodge/Counterattack, Kinetic Step, both descent profiles, and
 the fixed drop multiplier.
 

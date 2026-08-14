@@ -38,8 +38,8 @@ party behavior outside supported combat situations.
   and shutdown.
 - Automatically suspend the mode anywhere KH1 requires a scripted party or
   guest character.
-- Disable or safely replace Trinity Limit while Solo Sora mode is active; it
-  natively requires Donald and Goofy.
+- Keep Trinity Limit excluded from JokCombat's combo map; it natively requires
+  Donald and Goofy and remains available only through vanilla KH1 behavior.
 - Validate targeting, enemy aggro, ally healing, Limit state, party swapping,
   cutscenes, and save/reload behavior before release.
 

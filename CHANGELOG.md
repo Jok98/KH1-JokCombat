@@ -8,6 +8,15 @@ All notable player-facing changes to JokCombat are recorded here.
 
 - Moved Blitz to the first neutral `Y` in Strong and moved Vortex to C4's
   second Action slot, preserving one unique route for every Action Ability.
+- Added a virtual post-special depth carry: after a completed terminal move,
+  one real native `A` advances to the following ground family without writing
+  KH1's combo counter. An `A` buffered in the safe recovery tail of a terminal
+  Action uses the same handoff and does not require a second press. C5 remains
+  terminal. Once KH1 accepts that native attack, its delayed fallback is
+  cancelled so `Y` remains immediately available and no duplicate swing fires.
+- Removed Trinity Limit from the combo map because its native sequence owns
+  Donald and Goofy. Its old journal descriptor remains recovery-only so an
+  interrupted v2.0.0 invocation can still be restored safely after reload.
 
 ## 2.0.0 - 2026-08-13
 

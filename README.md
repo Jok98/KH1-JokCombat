@@ -12,8 +12,11 @@ an extended ground-to-air cycle, universal defense, and faster progression.
 - Native ground and aerial `A` combos with Combo Master, four Combo Plus, two
   Air Combo Plus, and an infinite post-finisher restart while Sora remains in
   the same ground or aerial state.
-- Five role-based `Y` branches containing eight Action Abilities and all five
-  native Limits, with no duplicated special move.
+- Five role-based `Y` branches containing eight Action Abilities and four
+  native Limits, with no duplicated special move. Trinity Limit is excluded
+  because its native sequence requires Donald and Goofy.
+- Post-special depth continuation: after a terminal move, one real native `A`
+  can advance into the following ground family; C5 remains the endpoint.
 - Five direct ground families and a separate three-step aerial branch
   available after any normal aerial hit.
 - One configurable `R2` Action Ability group, shown and edited through KH1's

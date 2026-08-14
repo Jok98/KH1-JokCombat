@@ -28,7 +28,6 @@ EXPECTED = {
     # C3 / area.
     "XXT": ("action", "stun_impact"),
     "XXTT": ("action", "ripple_drive"),
-    "XXTTT": ("limit", "trinity_limit"),
     # C4 / combo pressure.
     "XXXT": ("action", "slapshot"),
     "XXXTT": ("action", "vortex"),
@@ -43,7 +42,6 @@ LIMITS = {
     "ars_arcanum": ("XXXXTT", "XXXXT", "0x0057"),
     "strike_raid": ("XXXTTT", "XXXTT", "0x005E"),
     "ragnarok": ("TTT", "TT", "0x005A"),
-    "trinity_limit": ("XXTTT", "XXTT", "0x0052"),
 }
 
 
@@ -97,10 +95,10 @@ def action_catalog() -> tuple[set[str], dict[str, str], dict[str, int], str]:
 def assert_map(nodes: dict[str, dict[str, str]]) -> None:
     actual = {path: (node["kind"], node["id"]) for path, node in nodes.items()}
     assert actual == EXPECTED, "runtime tree differs from the approved map"
-    assert len(nodes) == 13
-    assert len(set(actual.values())) == 13, "ground roles are duplicated"
+    assert len(nodes) == 12
+    assert len(set(actual.values())) == 12, "ground roles are duplicated"
     assert sum(node["kind"] == "action" for node in nodes.values()) == 8
-    assert sum(node["kind"] == "limit" for node in nodes.values()) == 5
+    assert sum(node["kind"] == "limit" for node in nodes.values()) == 4
 
     for path, node in nodes.items():
         assert path.endswith("T"), f"named move {path} does not end in Y/T"
@@ -113,7 +111,7 @@ def assert_map(nodes: dict[str, dict[str, str]]) -> None:
         for family in (
             ("T", "TT", "TTT"),
             ("XT", "XTT"),
-            ("XXT", "XXTT", "XXTTT"),
+            ("XXT", "XXTT"),
             ("XXXT", "XXXTT", "XXXTTT"),
             ("XXXXT", "XXXXTT"),
         )
@@ -152,6 +150,66 @@ def assert_action_partition(nodes: dict[str, dict[str, str]]) -> None:
             )
 
 
+def assert_post_special_depth(nodes: dict[str, dict[str, str]]) -> None:
+    terminal_paths = {
+        path for path, node in nodes.items() if "triangle" not in node
+    }
+    assert terminal_paths == {"TTT", "XTT", "XXTT", "XXXTTT", "XXXXTT"}
+
+    expected_next = {
+        "TTT": "XT",
+        "XTT": "XXT",
+        "XXTT": "XXXT",
+        "XXXTTT": "XXXXT",
+        "XXXXTT": None,
+    }
+    for path, expected in expected_next.items():
+        depth = len(path) - len(path.lstrip("X"))
+        next_depth = depth + 1
+        actual = "X" * next_depth + "T" if next_depth <= 4 else None
+        assert actual == expected
+        if actual is not None:
+            assert actual in nodes
+
+    start = SOURCE.index("function JokCombatBranch.pathDepth")
+    end = SOURCE.index("function JokCombatBranch.kindReady", start)
+    controller = SOURCE[start:end]
+    for write in ("WriteByte(", "WriteShort(", "WriteInt(", "WriteLong(",
+                  "WriteFloat(", "WriteArray("):
+        assert write not in controller, "depth carry must remain metadata-only"
+
+    assert 'deferredLinkKind:sub(1, 12) == "musou-light:"' in controller
+    assert "clearDeferredAttackCommand()" in controller
+    assert "native A won the handoff; deferred fallback cancelled" in controller
+    assert "local carryPath = limit.prefix" in SOURCE
+    assert "JokCombatNativeLimit.continuationCrossPending" in SOURCE
+    assert "and player.secondary <= 0x02 then return false end" in controller
+    armed_start = controller.index('if state == "armed" then')
+    waiting_start = controller.index('if state == "waiting" then', armed_start)
+    armed = controller[armed_start:waiting_start]
+    assert armed.index("if crossPressed then") < armed.index(
+        "if player.control ~= 0x03"
+    ), "accepted same-frame Cross must be inspected before neutral-state rejection"
+    assert "JokCombatBranch.activateDepthCarry(player)" in armed
+    continuation_start = SOURCE.index(
+        "function JokCombatBranch.continuePhysical"
+    )
+    continuation_end = SOURCE.index(
+        "function JokCombatBranch.execute", continuation_start
+    )
+    continuation = SOURCE[continuation_start:continuation_end]
+    assert "local carryTerminalDepth" in continuation
+    assert 'sourceNode.kind == "action"' in continuation
+    assert "elseif carryTerminalDepth then" in continuation
+    assert "JokCombatBranch.armDepthCarry(" in continuation
+    assert continuation.index("local queued = queueAttackAfterRelease(") < (
+        continuation.index("JokCombatBranch.armDepthCarry(")
+    ), "terminal Action depth may arm only after its physical link was queued"
+    assert "local terminalAction = not JokCombatBranch.airFamily" in SOURCE
+    assert 'completedNode.kind == "action"' in SOURCE
+    assert "JokCombatBranch.clearDepthCarry(nil, true)" in SOURCE
+
+
 def assert_aerial_is_independent() -> None:
     guards = (
         'airFinisherPath = "AIR_CE"',
@@ -185,6 +243,10 @@ def assert_native_limits() -> None:
             rf'.*?reactionId = {reaction_id}'
         )
         assert re.search(pattern, catalog, re.S), f"bad native Limit map: {ability_id}"
+    assert re.search(
+        r'id = "trinity_limit".*?retired = true', catalog, re.S
+    ), "retired Trinity recovery descriptor is missing"
+    assert 'and limit.retired ~= true' in SOURCE
 
     guards = (
         "function JokCombatNativeLimit.publishJournal",
@@ -218,7 +280,7 @@ def assert_native_limits() -> None:
         "latched through parent recovery",
         "first final Y latched once for native %s",
         "Final Y belongs to KH1",
-        "native Limit combos ready: %d/5",
+        "native Limit combos ready: %d/4",
     )
     for guard in guards:
         assert guard in SOURCE, f"missing native Limit guard: {guard}"
@@ -503,6 +565,21 @@ def assert_integration() -> None:
         "standard C4",
         "Slapshot/Vortex/Strike Raid",
         "C4 shows Slapshot -> Vortex -> Strike Raid",
+        "branchDepthCarryFrames = 360",
+        "branchDepthConfirmFrames = 30",
+        "function JokCombatBranch.pathDepth",
+        "function JokCombatBranch.clearDepthCarry",
+        "function JokCombatBranch.armDepthCarry",
+        "function JokCombatBranch.depthCarryRootPath",
+        "function JokCombatBranch.updateDepthCarry",
+        "JokCombatNativeLimit.continuationCrossPending",
+        "JokCombatBranch.armDepthCarry(",
+        "next real A may carry virtual depth",
+        "completed C5; the next A starts a new vanilla chain",
+        "post-special depth ready",
+        "local carried = JokCombatBranch.depthCarryRootPath(player)",
+        "local terminalAction = not JokCombatBranch.airFamily",
+        "and completedNode.kind == \"action\"",
     )
     for guard in guards:
         assert guard in SOURCE, f"missing integration guard: {guard}"
@@ -567,6 +644,7 @@ def main() -> None:
     nodes = parse_nodes()
     assert_map(nodes)
     assert_action_partition(nodes)
+    assert_post_special_depth(nodes)
     assert_aerial_is_independent()
     assert_native_limits()
     assert_guard_counter()
@@ -574,7 +652,7 @@ def main() -> None:
     assert_air_attack_descent_brake()
     assert_integration()
     print(
-        "PASS: 13-node ground map; 8 ground Actions + 5 native Limits; "
+        "PASS: 12-node ground map; 8 ground Actions + 4 active native Limits; "
         "standard C4 Slapshot/Vortex/Strike Raid; native aerial descent brake; "
         "Counterattack gated by successful Guard"
     )
