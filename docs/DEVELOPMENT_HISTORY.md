@@ -2,7 +2,7 @@
 
 > Archived development log. This document preserves the experiments,
 > live test results, rejected approaches, and migration notes that led to the
-> stable v2.0.0 design. For current installation and usage, see the repository
+> stable v2.1.0 design. For current installation and usage, see the repository
 > README. For the release architecture, see `TECHNICAL_DESIGN.md`.
 
 Mod combat-oriented sperimentale per **KINGDOM HEARTS FINAL MIX PC**. Il
@@ -10,6 +10,18 @@ progetto mantiene storia, reward fissi, chest, synthesis, boss e world flags
 vanilla. Le sole eccezioni intenzionali sono il bootstrap nativo di High Jump,
 Glide, Superglide, Combo Plus, Air Combo Plus e Combo Master e il moltiplicatore
 globale dei drop descritto sotto.
+
+## Modifiche incluse in v2.1.0
+
+> **Nuova catena Y e profondità persistente:** Strong usa ora Slapshot -> Vortex
+> -> Blitz -> Zantetsuken -> Ars Arcanum. C4 esegue direttamente Strike Raid;
+> non avendo una Action parent, il selettore Reaction e il primo `Y` vengono
+> agganciati nello stesso frame. La vecchia C5 di Zantetsuken/Ars diventa Gravity
+> Break -> Ragnarok. Trinity Limit resta escluso perché controlla Paperino e
+> Pippo; il descrittore precedente serve soltanto al recupero del journal v2.0.0.
+> Dopo Ars Arcanum, Sonic Blade, Ripple Drive o Strike Raid, un solo `A` realmente
+> accettato da KH1 conserva la profondità logica e apre C2, C3, C4 o C5. Nessuna
+> scrittura modifica `comboPosition`; Ragnarok chiude la catena.
 
 ## Stato attuale
 

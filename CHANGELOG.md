@@ -2,6 +2,34 @@
 
 All notable player-facing changes to JokCombat are recorded here.
 
+## Unreleased
+
+## 2.1.0 - 2026-08-14
+
+### Changed
+
+- Rebuilt the ground families without duplicate moves: the pure `Y` chain is
+  now Slapshot -> Vortex -> Blitz -> Zantetsuken -> Ars Arcanum, C4 opens
+  Strike Raid directly, and C5 is Gravity Break -> Ragnarok.
+- Added same-frame native selector latching for the direct C4 Strike Raid root.
+- Added a virtual post-special depth carry: after a completed terminal move,
+  one real native `A` advances to the following ground family without writing
+  KH1's combo counter. An `A` buffered in the safe recovery tail of a terminal
+  Action uses the same handoff and does not require a second press. C5 remains
+  terminal. Once KH1 accepts that native attack, its delayed fallback is
+  cancelled so `Y` remains immediately available and no duplicate swing fires.
+- Removed Trinity Limit from the combo map because its native sequence owns
+  Donald and Goofy. Its old journal descriptor remains recovery-only so an
+  interrupted v2.0.0 invocation can still be restored safely after reload.
+
+### Fixed
+
+- Prevented grounded `A` attacks and newly opened `Y` families from selecting
+  either native Aerial Sweep `D6` or the normal aerial hit `CD` when the enemy
+  is above Sora. A signature-checked branch bypass is active only while Sora is
+  grounded; an independent recovery guard also releases branch input ownership
+  if KH1 had already committed a stale airborne transition.
+
 ## 2.0.0 - 2026-08-13
 
 ### Added
