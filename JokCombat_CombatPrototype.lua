@@ -108,8 +108,10 @@ local CONFIG = {
     -- A real 0x10 Guard-connect event opens one short physical Cross window.
     guardCounterAttemptFrames = 120,
     guardCounterWindowFrames = 35,
-    actionLoadout = true,
-    actionLoadoutMenu = true,
+    -- R2 owns a second native three-slot magic page. KH1 still performs the
+    -- complete cast (learned tier, MP, target, animation, VFX and effect).
+    r2MagicShortcuts = true,
+    r2MagicShortcutMenu = true,
     actionLoadoutPrompt = true,
     actionLoadoutOverlay = true,
 
@@ -164,6 +166,12 @@ local ADDRESS = {
     playerPointer = 0x2537E48,
     dpadButtons = 0x22C9300,
     rawButtons = 0x22C9301,
+    -- Steam Global's controller path calls the native edge-state builder here.
+    -- JokCombat redirects that one call through a signed tail cave so an armed
+    -- physical R2 becomes a complete native L1 Shortcut event (held, pressed
+    -- and released) before KH1's dispatcher sees it.
+    nativeShortcutInputBridge = 0x28B19A,
+    nativeShortcutInputCave = 0x3ADED8,
     -- Control layers retained for normal input recovery and one-version cleanup
     -- of a stale pre-v0.10.6 combo-magic journal.
     l2ControlMap = 0x22C9340,
@@ -193,10 +201,16 @@ local ADDRESS = {
     autoReaction = 0x232DDE0,
     defenseAbilityFlags = 0x2D5EC10,
 
-    -- Migration-only native magic fields. v0.10.6+ never writes them during
-    -- gameplay; they are retained solely to restore a stale older cast.
-    magicLevelBase = 0x2DE97E2,
-    nativeShortcutTriangle = 0x2DE9B94,
+    -- Native three-slot Shortcut page. The first byte is also retained for
+    -- migration of the retired combo-magic adapter.
+    -- Shortcut Sets resolves this owner pointer from Steam's unique Shortcut
+    -- writer signature. Its live object owns the real three-slot page at +844;
+    -- learned magic levels sit 0x3B2 bytes before that page.
+    nativeShortcutStoragePointer = 0x2868BA0,
+    magicLevelBase = 0x2DE97F2,
+    nativeShortcutTriangle = 0x2DE9BA4,
+    nativeShortcutSquare = 0x2DE9BA5,
+    nativeShortcutCross = 0x2DE9BA6,
 
     -- Migration-only reload journal written by v0.9.1-v0.10.5.
     -- v0.12.0+ reuses the same reserved block with a distinct Limit signature;
@@ -447,12 +461,10 @@ local ACTION_CATALOG = {
 }
 
 local ACTION_BY_ID = {}
-local ACTION_INDEX_BY_ID = {}
 local FINISHER_ACTION_ANIMATION = {}
 local ROUTE_RECORD_BY_ANIMATION = {}
-for index, action in ipairs(ACTION_CATALOG) do
+for _, action in ipairs(ACTION_CATALOG) do
     ACTION_BY_ID[action.id] = action
-    ACTION_INDEX_BY_ID[action.id] = index
     if action.animation ~= nil then
         if action.finisher then
             FINISHER_ACTION_ANIMATION[action.animation] = true
@@ -461,26 +473,21 @@ for index, action in ipairs(ACTION_CATALOG) do
     end
 end
 
-local ACTION_SLOTS = {
-    { id = "r2_cross", label = "R2 + X", modifier = BUTTON.R2,
-        face = BUTTON.CROSS, faceName = "A" },
-    { id = "r2_triangle", label = "R2 + Triangle", modifier = BUTTON.R2,
-        face = BUTTON.TRIANGLE, faceName = "Y" },
-    { id = "r2_circle", label = "R2 + Circle", modifier = BUTTON.R2,
-        face = BUTTON.CIRCLE, faceName = "B" },
-    { id = "r2_square", label = "R2 + Square", modifier = BUTTON.R2,
-        face = BUTTON.SQUARE, faceName = "X" },
+local SHORTCUT_SLOTS = {
+    { id = "r2_triangle", label = "R2 + Y", modifier = BUTTON.R2,
+        face = BUTTON.TRIANGLE, faceName = "Y",
+        address = ADDRESS.nativeShortcutTriangle },
+    { id = "r2_square", label = "R2 + X", modifier = BUTTON.R2,
+        face = BUTTON.SQUARE, faceName = "X",
+        address = ADDRESS.nativeShortcutSquare },
+    { id = "r2_cross", label = "R2 + A", modifier = BUTTON.R2,
+        face = BUTTON.CROSS, faceName = "A",
+        address = ADDRESS.nativeShortcutCross },
 }
 
-local ACTION_SLOT_BY_ID = {}
-for _, slot in ipairs(ACTION_SLOTS) do ACTION_SLOT_BY_ID[slot.id] = slot end
-
-local function slotModifierMatches(buttons, slot)
-    return (buttons & SHOULDER_MASK) == slot.modifier
-end
-
-local function slotModifierName(slot)
-    return "R2"
+local SHORTCUT_SLOT_BY_ID = {}
+for _, slot in ipairs(SHORTCUT_SLOTS) do
+    SHORTCUT_SLOT_BY_ID[slot.id] = slot
 end
 
 local LOADOUT_MENU_GROUPS = {
@@ -489,20 +496,237 @@ local LOADOUT_MENU_GROUPS = {
         label = "R2",
         openDirection = "Right",
         slots = {
-            ACTION_SLOT_BY_ID.r2_triangle,
-            ACTION_SLOT_BY_ID.r2_square,
-            ACTION_SLOT_BY_ID.r2_cross,
-            ACTION_SLOT_BY_ID.r2_circle,
+            SHORTCUT_SLOT_BY_ID.r2_triangle,
+            SHORTCUT_SLOT_BY_ID.r2_square,
+            SHORTCUT_SLOT_BY_ID.r2_cross,
         },
     },
 }
 
 local DEFAULT_LOADOUT = {
-    r2_cross = "gravity_break",
-    r2_triangle = "ripple_drive",
-    r2_circle = "hurricane_blast",
-    r2_square = "zantetsuken",
+    -- Used only before KH1 has exposed a loaded save. On the first usable R2
+    -- hold these are replaced by learned spells absent from the live L1 page.
+    r2_triangle = "cure",
+    r2_square = "gravity",
+    r2_cross = "aero",
 }
+
+-- Kept global because the main Lua chunk is close to Lua 5.3's 200-local
+-- ceiling. These IDs are the exact values stored by KH1's native Shortcut
+-- menu; 0xFF is an empty slot.
+JokCombatR2Shortcut = {
+    catalog = {
+        { id = "fire", name = "Fire", index = 0 },
+        { id = "blizzard", name = "Blizzard", index = 1 },
+        { id = "thunder", name = "Thunder", index = 2 },
+        { id = "cure", name = "Cure", index = 3 },
+        { id = "gravity", name = "Gravity", index = 4 },
+        { id = "stop", name = "Stop", index = 5 },
+        { id = "aero", name = "Aero", index = 6 },
+        { id = "none", name = "-", index = 0xFF },
+    },
+    byId = {},
+    byIndex = {},
+    recoverySignature = 0x313043534D32524A, -- "JR2MSC01"
+    recoveryMarker = 0xC4,
+    active = false,
+    failedKey = nil,
+    needsInitialSeed = false,
+    addressResolved = false,
+}
+
+-- Signed native R2 -> Shortcut edge bridge. The five-byte call site is stock
+-- KH1 code; the 28-byte tail cave is zero padding at the end of Steam Global's
+-- executable .text section. The cave checks JokCombat's recovery marker, maps
+-- only the controller shoulder nibble R2 -> L1, then tail-jumps to KH1's
+-- original edge builder. Physical raw input stays R2, so JokCombat can retain
+-- page ownership while KH1 receives coherent held/pressed/released L1 states.
+--
+-- The two older bridge layouts are recovery-only and are never installed.
+JokCombatR2NativeBridge = {
+    address = ADDRESS.nativeShortcutInputBridge,
+    normal = {
+        0xE8, 0x91, 0x02, 0x00, 0x00,
+    },
+    owned = {
+        0xE8, 0x39, 0x2D, 0x12, 0x00,
+    },
+    caveAddress = ADDRESS.nativeShortcutInputCave,
+    caveNormal = {
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    },
+    caveOwned = {
+        -- Compare JokCombat's recovery marker with C4.
+        0x80, 0x3D, 0xD9, 0x9A, 0xA0, 0x02, 0xC4,
+        -- If armed, map only DH's R2 shoulder nibble to L1.
+        0x75, 0x0E, 0x88, 0xF0, 0x24, 0x0F, 0x3C, 0x02,
+        0x75, 0x06, 0x80, 0xE6, 0xFD, 0x80, 0xCE, 0x04,
+        -- Tail-jump to KH1's original edge-state builder.
+        0xE9, 0x3C, 0xD5, 0xED, 0xFF,
+    },
+    preDispatchAddress = 0x18C870,
+    preDispatchNormal = {
+        0xE8, 0x3B, 0xE8, 0x0F, 0x00,
+        0x83, 0x3D, 0x14, 0x47, 0x1B, 0x02, 0x00,
+        0x0F, 0x28, 0x05, 0x2D, 0x01, 0x80, 0x02,
+        0x0F, 0x28, 0x0D, 0x36, 0x01, 0x80, 0x02,
+        0x0F, 0x29, 0x05, 0x1F, 0x3F, 0x1B, 0x02,
+        0x0F, 0x28, 0x05, 0x38, 0x01, 0x80, 0x02,
+        0x0F, 0x29, 0x0D, 0x21, 0x3F, 0x1B, 0x02,
+        0x0F, 0x28, 0x0D, 0x3A, 0x01, 0x80, 0x02,
+        0x0F, 0x29, 0x05, 0x23, 0x3F, 0x1B, 0x02,
+        0x0F, 0x28, 0x05, 0x3C, 0x01, 0x80, 0x02,
+        0x0F, 0x29, 0x0D, 0x25, 0x3F, 0x1B, 0x02,
+    },
+    preDispatchOwned = {
+        0x8A, 0x05, 0x3F, 0x01, 0x80, 0x02,
+        0x88, 0xC4, 0x80, 0xE4, 0x0F, 0x80, 0xFC, 0x02,
+        0x75, 0x0A,
+        0x24, 0xFD, 0x0C, 0x04,
+        0x88, 0x05, 0x2B, 0x01, 0x80, 0x02,
+        0xE8, 0x21, 0xE8, 0x0F, 0x00,
+        0x83, 0x3D, 0xFA, 0x46, 0x1B, 0x02, 0x00,
+        0x9C, 0x56, 0x57,
+        0x48, 0x8D, 0x35, 0x10, 0x01, 0x80, 0x02,
+        0x48, 0x8D, 0x3D, 0x09, 0x3F, 0x1B, 0x02,
+        0xB9, 0x1C, 0x00, 0x00, 0x00,
+        0xF3, 0x48, 0xA5, 0x5F, 0x5E, 0x9D,
+        0xE9, 0x89, 0x00, 0x00, 0x00,
+        0x90, 0x90, 0x90, 0x90,
+    },
+    legacyAddress = 0x18C87C,
+    legacyNormal = {
+        0x0F, 0x28, 0x05, 0x2D, 0x01, 0x80, 0x02,
+        0x0F, 0x28, 0x0D, 0x36, 0x01, 0x80, 0x02,
+        0x0F, 0x29, 0x05, 0x1F, 0x3F, 0x1B, 0x02,
+        0x0F, 0x28, 0x05, 0x38, 0x01, 0x80, 0x02,
+        0x0F, 0x29, 0x0D, 0x21, 0x3F, 0x1B, 0x02,
+        0x0F, 0x28, 0x0D, 0x3A, 0x01, 0x80, 0x02,
+        0x0F, 0x29, 0x05, 0x23, 0x3F, 0x1B, 0x02,
+        0x0F, 0x28, 0x05, 0x3C, 0x01, 0x80, 0x02,
+    },
+    legacyOwned = {
+        0x9C, 0x56,
+        0x48, 0x8D, 0x35, 0x2B, 0x01, 0x80, 0x02,
+        0x48, 0x8D, 0x3D, 0x24, 0x3F, 0x1B, 0x02,
+        0xB9, 0x1C, 0x00, 0x00, 0x00,
+        0xF3, 0x48, 0xA5, 0x5E,
+        0x8A, 0x05, 0x1A, 0x3F, 0x1B, 0x02,
+        0xA8, 0x02, 0x74, 0x0A,
+        0x24, 0xFD, 0x0C, 0x04,
+        0x88, 0x05, 0x0C, 0x3F, 0x1B, 0x02,
+        0x9D, 0xE9, 0x91, 0x00, 0x00, 0x00,
+        0x90, 0x90, 0x90, 0x90, 0x90,
+    },
+    ready = false,
+    ownedNow = false,
+    installLogged = false,
+    failureLogged = false,
+}
+
+for index, magic in ipairs(JokCombatR2Shortcut.catalog) do
+    JokCombatR2Shortcut.byId[magic.id] = magic
+    JokCombatR2Shortcut.byIndex[magic.index] = magic
+    magic.catalogIndex = index
+end
+
+function JokCombatR2Shortcut.isLearned(magic)
+    return magic ~= nil and magic.index ~= 0xFF
+        and ReadByte(ADDRESS.magicLevelBase + magic.index) > 0
+end
+
+function JokCombatR2Shortcut.resolveNativeAddresses()
+    JokCombatR2Shortcut.addressResolved = false
+    local storage = ReadLong(ADDRESS.nativeShortcutStoragePointer)
+    if storage < BASE_ADDR or storage >= BASE_ADDR + 0x2F91000 then
+        ConsolePrint(string.format(
+            "[JokCombat:r2-magic:fault] Shortcut storage pointer is invalid: 0x%X.",
+            storage))
+        return false
+    end
+
+    local triangle = storage - BASE_ADDR + 0x844
+    local levelBase = triangle - 0x3B2
+    if triangle < 0 or triangle + 2 >= 0x2F91000
+        or levelBase < 0 or levelBase + 6 >= 0x2F91000 then
+        ConsolePrint("[JokCombat:r2-magic:fault] resolved Shortcut storage "
+            .. "falls outside the Steam module.")
+        return false
+    end
+    for offset = 0, 2 do
+        local value = ReadByte(triangle + offset)
+        if value ~= 0xFF and (value < 0 or value > 6) then
+            ConsolePrint(string.format(
+                "[JokCombat:r2-magic:fault] resolved Shortcut slot %d has "
+                    .. "invalid value 0x%02X.", offset + 1, value))
+            return false
+        end
+    end
+    for offset = 0, 6 do
+        local level = ReadByte(levelBase + offset)
+        if level < 0 or level > 3 then
+            ConsolePrint(string.format(
+                "[JokCombat:r2-magic:fault] resolved magic level %d has "
+                    .. "invalid value 0x%02X.", offset, level))
+            return false
+        end
+    end
+
+    ADDRESS.nativeShortcutTriangle = triangle
+    ADDRESS.nativeShortcutSquare = triangle + 1
+    ADDRESS.nativeShortcutCross = triangle + 2
+    ADDRESS.magicLevelBase = levelBase
+    SHORTCUT_SLOT_BY_ID.r2_triangle.address = triangle
+    SHORTCUT_SLOT_BY_ID.r2_square.address = triangle + 1
+    SHORTCUT_SLOT_BY_ID.r2_cross.address = triangle + 2
+    JokCombatR2Shortcut.addressResolved = true
+    ConsolePrint(string.format(
+        "[JokCombat] native Shortcut storage resolved: "
+            .. "slots=0x%X levels=0x%X.", triangle, levelBase))
+    return true
+end
+
+function JokCombatR2Shortcut.distinctLearnedDefaults()
+    local native = {}
+    for _, slot in ipairs(SHORTCUT_SLOTS) do
+        local value = ReadByte(slot.address)
+        if JokCombatR2Shortcut.validSlotValue == nil
+            or JokCombatR2Shortcut.validSlotValue(value) then
+            native[value] = true
+        end
+    end
+
+    local defaults = {}
+    for _, magic in ipairs(JokCombatR2Shortcut.catalog) do
+        if #defaults < #SHORTCUT_SLOTS
+            and JokCombatR2Shortcut.isLearned(magic)
+            and not native[magic.index] then
+            table.insert(defaults, magic.id)
+        end
+    end
+    if #defaults == 0 then return nil end
+    while #defaults < #SHORTCUT_SLOTS do
+        table.insert(defaults, "none")
+    end
+    return defaults
+end
+
+function JokCombatR2Shortcut.nextSelectable(current, delta)
+    local start = current ~= nil and current.catalogIndex or 1
+    for step = 1, #JokCombatR2Shortcut.catalog do
+        local index = ((start - 1 + delta * step)
+            % #JokCombatR2Shortcut.catalog) + 1
+        local magic = JokCombatR2Shortcut.catalog[index]
+        if magic.index == 0xFF
+            or JokCombatR2Shortcut.isLearned(magic) then
+            return magic
+        end
+    end
+    return JokCombatR2Shortcut.byId.none
+end
 
 -- These are deliberately conservative first-pass windows, measured in the
 -- game's animation-time units. They are configuration data to tune from logs.
@@ -767,36 +991,75 @@ end
 
 local function resetLoadoutToDefaults()
     loadout = {}
-    for _, slot in ipairs(ACTION_SLOTS) do
-        loadout[slot.id] = DEFAULT_LOADOUT[slot.id] or "none"
+    local learnedDefaults = JokCombatR2Shortcut.distinctLearnedDefaults()
+    for index, slot in ipairs(SHORTCUT_SLOTS) do
+        loadout[slot.id] = learnedDefaults ~= nil
+            and learnedDefaults[index]
+            or DEFAULT_LOADOUT[slot.id] or "none"
     end
 end
 
 local function loadActionLoadout()
     resetLoadoutToDefaults()
-    loadoutPath = joinPath(SCRIPT_PATH, "JokCombat_ActionLoadout.cfg")
+    loadoutPath = joinPath(SCRIPT_PATH, "JokCombat_MagicShortcuts.cfg")
 
     local file = io.open(loadoutPath, "r")
     if file == nil then
-        log("loadout file not found; using current defaults.")
+        -- Preserve the user's overlay preference when migrating from the
+        -- retired Action Ability page, but never import its ability IDs.
+        local legacy = io.open(joinPath(
+            SCRIPT_PATH, "JokCombat_ActionLoadout.cfg"), "r")
+        if legacy ~= nil then
+            for line in legacy:lines() do
+                local value = line:match(
+                    "^%s*action_overlay%s*=%s*(%a+)%s*$")
+                if value == "true" or value == "false" then
+                    HUD.enabled = value == "true"
+                end
+            end
+            legacy:close()
+        end
+        JokCombatR2Shortcut.needsInitialSeed = true
+        log("R2 magic shortcut file not found; the first gameplay hold will "
+            .. "seed a page distinct from L1.")
         return
     end
 
+    JokCombatR2Shortcut.needsInitialSeed = false
+    local formatVersion = 0
     local accepted = 0
     for line in file:lines() do
         local slotId, actionId = line:match(
             "^%s*([%w_]+)%s*=%s*([%w_]+)%s*$")
-        if slotId == "action_overlay"
+        if slotId == "format_version" then
+            formatVersion = tonumber(actionId) or 0
+        elseif slotId == "action_overlay"
             and (actionId == "true" or actionId == "false") then
             HUD.enabled = actionId == "true"
-        elseif ACTION_SLOT_BY_ID[slotId] ~= nil
-            and ACTION_BY_ID[actionId] ~= nil then
+        elseif SHORTCUT_SLOT_BY_ID[slotId] ~= nil
+            and JokCombatR2Shortcut.byId[actionId] ~= nil then
             loadout[slotId] = actionId
             accepted = accepted + 1
         end
     end
     file:close()
-    log(string.format("loaded Action Ability loadout: %d valid slot(s).",
+
+    -- The first R2 prototype wrote Fire/Blizzard/Thunder before its D-pad
+    -- editor could ever become eligible. Treat only that exact unversioned
+    -- preset as generated legacy data; any versioned or customized file is
+    -- authoritative and is never rewritten automatically.
+    local legacyDuplicate = loadout.r2_triangle == "fire"
+        and loadout.r2_square == "blizzard"
+        and loadout.r2_cross == "thunder"
+    local invalidEmptyPage = loadout.r2_triangle == "none"
+        and loadout.r2_square == "none"
+        and loadout.r2_cross == "none"
+    if formatVersion < 3 and (legacyDuplicate or invalidEmptyPage) then
+        JokCombatR2Shortcut.needsInitialSeed = true
+        log("invalid pre-v3 R2 magic preset detected; it will be replaced "
+            .. "from the resolved native Shortcut data.")
+    end
+    log(string.format("loaded R2 magic shortcuts: %d valid slot(s).",
         accepted))
 end
 
@@ -809,16 +1072,18 @@ local function saveActionLoadout()
         return false
     end
 
-    file:write("# JokCombat v0.9.9 Action Ability loadout\n")
-    file:write("# Guard: L2+Circle; ground Dodge: Square; air Superglide: hold Square.\n")
-    file:write("# Only the four exact-R2 Action Ability slots are active.\n")
-    file:write("# action_overlay controls both loadout labels and Combo Guide.\n")
+    file:write("# JokCombat R2 native magic shortcuts\n")
+    file:write("# R2+Y / R2+X / R2+A; B remains jump or Kinetic Step.\n")
+    file:write("# D-pad Up/Down selects; Left/Right changes the spell.\n")
+    file:write("# action_overlay controls the Combo Guide.\n")
+    file:write("format_version=3\n")
     file:write("action_overlay=", HUD.enabled and "true" or "false", "\n")
-    for _, slot in ipairs(ACTION_SLOTS) do
+    for _, slot in ipairs(SHORTCUT_SLOTS) do
         file:write(slot.id, "=", loadout[slot.id] or "none", "\n")
     end
     file:close()
-    log("Action Ability loadout saved to " .. loadoutPath)
+    log("R2 magic shortcuts saved to " .. loadoutPath)
+    JokCombatR2Shortcut.needsInitialSeed = false
     return true
 end
 
@@ -1119,8 +1384,9 @@ function HUD.hideOwned()
 end
 
 function HUD.actionLine(slot)
-    local action = ACTION_BY_ID[loadout[slot.id]] or ACTION_BY_ID.none
-    return string.format("[%s] %s", slot.faceName, action.name)
+    local magic = JokCombatR2Shortcut.byId[loadout[slot.id]]
+        or JokCombatR2Shortcut.byId.none
+    return string.format("[%s] %s", slot.faceName, magic.name)
 end
 
 function HUD.overlayEntries(groupId)
@@ -1640,36 +1906,6 @@ local function pendingNativeFinisherAction()
     return nil
 end
 
-local function chordNativeFinisherAction(buttons)
-    local modifierHeld = (buttons & SHOULDER_MASK) ~= 0
-    if not modifierHeld then return nil end
-
-    -- A held non-X face button is an explicit request and takes precedence over
-    -- the passive X pre-prime belonging to the same shoulder layer.
-    for _, slot in ipairs(ACTION_SLOTS) do
-        if slotModifierMatches(buttons, slot)
-            and (buttons & slot.face) ~= 0 then
-            local action = ACTION_BY_ID[loadout[slot.id]]
-            if action ~= nil and NATIVE_FINISHER_SELECTOR[action.id] ~= nil then
-                return action
-            end
-            return nil
-        end
-    end
-
-    -- X routes must be native one frame before the physical X edge arrives.
-    for _, slot in ipairs(ACTION_SLOTS) do
-        if slot.face == BUTTON.CROSS and slotModifierMatches(buttons, slot) then
-            local action = ACTION_BY_ID[loadout[slot.id]]
-            if action ~= nil and NATIVE_FINISHER_SELECTOR[action.id] ~= nil then
-                return action
-            end
-            return nil
-        end
-    end
-    return nil
-end
-
 local function restoreNativeFinisherSelection()
     restoreIfKnown(ADDRESS.groundFinisherGateBranch, 0x72,
         { 0x72, 0x90 })
@@ -1699,10 +1935,9 @@ end
 
 local function updateNativeFinisherSelection(buttons, player)
     local action = pendingNativeFinisherAction()
-        or chordNativeFinisherAction(buttons)
     local selector = action ~= nil and NATIVE_FINISHER_SELECTOR[action.id]
         or nil
-    local enable = CONFIG.actionLoadout and selector ~= nil
+    local enable = selector ~= nil
 
     if not enable then
         if nativeFinisherSelectionActionId ~= nil
@@ -2110,6 +2345,14 @@ local function updateActionRoutes(player)
 end
 
 local function restoreAllPatches()
+    if JokCombatR2NativeBridge ~= nil
+        and JokCombatR2NativeBridge.restore ~= nil then
+        JokCombatR2NativeBridge.restore("patch restore", true)
+    end
+    if JokCombatR2Shortcut ~= nil
+        and JokCombatR2Shortcut.restore ~= nil then
+        JokCombatR2Shortcut.restore("patch restore", true)
+    end
     if JokCombatAttackSpeed ~= nil
         and JokCombatAttackSpeed.restore ~= nil then
         JokCombatAttackSpeed.restore("patch restore", true)
@@ -2163,7 +2406,7 @@ local function restoreAllPatches()
         NORMAL.shortcutControlSelector,
         { 0xFF, CONTROL_INDEX.TRIANGLE, 0x20 })
     restoreIfKnown(ADDRESS.l2ControlMap, NORMAL.l2ControlMap,
-        { 0xFF, CONTROL_INDEX.TRIANGLE })
+        { 0xFF, 0x01, CONTROL_INDEX.TRIANGLE, 0x21 })
     restoreIfKnown(ADDRESS.triangleControlMap, NORMAL.triangleControlMap,
         { 0xFF, 0xFE })
     restoreIfKnown(ADDRESS.circleControlMap, NORMAL.circleControlMap,
@@ -2216,10 +2459,9 @@ function HUD.shoulderGroup(buttons)
 end
 
 function HUD.overlayEligible(buttons, player)
-    return CONFIG.actionLoadout and CONFIG.actionLoadoutPrompt
-        and CONFIG.actionLoadoutOverlay and HUD.enabled
+    return CONFIG.r2MagicShortcuts and CONFIG.actionLoadoutPrompt
+        and HUD.enabled
         and HUD.shoulderGroup(buttons) ~= nil
-        and HUD.nativeRootSelectionAvailable()
         and player.control == 0x03 and player.animation <= 0x07
 end
 
@@ -2267,7 +2509,7 @@ function HUD.updateOverlayControls(buttons, dpad)
         HUD.overlaySignature = nil
         saveActionLoadout()
         ConsolePrint(
-            "[JokCombat:loadout] all four R2 slots restored to defaults.")
+            "[JokCombat:loadout] all three R2 magic slots restored to defaults.")
     end
 
     if not toggleHeld and HUD.controlChordHeld then
@@ -2276,7 +2518,7 @@ function HUD.updateOverlayControls(buttons, dpad)
             HUD.enabled = not HUD.enabled
             HUD.hideOverlay()
             saveActionLoadout()
-            log("native Command Menu overlay + Combo Guide "
+            log("Combo Guide overlay "
                 .. (HUD.enabled and "enabled" or "disabled")
                 .. " after releasing L1+R1+L2+R2.")
         end
@@ -2308,8 +2550,13 @@ end
 function HUD.updateDirectEditor(buttons, dpad, player, controlConsumed)
     if dpad == 0 then HUD.dpadReleaseLock = false end
     local groupId = HUD.shoulderGroup(buttons)
-    local eligible = CONFIG.actionLoadoutMenu
-        and HUD.overlayEligible(buttons, player)
+    -- The editor belongs to the active native R2 page itself. It must not
+    -- depend on the optional Combo Guide overlay or on the root Command Menu:
+    -- once KH1 opens menu 5, those old Action-Loadout eligibility checks are
+    -- no longer true and silently discarded every D-pad input.
+    local eligible = CONFIG.r2MagicShortcutMenu
+        and groupId == "r2" and JokCombatR2Shortcut.active
+        and player ~= nil
         and (buttons & FACE_BUTTON_MASK) == 0
     if not eligible then
         local reason = "shortcut context ended"
@@ -2329,9 +2576,7 @@ function HUD.updateDirectEditor(buttons, dpad, player, controlConsumed)
         HUD.directEditGroup = groupId
         HUD.directEditActive = false
         HUD.directEditDirty = false
-        -- The native root cursor always starts on Attack. Start each editing
-        -- session on the first displayed row so logical and visual selection
-        -- have the same origin.
+        -- A new R2 hold starts from the first native Shortcut row.
         HUD.directEditIndex[groupId] = 1
     end
 
@@ -2360,39 +2605,34 @@ function HUD.updateDirectEditor(buttons, dpad, player, controlConsumed)
         HUD.directEditIndex[groupId] = index
         HUD.directEditActive = true
         HUD.overlaySignature = nil
-        log(string.format("%s direct loadout selected %s.",
+        log(string.format("%s magic shortcut selected %s.",
             group.label, group.slots[index].label))
-        local direction = upStarted and DPAD.UP or DPAD.DOWN
-        if not HUD.requestNativeSelection(index, direction) then
-            log("native editor cursor became unavailable; editor selection closed.")
-            HUD.finishDirectEdit("native cursor unavailable", dpad)
-            return true
-        end
     end
 
     if leftStarted or rightStarted then
         local slot = group.slots[index]
-        local currentIndex = ACTION_INDEX_BY_ID[loadout[slot.id]] or 1
+        local current = JokCombatR2Shortcut.byId[loadout[slot.id]]
+            or JokCombatR2Shortcut.byId.none
         local delta = leftStarted and -1 or 1
-        local nextIndex = ((currentIndex - 1 + delta)
-            % #ACTION_CATALOG) + 1
-        local action = ACTION_CATALOG[nextIndex]
-        loadout[slot.id] = action.id
+        local magic = JokCombatR2Shortcut.nextSelectable(current, delta)
+        loadout[slot.id] = magic.id
         HUD.directEditActive = true
         HUD.directEditDirty = true
         HUD.overlaySignature = nil
         ConsolePrint(string.format("[JokCombat:loadout] %s -> %s",
-            slot.label, action.name))
-    end
-    if HUD.directEditActive and not HUD.observeNativeSelection() then
-        log("native editor cursor became unavailable; editor selection closed.")
-        HUD.finishDirectEdit("native cursor unavailable", dpad)
+            slot.label, magic.name))
     end
     return true
 end
 
 function HUD.updateOverlay(buttons, player)
     local groupId = HUD.shoulderGroup(buttons)
+    if groupId == "r2" then
+        -- KH1's own three-row Shortcut panel is the R2 HUD. Do not draw a
+        -- second Command Menu overlay on top of it.
+        HUD.hideOverlay()
+        return false
+    end
     local show = HUD.overlayEligible(buttons, player)
         and (buttons & FACE_BUTTON_MASK) == 0
     if show then return HUD.showOverlay(groupId) end
@@ -4263,6 +4503,384 @@ function LegacyMagicRecovery.recoverStale()
         "[JokCombat:magic:recovery] stale %s cast restored (%d owned fields).",
         family.name, restored))
     return true
+end
+
+function JokCombatR2NativeBridge.matchesAt(address, expected)
+    for index = 1, #expected do
+        if ReadByte(address + index - 1) ~= expected[index] then
+            return false
+        end
+    end
+    return true
+end
+
+function JokCombatR2NativeBridge.matches(expected)
+    return JokCombatR2NativeBridge.matchesAt(
+        JokCombatR2NativeBridge.address, expected)
+end
+
+function JokCombatR2NativeBridge.activeNormal()
+    return JokCombatR2NativeBridge.matches(
+        JokCombatR2NativeBridge.normal)
+        and JokCombatR2NativeBridge.matchesAt(
+            JokCombatR2NativeBridge.caveAddress,
+            JokCombatR2NativeBridge.caveNormal)
+end
+
+function JokCombatR2NativeBridge.activeOwned()
+    return JokCombatR2NativeBridge.matches(
+        JokCombatR2NativeBridge.owned)
+        and JokCombatR2NativeBridge.matchesAt(
+            JokCombatR2NativeBridge.caveAddress,
+            JokCombatR2NativeBridge.caveOwned)
+end
+
+function JokCombatR2NativeBridge.restore(reason, quiet)
+    local callOwned = JokCombatR2NativeBridge.matches(
+        JokCombatR2NativeBridge.owned)
+    local caveOwned = JokCombatR2NativeBridge.matchesAt(
+        JokCombatR2NativeBridge.caveAddress,
+        JokCombatR2NativeBridge.caveOwned)
+    local preDispatchOwned = JokCombatR2NativeBridge.matchesAt(
+        JokCombatR2NativeBridge.preDispatchAddress,
+        JokCombatR2NativeBridge.preDispatchOwned)
+    local legacyOwned = JokCombatR2NativeBridge.matchesAt(
+        JokCombatR2NativeBridge.legacyAddress,
+        JokCombatR2NativeBridge.legacyOwned)
+    local wasOwned = JokCombatR2NativeBridge.ownedNow
+        or callOwned or caveOwned or preDispatchOwned or legacyOwned
+
+    -- Disconnect the call before clearing its tail cave. Each write remains
+    -- conditional on JokCombat's complete signed bytes.
+    if callOwned then
+        WriteArray(JokCombatR2NativeBridge.address,
+            JokCombatR2NativeBridge.normal)
+    end
+    if caveOwned then
+        WriteArray(JokCombatR2NativeBridge.caveAddress,
+            JokCombatR2NativeBridge.caveNormal)
+    end
+    if preDispatchOwned then
+        WriteArray(JokCombatR2NativeBridge.preDispatchAddress,
+            JokCombatR2NativeBridge.preDispatchNormal)
+    elseif legacyOwned then
+        WriteArray(JokCombatR2NativeBridge.legacyAddress,
+            JokCombatR2NativeBridge.legacyNormal)
+    end
+
+    local activeRestored = JokCombatR2NativeBridge.activeNormal()
+    local retiredRestored = JokCombatR2NativeBridge.matchesAt(
+        JokCombatR2NativeBridge.preDispatchAddress,
+        JokCombatR2NativeBridge.preDispatchNormal)
+    if (not activeRestored or not retiredRestored)
+        and not JokCombatR2NativeBridge.failureLogged then
+        JokCombatR2NativeBridge.failureLogged = true
+        JokCombatR2NativeBridge.ready = false
+        ConsolePrint("[JokCombat:r2-magic:fault] native input bridge changed "
+            .. "by another writer; conditional restore left it untouched.")
+    end
+    JokCombatR2NativeBridge.ownedNow = false
+    if wasOwned and not quiet then
+        log("R2 native Shortcut input bridge restored"
+            .. (reason ~= nil and ": " .. reason or "."))
+    end
+    return wasOwned
+end
+
+function JokCombatR2NativeBridge.ensure()
+    if not CONFIG.r2MagicShortcuts
+        or not JokCombatR2NativeBridge.ready then return false end
+    if JokCombatR2NativeBridge.activeOwned() then
+        JokCombatR2NativeBridge.ownedNow = true
+        return true
+    end
+    if not JokCombatR2NativeBridge.activeNormal() then
+        JokCombatR2NativeBridge.ready = false
+        if not JokCombatR2NativeBridge.failureLogged then
+            JokCombatR2NativeBridge.failureLogged = true
+            ConsolePrint("[JokCombat:r2-magic:fault] Steam Shortcut edge "
+                .. "signature mismatch; R2 page disabled.")
+        end
+        return false
+    end
+
+    -- Publish the tail first and redirect the call only after every helper byte
+    -- has been verified. A partial write can therefore never be executed.
+    WriteArray(JokCombatR2NativeBridge.caveAddress,
+        JokCombatR2NativeBridge.caveOwned)
+    if not JokCombatR2NativeBridge.matchesAt(
+            JokCombatR2NativeBridge.caveAddress,
+            JokCombatR2NativeBridge.caveOwned) then
+        JokCombatR2NativeBridge.ready = false
+        return false
+    end
+    WriteArray(JokCombatR2NativeBridge.address,
+        JokCombatR2NativeBridge.owned)
+    if not JokCombatR2NativeBridge.activeOwned() then
+        if JokCombatR2NativeBridge.matches(
+                JokCombatR2NativeBridge.normal) then
+            WriteArray(JokCombatR2NativeBridge.caveAddress,
+                JokCombatR2NativeBridge.caveNormal)
+        end
+        JokCombatR2NativeBridge.ready = false
+        if not JokCombatR2NativeBridge.failureLogged then
+            JokCombatR2NativeBridge.failureLogged = true
+            ConsolePrint("[JokCombat:r2-magic:fault] native Shortcut edge "
+                .. "bridge write was not accepted; R2 page disabled.")
+        end
+        return false
+    end
+    JokCombatR2NativeBridge.ownedNow = true
+    if not JokCombatR2NativeBridge.installLogged then
+        JokCombatR2NativeBridge.installLogged = true
+        log("R2 native Shortcut edge bridge ready: physical R2 is mapped "
+            .. "before KH1 builds held/pressed/released states.")
+    end
+    return true
+end
+
+function JokCombatR2NativeBridge.initialize()
+    JokCombatR2NativeBridge.ready = false
+    JokCombatR2NativeBridge.ownedNow = false
+    JokCombatR2NativeBridge.installLogged = false
+    JokCombatR2NativeBridge.failureLogged = false
+
+    -- Normalize this bridge or either rejected predecessor before validating
+    -- the stock call site and zero-padded executable tail.
+    JokCombatR2NativeBridge.restore("retired bridge recovery", true)
+    if not JokCombatR2NativeBridge.activeNormal() then
+        ConsolePrint("[JokCombat:r2-magic:fault] native edge bridge "
+            .. "could not be normalized; R2 page disabled.")
+        return false
+    end
+    JokCombatR2NativeBridge.ready = true
+    return JokCombatR2NativeBridge.ensure()
+end
+
+-- R2 is a second page of KH1's real three-slot Shortcut system. L1 remains the
+-- untouched vanilla page. This follows Shortcut Sets' proven native-page model:
+-- swap only the three real spell IDs. The signed bridge above converts physical
+-- R2 before KH1 calculates input edges, so the original Shortcut dispatcher and
+-- spell execution path remain responsible for the menu, casts, MP and effects.
+function JokCombatR2Shortcut.validSlotValue(value)
+    return value == 0xFF or (value >= 0 and value <= 6)
+end
+
+function JokCombatR2Shortcut.clearJournal()
+    WriteLong(ADDRESS.magicRecovery, 0)
+end
+
+function JokCombatR2Shortcut.journalValid()
+    local journal = ADDRESS.magicRecovery
+    -- 0x01/0x21 and selector 0x20 are recovery-only values from rejected
+    -- carriers. The active edge bridge owns neither control-map byte.
+    local l2Owned = ReadByte(journal + 0x0E)
+    local selectorOwned = ReadByte(journal + 0x0F)
+    if ReadLong(journal) ~= JokCombatR2Shortcut.recoverySignature
+        or ReadByte(journal + 0x08) ~= JokCombatR2Shortcut.recoveryMarker
+        or (l2Owned ~= 0x01 and l2Owned ~= NORMAL.l2ControlMap
+            and l2Owned ~= 0x21)
+        or (selectorOwned ~= 0x20
+            and selectorOwned ~= NORMAL.shortcutControlSelector)
+        or ReadByte(journal + 0x10) ~= 0x53 then
+        return false
+    end
+    for offset = 0x09, 0x0B do
+        if not JokCombatR2Shortcut.validSlotValue(ReadByte(journal + offset)) then
+            return false
+        end
+    end
+    return true
+end
+
+function JokCombatR2Shortcut.publishJournal()
+    if ReadLong(ADDRESS.magicRecovery) ~= 0
+        or ReadByte(ADDRESS.l2ControlMap) ~= NORMAL.l2ControlMap
+        or ReadByte(ADDRESS.shortcutControlSelector)
+            ~= NORMAL.shortcutControlSelector then
+        return false
+    end
+    for _, slot in ipairs(SHORTCUT_SLOTS) do
+        if not JokCombatR2Shortcut.validSlotValue(ReadByte(slot.address)) then
+            return false
+        end
+    end
+
+    local journal = ADDRESS.magicRecovery
+    WriteLong(journal, 0)
+    WriteByte(journal + 0x08, JokCombatR2Shortcut.recoveryMarker)
+    WriteByte(journal + 0x09, ReadByte(ADDRESS.nativeShortcutTriangle))
+    WriteByte(journal + 0x0A, ReadByte(ADDRESS.nativeShortcutSquare))
+    WriteByte(journal + 0x0B, ReadByte(ADDRESS.nativeShortcutCross))
+    WriteByte(journal + 0x0C, ReadByte(ADDRESS.l2ControlMap))
+    WriteByte(journal + 0x0D, ReadByte(ADDRESS.shortcutControlSelector))
+    -- Both control-map bytes stay stock. The native edge bridge is gated by the
+    -- C4 journal marker published above and never borrows L2's selector.
+    WriteByte(journal + 0x0E, NORMAL.l2ControlMap)
+    WriteByte(journal + 0x0F, NORMAL.shortcutControlSelector)
+    WriteByte(journal + 0x10, 0x53)
+    WriteLong(journal, JokCombatR2Shortcut.recoverySignature)
+    return JokCombatR2Shortcut.journalValid()
+end
+
+function JokCombatR2Shortcut.restore(reason, quiet)
+    local journal = ADDRESS.magicRecovery
+    local ownedJournal = JokCombatR2Shortcut.journalValid()
+    local restored = 0
+    if ownedJournal then
+        local l2Owned = ReadByte(ADDRESS.l2ControlMap)
+            == ReadByte(journal + 0x0E)
+        local selectorCurrent = ReadByte(ADDRESS.shortcutControlSelector)
+        local selectorOriginal = ReadByte(journal + 0x0D)
+        local selectorExpected = ReadByte(journal + 0x0F)
+        -- KH1 may reset the transient selector to its original value before
+        -- Lua observes the R2 release. Both states are still ours to unwind.
+        local selectorOwned = selectorCurrent == selectorExpected
+            or (selectorExpected == 0x20
+                and selectorCurrent == selectorOriginal)
+        if l2Owned and selectorOwned then
+            WriteByte(ADDRESS.nativeShortcutTriangle, ReadByte(journal + 0x09))
+            WriteByte(ADDRESS.nativeShortcutSquare, ReadByte(journal + 0x0A))
+            WriteByte(ADDRESS.nativeShortcutCross, ReadByte(journal + 0x0B))
+            restored = restored + 3
+        else
+            ConsolePrint("[JokCombat:r2-magic:fault] Shortcut ownership "
+                .. "changed while R2 was held; native slots left untouched.")
+        end
+        if l2Owned then
+            WriteByte(ADDRESS.l2ControlMap, ReadByte(journal + 0x0C))
+            restored = restored + 1
+        end
+        if selectorOwned then
+            WriteByte(ADDRESS.shortcutControlSelector,
+                ReadByte(journal + 0x0D))
+            restored = restored + 1
+        end
+        JokCombatR2Shortcut.clearJournal()
+    end
+    local wasActive = JokCombatR2Shortcut.active or ownedJournal
+    JokCombatR2Shortcut.active = false
+    if wasActive and not quiet then
+        log(string.format("R2 native magic page restored (%s; %d fields).",
+            reason or "modifier released", restored))
+    end
+    return ownedJournal
+end
+
+function JokCombatR2Shortcut.recoverStale()
+    if ReadLong(ADDRESS.magicRecovery)
+            ~= JokCombatR2Shortcut.recoverySignature then
+        return false
+    end
+    if not JokCombatR2Shortcut.journalValid() then
+        JokCombatR2Shortcut.clearJournal()
+        ConsolePrint("[JokCombat:r2-magic:fault] invalid recovery journal "
+            .. "cleared without touching Shortcut slots.")
+        return false
+    end
+    JokCombatR2Shortcut.restore("F1/reload recovery")
+    return true
+end
+
+function JokCombatR2Shortcut.initialize()
+    JokCombatR2Shortcut.active = false
+    JokCombatR2Shortcut.failedKey = nil
+    if not JokCombatR2Shortcut.addressResolved then return false end
+    JokCombatR2Shortcut.recoverStale()
+    if ReadLong(ADDRESS.magicRecovery) ~= 0
+        or ReadByte(ADDRESS.l2ControlMap) ~= NORMAL.l2ControlMap
+        or ReadByte(ADDRESS.shortcutControlSelector)
+            ~= NORMAL.shortcutControlSelector then
+        return false
+    end
+    for _, slot in ipairs(SHORTCUT_SLOTS) do
+        if not JokCombatR2Shortcut.validSlotValue(ReadByte(slot.address)) then
+            return false
+        end
+    end
+    return true
+end
+
+function JokCombatR2Shortcut.syncPage()
+    if not JokCombatR2Shortcut.active
+        or not JokCombatR2Shortcut.journalValid()
+        or ReadByte(ADDRESS.l2ControlMap) ~= NORMAL.l2ControlMap
+        or ReadByte(ADDRESS.shortcutControlSelector)
+            ~= NORMAL.shortcutControlSelector then
+        return false
+    end
+    for _, slot in ipairs(SHORTCUT_SLOTS) do
+        local magic = JokCombatR2Shortcut.byId[loadout[slot.id]]
+            or JokCombatR2Shortcut.byId.none
+        if ReadByte(slot.address) ~= magic.index then
+            WriteByte(slot.address, magic.index)
+        end
+    end
+    return true
+end
+
+function JokCombatR2Shortcut.arm()
+    if JokCombatR2Shortcut.active then
+        return JokCombatR2Shortcut.syncPage()
+    end
+
+    -- A missing configuration is initialized only now, while the loaded save's
+    -- learned-magic table and untouched L1 slots are both available. This
+    -- guarantees that page two starts useful instead of cloning page one.
+    if JokCombatR2Shortcut.needsInitialSeed then
+        resetLoadoutToDefaults()
+        if saveActionLoadout() then
+            log(string.format(
+                "R2 magic defaults seeded away from L1: Y=%s X=%s A=%s.",
+                JokCombatR2Shortcut.byId[loadout.r2_triangle].name,
+                JokCombatR2Shortcut.byId[loadout.r2_square].name,
+                JokCombatR2Shortcut.byId[loadout.r2_cross].name))
+        end
+    end
+    if not JokCombatR2Shortcut.publishJournal() then return false end
+
+    for _, slot in ipairs(SHORTCUT_SLOTS) do
+        local magic = JokCombatR2Shortcut.byId[loadout[slot.id]]
+            or JokCombatR2Shortcut.byId.none
+        WriteByte(slot.address, magic.index)
+    end
+    JokCombatR2Shortcut.active = true
+    if not JokCombatR2Shortcut.syncPage() then
+        JokCombatR2Shortcut.restore("arm verification failed")
+        return false
+    end
+    JokCombatR2Shortcut.failedKey = nil
+    log("R2 second magic page armed: three native Shortcut slots swapped; "
+        .. "edge bridge waiting for KH1's next controller sample.")
+    return true
+end
+
+function JokCombatR2Shortcut.update(player, buttons, nativeLimitActive)
+    local exactR2 = (buttons & SHOULDER_MASK) == BUTTON.R2
+        and (buttons & (BUTTON.L1 | BUTTON.R1)) == 0
+    local eligible = CONFIG.r2MagicShortcuts
+        and JokCombatR2Shortcut.addressResolved
+        and JokCombatR2NativeBridge.ensure() and exactR2
+        and player ~= nil and not nativeLimitActive
+    if not eligible then
+        if JokCombatR2Shortcut.active then
+            JokCombatR2Shortcut.restore("R2 context ended", true)
+        end
+        return false
+    end
+
+    if JokCombatR2Shortcut.arm() then return true end
+    JokCombatR2Shortcut.restore("native Shortcut page failed", true)
+    local key = string.format("%02X:%02X:%016X",
+        ReadByte(ADDRESS.l2ControlMap),
+        ReadByte(ADDRESS.shortcutControlSelector),
+        ReadLong(ADDRESS.magicRecovery))
+    if JokCombatR2Shortcut.failedKey ~= key then
+        JokCombatR2Shortcut.failedKey = key
+        log("R2 second magic page unavailable: native Shortcut slots or "
+            .. "signed edge bridge were not accepted.")
+    end
+    return false
 end
 
 -- Four active Limits use KH1's real Reaction dispatcher. The adapter publishes
@@ -6369,103 +6987,6 @@ function JokCombatBranch.update(player, buttons, crossPressed,
     return consumed
 end
 
-local function updateCrossActionPrime(player, buttons)
-    local l2Held = (buttons & BUTTON.L2) ~= 0
-    local r2Held = (buttons & BUTTON.R2) ~= 0
-    local crossHeld = (buttons & BUTTON.CROSS) ~= 0
-    local otherFaceHeld = (buttons & (BUTTON.TRIANGLE
-        | BUTTON.CIRCLE | BUTTON.SQUARE)) ~= 0
-    local slot = nil
-    if r2Held and not l2Held then
-        slot = ACTION_SLOT_BY_ID.r2_cross
-    end
-    local action = slot ~= nil
-        and ACTION_BY_ID[loadout[slot.id]] or nil
-    local desiredPrime = action ~= nil and action.animation ~= nil
-        and actionPrimeKind(slot, action) or nil
-
-    local currentPrimeKind = nil
-    if isActionPrimeKind(groundRouteKind) then
-        currentPrimeKind = groundRouteKind
-    elseif isActionPrimeKind(airRouteKind) then
-        currentPrimeKind = airRouteKind
-    end
-
-    local currentPrimeMatchesPlayer = currentPrimeKind == nil
-        or (player.airborne and isActionPrimeKind(airRouteKind))
-        or (not player.airborne and isActionPrimeKind(groundRouteKind))
-    if not currentPrimeMatchesPlayer then
-        restoreActionRoutes()
-        currentPrimeKind = nil
-        log("Action Ability X prime moved to the current air/ground context.")
-    end
-
-    local canStayPrimed = CONFIG.actionLoadout and desiredPrime ~= nil
-        and action.recordAvailable == true
-        and actionMatchesContext(action, player)
-        and player.animation ~= action.animation
-        and HUD.nativeRootSelectionAvailable()
-        and not otherFaceHeld
-        and transitionKind == nil and deferredLinkKind == nil
-
-    if currentPrimeKind ~= nil then
-        if currentPrimeKind == desiredPrime
-            and action ~= nil and player.animation == action.animation then
-            clearActionPrimeCombo(false)
-            physicalPrimeAcceptedActionId = action.id
-            restoreActionRoutes(false)
-            return false
-        end
-        if currentPrimeKind ~= desiredPrime or not canStayPrimed then
-            restoreActionRoutes()
-            log("Action Ability X prime cancelled by state change.")
-            return false
-        end
-        if not primeActionComboState(action, currentPrimeKind, player) then
-            restoreActionRoutes()
-            log("Action Ability X prime cancelled: combo state unavailable.")
-            return false
-        end
-        if player.airborne then
-            airRouteFrames = math.max(
-                airRouteFrames, CONFIG.actionRequestFrames)
-        else
-            groundRouteFrames = math.max(
-                groundRouteFrames, CONFIG.actionRequestFrames)
-        end
-        return true
-    end
-
-    -- The physical X route must exist one frame before X reaches KH1's action
-    -- dispatcher. Pressing modifier and X together therefore stays native and
-    -- the log asks the player to hold the modifier first.
-    if not canStayPrimed or crossHeld
-        or groundRouteKind ~= nil or airRouteKind ~= nil then
-        if desiredPrime == nil then clearActionPrimeCombo(true) end
-        return false
-    end
-
-    if not primeActionComboState(action, desiredPrime, player) then
-        log(action.name .. " prime ignored: combo state unavailable.")
-        return false
-    end
-    local routeArmed = beginActionRoute(desiredPrime, action, player)
-    if routeArmed then
-        if player.airborne then
-            airRouteFrames = math.max(
-                airRouteFrames, CONFIG.actionRequestFrames)
-        else
-            groundRouteFrames = math.max(
-                groundRouteFrames, CONFIG.actionRequestFrames)
-        end
-        log(string.format("%s primed by %s; waiting for X.",
-            action.name, slotModifierName(slot)))
-    else
-        clearActionPrimeCombo(true)
-    end
-    return routeArmed
-end
-
 local function updateLoadoutMenuRouting(controlsOwned, dpadOwned)
     local passMask = HUD.nativeDpadPassMask or 0
     local upMap = dpadOwned and (passMask & DPAD.UP) == 0
@@ -6499,17 +7020,13 @@ local function updateLoadoutMenuRouting(controlsOwned, dpadOwned)
 end
 
 local function updateModifierFaceRouting(buttons)
-    local l2Held = (buttons & BUTTON.L2) ~= 0
-    local r2Held = (buttons & BUTTON.R2) ~= 0
-    local actionModifierHeld = r2Held and not l2Held
     local reactionActive = not HUD.nativeRootSelectionAvailable()
         or (JokCombatNativeLimit ~= nil
             and JokCombatNativeLimit.selectorOwned())
     local branchOwnsTriangle = CONFIG.branchCombos
         and JokCombatBranch ~= nil and JokCombatBranch.active
     return setByte("triangleControlMap", ADDRESS.triangleControlMap,
-        (actionModifierHeld or branchOwnsTriangle)
-            and not reactionActive and 0xFE
+        branchOwnsTriangle and not reactionActive and 0xFE
             or NORMAL.triangleControlMap,
         { 0xFF, 0xFE })
 end
@@ -6562,11 +7079,12 @@ local function updateDefenseRouting(buttons, guardAvailable, dodgeActive,
     local r2Held = (buttons & BUTTON.R2) ~= 0
     local circleHeld = (buttons & BUTTON.CIRCLE) ~= 0
     local squareHeld = (buttons & BUTTON.SQUARE) ~= 0
-    local actionModifierHeld = l2Held or r2Held
+    local actionModifierHeld = l2Held
     local playerAirborne = player ~= nil and player.airborne
-    -- L1/R1 own KH1's native magic shortcut layer. Fixed Dodge must leave
-    -- Square completely vanilla while either shortcut modifier is held.
+    -- L1/R1 own the normal page; exact R2 owns JokCombat's second native page.
+    -- Fixed Dodge must leave Square completely vanilla for either one.
     local nativeShortcutHeld = (buttons & (BUTTON.L1 | BUTTON.R1)) ~= 0
+        or (r2Held and not l2Held)
     local anyDodgeModifierHeld = actionModifierHeld or nativeShortcutHeld
     local guardChord = l2Held and not r2Held and circleHeld
     local nativeSuperglideOwnsSquare =
@@ -6586,10 +7104,6 @@ local function updateDefenseRouting(buttons, guardAvailable, dodgeActive,
         if circleHeld then
             squareMap = guardAvailable and 0x05 or 0xFE
         end
-    elseif r2Held and not l2Held then
-        -- R2+Circle and R2+Square are configurable Action Ability slots.
-        circleMap = 0xFE
-        squareMap = 0xFE
     elseif JokCombatAirJump ~= nil
         and JokCombatAirJump.ownsCircle ~= nil
         and JokCombatAirJump.ownsCircle(buttons) then
@@ -6669,7 +7183,7 @@ function _OnInit()
     HUD.directEditGroup = nil
     HUD.directEditActive = false
     HUD.directEditDirty = false
-    HUD.directEditIndex = { l2 = 1, r2 = 1, dual = 1 }
+    HUD.directEditIndex = { r2 = 1 }
     HUD.dpadReleaseLock = false
     HUD.controlChordHeld = false
     HUD.controlChordUsed = false
@@ -6710,10 +7224,21 @@ function _OnInit()
         return
     end
 
+    -- Resolve the live Shortcut object exactly as Shortcut Sets does. All
+    -- recovery and page operations below must use these addresses; the former
+    -- fixed values were 0x10 bytes early and could never affect the visible
+    -- native page on this Steam executable.
+    local nativeShortcutAddressesReady =
+        JokCombatR2Shortcut.resolveNativeAddresses()
+
     -- Recover before any later validation can return early. Every field is
     -- restored only if it still contains JokCombat's owned patched value.
+    JokCombatR2NativeBridge.restore("reload recovery", true)
+    JokCombatR2Shortcut.recoverStale()
     LegacyMagicRecovery.recoverStale()
     local nativeLimitReadyCount = JokCombatNativeLimit.initialize()
+    local r2MagicReady = nativeShortcutAddressesReady
+        and JokCombatR2Shortcut.initialize()
 
     local staleSyntheticAttack = ReadInt(ADDRESS.triggerMenu1) ~= 0
         or ReadInt(ADDRESS.triggerMenu2) ~= 0
@@ -6762,7 +7287,8 @@ function _OnInit()
         ADDRESS.shortcutControlSelector, 0xFF,
         { 0xFF, CONTROL_INDEX.TRIANGLE, 0x20 }) and valid
     valid = normalizeByte("l2ControlMap", ADDRESS.l2ControlMap,
-        0xFF, { 0xFF, CONTROL_INDEX.TRIANGLE }) and valid
+        0xFF, { 0xFF, 0x01, CONTROL_INDEX.TRIANGLE,
+            0x21 }) and valid
     valid = normalizeByte("triangleControlMap", ADDRESS.triangleControlMap,
         0xFF, { 0xFF, 0xFE }) and valid
     valid = normalizeByte("circleControlMap", ADDRESS.circleControlMap,
@@ -6772,6 +7298,7 @@ function _OnInit()
     valid = normalizeByte("squareControlMap", ADDRESS.squareControlMap,
         0xFF, { 0xFF, 0x05, 0xFE }) and valid
     if not valid then return end
+    r2MagicReady = JokCombatR2NativeBridge.initialize() and r2MagicReady
 
     -- Recover a stale Kinetic Step byte-only route before the generic aerial
     -- normalizer sees its otherwise unknown 0x0F/0x09 heads.
@@ -6816,11 +7343,10 @@ function _OnInit()
     log("successful-Guard Counterattack detector "
         .. (guardCounterReady and "ready: read-only 0x10 signal -> A."
             or "disabled."))
-    log("direct Action Loadout ready: hold exact R2; "
-        .. "D-pad Up/Down selects, Left/Right changes, release saves.")
-    log("native editor cursor delegation ready: Up/Down uses KH1's complete "
-        .. "native transition; Left/Right remains isolated for editing.")
-    log("native Command Menu overlay + Combo Guide ready: up to four native rows; "
+    log("R2 native magic page " .. (r2MagicReady and "ready" or "disabled")
+        .. ": Y/X/A cast through KH1; D-pad Up/Down selects, "
+        .. "Left/Right changes, release saves; B remains jump.")
+    log("native Command Menu Combo Guide ready: up to four native rows; "
         .. "release L1+R1+L2+R2 to toggle it; add D-pad Down to reset "
         .. "defaults; overlay is currently "
         .. (HUD.enabled and "on." or "off."))
@@ -6917,6 +7443,8 @@ function _OnFrame()
 
     local buttons = ReadByte(ADDRESS.rawButtons)
     local dpad = ReadByte(ADDRESS.dpadButtons)
+    local r2MagicActive = JokCombatR2Shortcut.update(
+        player, buttons, JokCombatNativeLimit.activeState(player))
     JokCombatNativeLimit.update(player, buttons)
     local nativeLimitActive = JokCombatNativeLimit.activeState(player)
     JokCombatAttackSpeed.observe(player, nativeLimitActive)
@@ -6927,6 +7455,7 @@ function _OnFrame()
         HUD.updateOverlayControls(buttons, dpad)
     local directDpadOwned = HUD.updateDirectEditor(
         buttons, dpad, player, controlConsumed)
+    if r2MagicActive then JokCombatR2Shortcut.syncPage() end
     local dpadOwned = controlDpadOwned or directDpadOwned
         or HUD.dpadReleaseLock
     local configurationInputActive = dpadOwned and dpad ~= 0
@@ -7040,14 +7569,17 @@ function _OnFrame()
 
     local l2Held = (buttons & BUTTON.L2) ~= 0
     local r2Held = (buttons & BUTTON.R2) ~= 0
-    local nativeShortcutHeld = (buttons & (BUTTON.L1 | BUTTON.R1)) ~= 0
+    local standardShortcutHeld =
+        (buttons & (BUTTON.L1 | BUTTON.R1)) ~= 0
+    local r2ShortcutHeld = CONFIG.r2MagicShortcuts
+        and r2Held and not l2Held and not standardShortcutHeld
+    local nativeShortcutHeld = standardShortcutHeld or r2ShortcutHeld
     local circlePressed = pressStarted(buttons, BUTTON.CIRCLE)
     local crossPressed = pressStarted(buttons, BUTTON.CROSS)
     local squarePressed = pressStarted(buttons, BUTTON.SQUARE)
     local trianglePressed = pressStarted(buttons, BUTTON.TRIANGLE)
     local guardPressed = not r2Held
         and chordStarted(buttons, BUTTON.L2, BUTTON.CIRCLE)
-    updateCrossActionPrime(player, buttons)
     local cancelWindowOpen = isCancelableAttack(player)
     local actionConsumed = false
     local chainWasArmed = groundChainFrames > 0
@@ -7057,7 +7589,7 @@ function _OnFrame()
             and player.control == 0x03 and player.animation <= 0x07)
 
     if circlePressed and not player.airborne
-        and not l2Held and not r2Held and not nativeShortcutHeld then
+        and not l2Held and not standardShortcutHeld then
         JokCombatAirJump.noteGroundJump(player)
     end
 
@@ -7076,8 +7608,7 @@ function _OnFrame()
         clearDeferredAttackCommand()
         restoreActionRoutes()
         actionConsumed = true
-    elseif circlePressed and not l2Held and not r2Held
-        and not nativeShortcutHeld then
+    elseif circlePressed and not l2Held and not standardShortcutHeld then
         if player.airborne and not JokCombatAirJump.releaseRequired then
             -- The second jump is the only universal offensive jump cancel. It
             -- closes the current Musou family first, then Kinetic Step owns
@@ -7151,47 +7682,14 @@ function _OnFrame()
             player, buttons, crossPressed, trianglePressed)
     end
 
-    -- Exact R2 selects one of four configurable slots. X uses
-    -- the proven pre-armed physical route; the other face buttons are suppressed
-    -- while their modifier is held and dispatch a delayed synthetic Attack edge.
-    if not actionConsumed and CONFIG.actionLoadout
-        and r2Held and not l2Held then
-        local selectedSlot = nil
-        for _, slot in ipairs(ACTION_SLOTS) do
-            if slotModifierMatches(buttons, slot)
-                and pressStarted(buttons, slot.face) then
-                selectedSlot = slot
-                break
-            end
-        end
-
-        if selectedSlot ~= nil then
-            local modifierWasHeld = slotModifierMatches(
-                lastButtons, selectedSlot)
-            local action = ACTION_BY_ID[loadout[selectedSlot.id]]
-                or ACTION_BY_ID.none
-            local isPhysicalCross = selectedSlot.face == BUTTON.CROSS
-
-            if not modifierWasHeld then
-                log(selectedSlot.label
-                    .. " ignored: hold the modifier for one frame first.")
-                -- X can safely fall through to its native combo. The other face
-                -- buttons may already have reached KH1 on this first shoulder
-                -- frame, so do not dispatch a second action from the script.
-                actionConsumed = not isPhysicalCross
-            elseif isPhysicalCross then
-                if actionMatchesContext(action, player) then
-                    actionConsumed = requestActionAbility(
-                        player, selectedSlot, action, true)
-                else
-                    -- None or a ground/air mismatch deliberately preserves the
-                    -- normal X combo rather than leaving the player inert.
-                    actionConsumed = false
-                end
-            else
-                actionConsumed = true
-                requestActionAbility(player, selectedSlot, action, false)
-            end
+    -- Once the second native Shortcut page is active, Y/X/A belong wholly to
+    -- KH1. Mark their edge consumed only for JokCombat's later attack/finisher
+    -- branches; the physical input remains untouched for the native dispatcher.
+    if not actionConsumed and r2ShortcutHeld
+        and (trianglePressed or squarePressed or crossPressed) then
+        actionConsumed = true
+        if not r2MagicActive then
+            log("R2 magic input ignored: native Shortcut page is unavailable.")
         end
     end
 

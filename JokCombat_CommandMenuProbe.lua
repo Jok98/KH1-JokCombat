@@ -8,7 +8,7 @@ LUAGUI_DESC = "Read-only Steam probe for KH1's native four-row Command Menu."
 
 local EXPECTED_GAME_ID = 0xAF71841E
 local FINGERPRINT = 0x7265737563697065 -- "epicures", little endian
-local VERSION = "v0.1.2"
+local VERSION = "v0.1.5"
 local SETTLE_FRAMES = 18
 local TEXT_RECHECK_FRAMES = 300
 local HEARTBEAT_FRAMES = 900
@@ -17,6 +17,12 @@ local ADDRESS = {
     fingerprint = 0x3B2271,
     dpadButtons = 0x22C9300,
     rawButtons = 0x22C9301,
+    commandButtons = 0x23407B5,
+    l2ControlMap = 0x22C9340,
+    shortcutControlSelector = 0x22C9342,
+    nativeShortcutTriangle = 0x2DE9BA4,
+    nativeShortcutSquare = 0x2DE9BA5,
+    nativeShortcutCross = 0x2DE9BA6,
 
     -- Steam Global ports of Critical Mix's currentCommandMenu and
     -- currentCommandMenuSlot globals.
@@ -78,6 +84,7 @@ local canRun = false
 local frame = 0
 local lastInputRaw = -1
 local lastInputDpad = -1
+local lastInputCommand = -1
 local lastStateKey = nil
 local lastStableSnapshots = nil
 local pendingStateKey = nil
@@ -154,6 +161,12 @@ local function readMenuState()
         lastSlot = ReadByte(ADDRESS.lastSlot),
         visibility = u32(ReadInt(ADDRESS.menuVisibility)),
         raw = ReadByte(ADDRESS.rawButtons),
+        command = ReadByte(ADDRESS.commandButtons),
+        l2Map = ReadByte(ADDRESS.l2ControlMap),
+        shortcutSelector = ReadByte(ADDRESS.shortcutControlSelector),
+        shortcutY = ReadByte(ADDRESS.nativeShortcutTriangle),
+        shortcutX = ReadByte(ADDRESS.nativeShortcutSquare),
+        shortcutA = ReadByte(ADDRESS.nativeShortcutCross),
         dpad = ReadByte(ADDRESS.dpadButtons),
         upMap = ReadByte(ADDRESS.dpadUpControlMap),
         rightMap = ReadByte(ADDRESS.dpadRightControlMap),
@@ -163,16 +176,20 @@ local function readMenuState()
 end
 
 local function keyFor(state)
-    return string.format("%02X:%02X:%02X:%02X:%02X:%02X:%02X:%02X",
+    return string.format(
+        "%02X:%02X:%02X:%02X:%02X:%02X:%02X:%02X:%02X:%02X:%02X:%02X:%02X",
         state.menu, state.visualSlot, state.slot, state.lastSlot,
-        state.upMap, state.rightMap, state.downMap, state.leftMap)
+        state.upMap, state.rightMap, state.downMap, state.leftMap,
+        state.l2Map, state.shortcutSelector,
+        state.shortcutY, state.shortcutX, state.shortcutA)
 end
 
 local function logMenuState(state, reason)
     ConsolePrint(string.format(
         "[JokCombat:cmdprobe:%s] menu=%d(%s) visual=%d slot=%d last=%d "
-        .. "visibility=0x%08X raw=0x%02X dpad=0x%02X "
-        .. "maps=%02X/%02X/%02X/%02X",
+        .. "visibility=0x%08X raw=0x%02X command=0x%02X dpad=0x%02X "
+        .. "maps=%02X/%02X/%02X/%02X carrier=%02X/%02X "
+        .. "shortcuts=%02X/%02X/%02X",
         reason,
         state.menu,
         menuName(state.menu),
@@ -181,11 +198,17 @@ local function logMenuState(state, reason)
         state.lastSlot,
         state.visibility,
         state.raw,
+        state.command,
         state.dpad,
         state.upMap,
         state.rightMap,
         state.downMap,
-        state.leftMap))
+        state.leftMap,
+        state.l2Map,
+        state.shortcutSelector,
+        state.shortcutY,
+        state.shortcutX,
+        state.shortcutA))
 end
 
 local function validateRows()
@@ -374,6 +397,7 @@ function _OnInit()
     frame = 0
     lastInputRaw = -1
     lastInputDpad = -1
+    lastInputCommand = -1
     lastStateKey = nil
     lastStableSnapshots = nil
     pendingStateKey = nil
@@ -420,12 +444,17 @@ function _OnFrame()
 
     local state = readMenuState()
     local stateKey = keyFor(state)
-    if state.raw ~= lastInputRaw or state.dpad ~= lastInputDpad then
+    if state.raw ~= lastInputRaw or state.dpad ~= lastInputDpad
+        or state.command ~= lastInputCommand then
         ConsolePrint(string.format(
-            "[JokCombat:cmdprobe:input] raw=0x%02X(%s) dpad=0x%02X(%s) "
-            .. "menu=%d visual=%d slot=%d maps=%02X/%02X/%02X/%02X",
+            "[JokCombat:cmdprobe:input] raw=0x%02X(%s) "
+            .. "command=0x%02X(%s) dpad=0x%02X(%s) "
+            .. "menu=%d visual=%d slot=%d maps=%02X/%02X/%02X/%02X "
+            .. "shortcuts=%02X/%02X/%02X",
             state.raw,
             namesFor(state.raw, BUTTONS),
+            state.command,
+            namesFor(state.command, BUTTONS),
             state.dpad,
             namesFor(state.dpad, DPAD),
             state.menu,
@@ -434,9 +463,13 @@ function _OnFrame()
             state.upMap,
             state.rightMap,
             state.downMap,
-            state.leftMap))
+            state.leftMap,
+            state.shortcutY,
+            state.shortcutX,
+            state.shortcutA))
         lastInputRaw = state.raw
         lastInputDpad = state.dpad
+        lastInputCommand = state.command
     end
 
     if stateKey ~= lastStateKey then
