@@ -589,7 +589,7 @@ def assert_intentional_air_entry() -> None:
         "function JokCombatBranch.update(player, buttons, crossPressed,"
     )
     branch_end = SOURCE.index(
-        "local function updateCrossActionPrime", branch_start
+        "local function updateLoadoutMenuRouting", branch_start
     )
     branch = SOURCE[branch_start:branch_end]
     recovery = branch.index(
@@ -665,7 +665,7 @@ def assert_integration() -> None:
         assert guard in SOURCE, f"missing integration guard: {guard}"
 
     branch_start = SOURCE.index("function JokCombatBranch.update")
-    branch_end = SOURCE.index("local function updateCrossActionPrime", branch_start)
+    branch_end = SOURCE.index("local function updateLoadoutMenuRouting", branch_start)
     branch_update = SOURCE[branch_start:branch_end]
     selector_gate = branch_update.index("JokCombatNativeLimit.selectorOwned()")
     reaction_gate = branch_update.index(
@@ -719,10 +719,10 @@ def assert_integration() -> None:
     ):
         assert retired not in SOURCE, f"retired C4 state remains: {retired}"
 
-    slot_start = SOURCE.index("local ACTION_SLOTS = {")
-    slot_end = SOURCE.index("local ACTION_SLOT_BY_ID = {}", slot_start)
+    slot_start = SOURCE.index("local SHORTCUT_SLOTS = {")
+    slot_end = SOURCE.index("local SHORTCUT_SLOT_BY_ID = {}", slot_start)
     slots = set(re.findall(r'id = "([^"]+)"', SOURCE[slot_start:slot_end]))
-    assert slots == {"r2_cross", "r2_triangle", "r2_circle", "r2_square"}
+    assert slots == {"r2_cross", "r2_triangle", "r2_square"}
 
 
 def main() -> None:
