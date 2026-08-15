@@ -2,11 +2,11 @@ LUAGUI_NAME = "JokCombat"
 LUAGUI_AUTH = "Jok; Critical Mix reference by Xendra / KSX"
 LUAGUI_DESC = "Native Cross combo, Musou-style Y Action/Limit families, one-cycle double jump, configurable loadout and universal defense."
 
--- JokCombat v2.0.0 for the current Steam Global executable.
+-- JokCombat v2.1.0 for the current Steam Global executable.
 -- Critical Mix was used as an authorized technical reference. This script is
 -- intentionally limited to combat/input state and does not persist changes to
 -- story flags, rewards, inventory, AP, levels, worlds, chests, or synthesis.
--- All five Musou combo Limits are exposed through KH1's native Reaction/Limit
+-- Four Musou combo Limits are exposed through KH1's native Reaction/Limit
 -- dispatcher. Their MP state and dispatcher bytes are borrowed only while the
 -- selected combo Limit is owned, then restored conditionally before normal
 -- play resumes.
@@ -21,6 +21,12 @@ local CONFIG = {
     -- remains below only as a disabled rollback path.
     nativeNormalAttacks = true,
 
+    -- KH1's native Attack selector enables either Aerial Sweep D6 or the
+    -- ordinary aerial hit CD when a grounded target vector crosses its height
+    -- threshold. Bypass only that high-target branch while Sora is grounded;
+    -- the complete native aerial selector is restored after a real jump.
+    intentionalAirEntry = true,
+
     -- Give only KH1's seven native physical combo animations a light speed
     -- increase. Action Abilities, Limits, magic, defense, jumps and locomotion
     -- retain their authored playback speed. The controller snapshots the live
@@ -29,17 +35,26 @@ local CONFIG = {
     normalAttackSpeedMultiplier = 1.15,
 
     -- Modifier-free Triangle selects the Musou-style Strong/C2/C3/C4/C5
-    -- family. Eight ground Action Abilities and all five native Limits form
+    -- family. Eight ground Action Abilities and four native Limits form
     -- five standard role-specific branches; Cross after a named move closes
-    -- the family and remains a physical continuation. C4 is now an ordinary
-    -- Slapshot -> Blitz -> Strike Raid route with no jump/landing state machine.
+    -- the family and remains a physical continuation. The pure Y family owns
+    -- Slapshot -> Vortex -> Blitz -> Zantetsuken -> Ars Arcanum; C4 opens
+    -- Strike Raid directly and C5 owns Gravity Break -> Ragnarok.
     -- The failed reverse-magic adapter is retired: normal menu/R1 magic remains
-    -- entirely native. All five unique Limit leaves use the validated native
-    -- Reaction dispatcher; no Limit animation, hitbox or follow-up is imitated.
+    -- entirely native. The three Limit leaves and direct C4 root use the
+    -- validated native Reaction dispatcher; no Limit animation, hitbox or
+    -- follow-up is imitated. Trinity Limit is excluded because its native
+    -- sequence owns Donald and Goofy.
     branchCombos = true,
     branchActionAbilities = true,
     branchLimits = true,
     branchInputTimeoutFrames = 150,
+    -- A completed terminal special preserves only its logical family depth.
+    -- The next real ground A must enter a native C8-CA attack before that
+    -- virtual depth may select the following Y family. No KH1 combo counter is
+    -- written, and C5 remains terminal.
+    branchDepthCarryFrames = 360,
+    branchDepthConfirmFrames = 30,
     -- A neutral Y is shared with Talk/Examine/Save. Leave its physical edge
     -- native, then wait two released frames before opening Strong so KH1 can
     -- publish a contextual Reaction first. A following A always cancels this
@@ -142,7 +157,7 @@ local CONFIG = {
 
 local EXPECTED_GAME_ID = 0xAF71841E
 local FINGERPRINT = 0x7265737563697065 -- "epicures", little endian
-local VERSION = "v2.0.0"
+local VERSION = "v2.1.0"
 
 local ADDRESS = {
     fingerprint = 0x3B2271,
@@ -193,8 +208,8 @@ local ADDRESS = {
     -- shift of +0x47D0. Their exact bytes were verified against the supported
     -- executable before this adapter was enabled. The four ordinary Limit
     -- costs are contiguous shorts in the high data tables and use the separately
-    -- validated +0x3980 shift. Trinity Limit consumes party MP directly, so its
-    -- three runtime MP bytes are snapshotted instead of inventing a cost record.
+    -- validated +0x3980 shift. The old Trinity adapter remains recoverable from
+    -- its journal but is no longer exposed by the active combo map.
     sonicBladeCost = 0x2D22E8C,
     arsArcanumCost = 0x2D22E8E,
     strikeRaidCost = 0x2D22E90,
@@ -270,6 +285,11 @@ local ADDRESS = {
     -- v0.9.6 never arms 0x73; initialization still restores a stale older build
     -- to vanilla 0x74 before enabling the native-air-only policy.
     airGroundActionBranch = 0x2A376D,   -- 74 normal, 73 bridged
+    -- Native high-target Attack selector. At this point candidate 0 is D6
+    -- (Aerial Sweep) and candidate 1 is CD (ordinary aerial hit). The signed
+    -- runtime patch jumps to the existing ground-candidate scan at 0x2A71DB;
+    -- it is installed only while Sora is genuinely grounded.
+    groundAirTargetSelector = 0x2A70D5,
     guardAvailabilityBranch = 0x2A7BFD, -- 74 normal, 72 enabled, EB choose roll
     guardSelectionBranch = 0x2A7C01,    -- 74 normal, EB choose guard
     dodgeAvailabilityBranch = 0x2A7C1F, -- 84 normal, 82 enabled
@@ -2112,6 +2132,10 @@ local function restoreAllPatches()
     clearSyntheticAttackCommand(false)
     restoreActionRoutes()
     restoreNativeFinisherSelection()
+    if JokCombatGroundIntent ~= nil
+        and JokCombatGroundIntent.restore ~= nil then
+        JokCombatGroundIntent.restore("patch restore", true)
+    end
     HUD.hideOverlay()
     restoreIfKnown(ADDRESS.forceCircleBranch, NORMAL.forceCircle,
         { 0x74, 0x72 })
@@ -4241,12 +4265,11 @@ function LegacyMagicRecovery.recoverStale()
     return true
 end
 
--- All five Limits use KH1's real Reaction dispatcher. The adapter publishes
+-- Four active Limits use KH1's real Reaction dispatcher. The adapter publishes
 -- exactly one native Reaction ID before the final Y, then KH1 owns target
--- selection, movement, animation, VFX, hitboxes, damage and follow-ups. Four
--- ordinary Limits borrow their table cost at zero. Trinity Limit has no entry
--- in that table: its native all-party MP spend is neutralized from a journaled
--- runtime snapshot and is available only with Donald and Goofy in the party.
+-- selection, movement, animation, VFX, hitboxes, damage and follow-ups. Each
+-- active Limit borrows its table cost at zero. The retired Trinity entry is
+-- retained only so an F1 reload can restore a journal created by v2.0.0.
 --
 -- Keep the table global to avoid Lua 5.3's 200-local chunk limit. Every write
 -- is journaled first and restored only while the destination still contains
@@ -4258,22 +4281,23 @@ JokCombatNativeLimit = {
             reactionId = 0x004B, costAddress = ADDRESS.sonicBladeCost,
             context = "ground" },
         { id = "ars_arcanum", index = 2, tag = "ars",
-            name = "Ars Arcanum", path = "XXXXTT", prefix = "XXXXT",
+            name = "Ars Arcanum", path = "TTTTT", prefix = "TTTT",
             reactionId = 0x0057, costAddress = ADDRESS.arsArcanumCost,
             context = "ground" },
         { id = "strike_raid", index = 3, tag = "raid",
-            name = "Strike Raid", path = "XXXTTT", prefix = "XXXTT",
+            name = "Strike Raid", path = "XXXT", prefix = "XXX",
+            carryPath = "XXXT",
             reactionId = 0x005E, costAddress = ADDRESS.strikeRaidCost,
             context = "both" },
         { id = "ragnarok", index = 4, tag = "ragnarok",
-            name = "Ragnarok", path = "TTT", prefix = "TT",
+            name = "Ragnarok", path = "XXXXTT", prefix = "XXXXT",
             reactionId = 0x005A, costAddress = ADDRESS.ragnarokCost,
             context = "both" },
         { id = "trinity_limit", index = 5, tag = "trinity",
             name = "Trinity Limit", path = "XXTTT",
             prefix = "XXTT", reactionId = 0x0052,
             context = "ground", partyRequired = true,
-            restorePartyMP = true },
+            restorePartyMP = true, retired = true },
     },
     byId = {},
     byIndex = {},
@@ -4295,6 +4319,8 @@ JokCombatNativeLimit = {
     activationFrames = 0,
     activationObserved = false,
     selectorRestored = false,
+    continuationCrossPending = false,
+    continuationCancelled = false,
     -- A real final Y may arrive while the parent Action still owns Sora. KH1
     -- cannot consume that edge yet, so this bounded native input latch keeps
     -- the same request alive until the Reaction dispatcher accepts it.
@@ -4558,6 +4584,8 @@ function JokCombatNativeLimit.restore(reason, quiet)
     JokCombatNativeLimit.activationObserved = false
     JokCombatNativeLimit.selectorRestored = false
     JokCombatNativeLimit.finalInputPending = false
+    JokCombatNativeLimit.continuationCrossPending = false
+    JokCombatNativeLimit.continuationCancelled = false
     if wasArmed and not quiet then
         log(string.format(
             "[limit:%s] native selector restored (%s; %d owned fields).",
@@ -4636,6 +4664,8 @@ function JokCombatNativeLimit.initialize()
     JokCombatNativeLimit.activeId = nil
     JokCombatNativeLimit.armed = false
     JokCombatNativeLimit.finalInputPending = false
+    JokCombatNativeLimit.continuationCrossPending = false
+    JokCombatNativeLimit.continuationCancelled = false
     JokCombatNativeLimit.recoverLegacySonic()
     JokCombatNativeLimit.recoverStale()
     if ReadLong(ADDRESS.magicRecovery) ~= 0 then
@@ -4662,6 +4692,7 @@ function JokCombatNativeLimit.initialize()
             end
         end
         limit.available = CONFIG.branchLimits and valid
+            and limit.retired ~= true
         if limit.available then ready = ready + 1 end
     end
     return ready
@@ -4763,6 +4794,8 @@ function JokCombatNativeLimit.arm(limitId, player)
     JokCombatNativeLimit.activationFrames = 0
     JokCombatNativeLimit.activationObserved = false
     JokCombatNativeLimit.selectorRestored = false
+    JokCombatNativeLimit.continuationCrossPending = false
+    JokCombatNativeLimit.continuationCancelled = false
     log(string.format(
         "[limit:%s] %s accepted; native %s pre-armed %s. "
             .. "Final Y belongs to KH1.",
@@ -4851,10 +4884,12 @@ function JokCombatNativeLimit.update(player, buttons)
     local nonTriangleFace = BUTTON.CROSS | BUTTON.CIRCLE | BUTTON.SQUARE
     local nonTriangleStarted = (buttons & nonTriangleFace) ~= 0
         and (lastButtons & nonTriangleFace) == 0
-    local modifierStarted = (buttons & (BUTTON.L1 | BUTTON.R1
-            | BUTTON.L2 | BUTTON.R2)) ~= 0
-        and (lastButtons & (BUTTON.L1 | BUTTON.R1
-            | BUTTON.L2 | BUTTON.R2)) == 0
+    local modifierMask = BUTTON.L1 | BUTTON.R1 | BUTTON.L2 | BUTTON.R2
+    local modifierHeld = (buttons & modifierMask) ~= 0
+    local modifierStarted = modifierHeld
+        and (lastButtons & modifierMask) == 0
+    local crossStarted = (buttons & BUTTON.CROSS) ~= 0
+        and (lastButtons & BUTTON.CROSS) == 0
     if not JokCombatNativeLimit.activationObserved
         and (ReadByte(ADDRESS.world) == 0x09
             or nonTriangleStarted or modifierStarted) then
@@ -4870,6 +4905,10 @@ function JokCombatNativeLimit.update(player, buttons)
     end
 
     if limitActive then
+        -- A brief raw-state gap inside a multi-stage Limit is not completion.
+        -- Forget inputs seen during such a gap if KH1 resumes Limit ownership.
+        JokCombatNativeLimit.continuationCrossPending = false
+        JokCombatNativeLimit.continuationCancelled = false
         if not JokCombatNativeLimit.activationObserved then
             JokCombatNativeLimit.activationObserved = true
             JokCombatNativeLimit.frames =
@@ -4902,6 +4941,17 @@ function JokCombatNativeLimit.update(player, buttons)
     JokCombatNativeLimit.maintainFinalInputLatch()
 
     if JokCombatNativeLimit.activationObserved then
+        local otherFaceStarted = (buttons & (BUTTON.CIRCLE | BUTTON.SQUARE)) ~= 0
+            and (lastButtons & (BUTTON.CIRCLE | BUTTON.SQUARE)) == 0
+        if modifierStarted or triangleStarted or otherFaceStarted
+            or (crossStarted and modifierHeld) then
+            JokCombatNativeLimit.continuationCancelled = true
+            JokCombatNativeLimit.continuationCrossPending = false
+        elseif crossStarted and not player.airborne then
+            -- Leave the edge native. If KH1 accepts it before the exit grace
+            -- expires, the branch-depth controller will recognize C8-CA.
+            JokCombatNativeLimit.continuationCrossPending = true
+        end
         JokCombatNativeLimit.restorePartyMpSnapshot()
         JokCombatNativeLimit.frames = JokCombatNativeLimit.frames - 1
         JokCombatNativeLimit.activationFrames =
@@ -4909,7 +4959,17 @@ function JokCombatNativeLimit.update(player, buttons)
         if JokCombatNativeLimit.frames <= 0 then
             JokCombatNativeLimit.finish("native Limit safety timeout")
         elseif JokCombatNativeLimit.activationFrames <= 0 then
+            local carryPath = limit.carryPath or limit.prefix
+            local carryName = limit.name
+            local carryCross =
+                JokCombatNativeLimit.continuationCrossPending
+            local carryAllowed =
+                not JokCombatNativeLimit.continuationCancelled
             JokCombatNativeLimit.finish("native Limit ended")
+            if carryAllowed and JokCombatBranch ~= nil then
+                JokCombatBranch.armDepthCarry(
+                    carryPath, carryName, player, carryCross)
+            end
         end
         return true
     end
@@ -5031,43 +5091,167 @@ function JokCombatGuardCounter.dispatch(player)
     return requested
 end
 
+-- KH1's ground Attack candidate builder reaches RVA 0x2A70D5 only after the
+-- selected target crosses its native vertical threshold. The stock block then
+-- chooses candidate 0 (D6 Aerial Sweep) when ability bit 0x02 is active, or
+-- candidate 1 (CD ordinary aerial hit) when it is not. Clearing that ability
+-- bit therefore cannot disable the leap: it merely changes D6 into CD.
+--
+-- While Sora is genuinely grounded, replace the seven-byte TEST instruction
+-- with a signed near jump to KH1's existing ground-candidate scan at 0x2A71DB.
+-- The patch is restored as soon as Sora enters the air through a real jump, so
+-- the native aerial selector and the explicit AIR_D6 family remain untouched.
+-- No target pointer, ability bit, airborne state, position or action record is
+-- modified. The exact stock/owned byte sequences are checked before every
+-- write and restore.
+-- Keep this controller global because the Lua 5.3 chunk is already close to
+-- its 200-local limit.
+JokCombatGroundIntent = {
+    address = ADDRESS.groundAirTargetSelector,
+    normal = { 0xF6, 0x05, 0x34, 0x7B, 0xAB, 0x02, 0x02 },
+    blocked = { 0xE9, 0x01, 0x01, 0x00, 0x00, 0x90, 0x90 },
+    ready = false,
+    owned = false,
+    suppressionLogged = false,
+    failureLogged = false,
+}
+
+function JokCombatGroundIntent.matches(expected)
+    for index = 1, #expected do
+        if ReadByte(JokCombatGroundIntent.address + index - 1)
+            ~= expected[index] then
+            return false
+        end
+    end
+    return true
+end
+
+function JokCombatGroundIntent.initialize()
+    JokCombatGroundIntent.ready = false
+    JokCombatGroundIntent.owned = false
+    JokCombatGroundIntent.suppressionLogged = false
+    JokCombatGroundIntent.failureLogged = false
+
+    -- F1 may reload while the previous instance still owns the jump. Recover
+    -- that exact byte sequence before accepting the executable signature.
+    if JokCombatGroundIntent.matches(JokCombatGroundIntent.blocked) then
+        WriteArray(JokCombatGroundIntent.address,
+            JokCombatGroundIntent.normal)
+    end
+    if not JokCombatGroundIntent.matches(JokCombatGroundIntent.normal) then
+        ConsolePrint(string.format(
+            "[JokCombat:ground-intent] selector signature mismatch at "
+            .. "RVA=0x%X; intentional air-entry gate disabled.",
+            JokCombatGroundIntent.address))
+        return false
+    end
+
+    JokCombatGroundIntent.ready = true
+    return true
+end
+
+function JokCombatGroundIntent.restore(reason, quiet)
+    if not JokCombatGroundIntent.owned
+        and not JokCombatGroundIntent.matches(
+            JokCombatGroundIntent.blocked) then return end
+
+    if JokCombatGroundIntent.matches(JokCombatGroundIntent.blocked) then
+        WriteArray(JokCombatGroundIntent.address,
+            JokCombatGroundIntent.normal)
+    elseif not JokCombatGroundIntent.matches(JokCombatGroundIntent.normal)
+        and not JokCombatGroundIntent.failureLogged then
+        JokCombatGroundIntent.failureLogged = true
+        ConsolePrint("[JokCombat:ground-intent] selector changed by another "
+            .. "writer; conditional restore left it untouched.")
+    end
+    JokCombatGroundIntent.owned = false
+    if not quiet then
+        log("[ground-intent] native high-target Attack selector restored"
+            .. (reason ~= nil and ": " .. reason or "."))
+    end
+end
+
+function JokCombatGroundIntent.update(player, nativeLimitActive)
+    local unsupportedContext = player == nil or nativeLimitActive
+        or player.airborneState >= 0x20
+        or ReadByte(ADDRESS.world) == 0x09
+    local shouldSuppress = JokCombatGroundIntent.ready
+        and CONFIG.intentionalAirEntry and not unsupportedContext
+        and not player.airborne
+    if not shouldSuppress then
+        JokCombatGroundIntent.restore("unsupported gameplay context", true)
+        return
+    end
+
+    if JokCombatGroundIntent.matches(JokCombatGroundIntent.blocked) then
+        JokCombatGroundIntent.owned = true
+        return
+    end
+    if not JokCombatGroundIntent.matches(JokCombatGroundIntent.normal) then
+        if not JokCombatGroundIntent.failureLogged then
+            JokCombatGroundIntent.failureLogged = true
+            ConsolePrint("[JokCombat:ground-intent] selector changed by "
+                .. "another writer; intentional air-entry gate disabled.")
+        end
+        JokCombatGroundIntent.ready = false
+        return
+    end
+
+    WriteArray(JokCombatGroundIntent.address,
+        JokCombatGroundIntent.blocked)
+    if not JokCombatGroundIntent.matches(JokCombatGroundIntent.blocked) then
+        if not JokCombatGroundIntent.failureLogged then
+            JokCombatGroundIntent.failureLogged = true
+            ConsolePrint("[JokCombat:ground-intent] native high-target "
+                .. "selector could not be patched; recovery guard remains active.")
+        end
+        JokCombatGroundIntent.ready = false
+        return
+    end
+    JokCombatGroundIntent.owned = true
+
+    if not JokCombatGroundIntent.suppressionLogged then
+        JokCombatGroundIntent.suppressionLogged = true
+        log("[ground-intent] native D6/CD high-target leap disabled while "
+            .. "grounded; air entry now requires a real jump.")
+    end
+end
+
 -- Musou-style modifier-free X/T families. Keep this as one global table:
 -- Lua 5.3 limits a chunk to 200 local variables and this controller already
 -- carries the validated loadout, HUD and route state in the same chunk.
 -- Every named move ends in T. X before the first T chooses Strong/C2/C3/C4/C5;
--- X after a named move returns to the vanilla physical string. Strong is
--- energy/burst, C2 is pursuit, C3 is crowd control, C4 is combo pressure and
--- C5 is single-target execution. Counterattack remains contextual to a
--- successful Guard; the aerial Y family remains independent of every ground
--- branch.
+-- X after a named move returns to the vanilla physical string. Strong is the
+-- five-step signature chain, C2 is pursuit, C3 is crowd control, C4 is a
+-- direct ranged Limit and C5 is gravity burst. Counterattack remains
+-- contextual to a successful Guard; the aerial Y family remains independent
+-- of every ground branch.
 JokCombatBranch = {
     nodes = {
-        -- Strong / energy: Y Y Y.
-        T = { kind = "action", id = "vortex", triangle = "TT" },
-        TT = { kind = "action", id = "gravity_break", triangle = "TTT" },
-        TTT = { kind = "limit", id = "ragnarok" },
+        -- Strong / signature chain: Y Y Y Y Y.
+        T = { kind = "action", id = "slapshot", triangle = "TT" },
+        TT = { kind = "action", id = "vortex", triangle = "TTT" },
+        TTT = { kind = "action", id = "blitz", triangle = "TTTT" },
+        TTTT = { kind = "action", id = "zantetsuken",
+            triangle = "TTTTT" },
+        TTTTT = { kind = "limit", id = "ars_arcanum" },
 
         -- C2 / pursuit: A Y Y.
         XT = { kind = "action", id = "sliding_dash", triangle = "XTT" },
         XTT = { kind = "limit", id = "sonic_blade" },
 
-        -- C3 / area: A A Y Y Y.
+        -- C3 / area: A A Y Y. Ripple Drive is terminal; Trinity Limit is
+        -- intentionally excluded because its native sequence owns the party.
         XXT = { kind = "action", id = "stun_impact", triangle = "XXTT" },
-        XXTT = { kind = "action", id = "ripple_drive",
-            triangle = "XXTTT" },
-        XXTTT = { kind = "limit", id = "trinity_limit" },
+        XXTT = { kind = "action", id = "ripple_drive" },
 
-        -- C4 / combo pressure: A A A Y Y Y.
-        XXXT = { kind = "action", id = "slapshot",
-            triangle = "XXXTT" },
-        XXXTT = { kind = "action", id = "blitz",
-            triangle = "XXXTTT" },
-        XXXTTT = { kind = "limit", id = "strike_raid" },
+        -- C4 / ranged raid: A A A Y.
+        XXXT = { kind = "limit", id = "strike_raid" },
 
-        -- C5 / execution: A A A A Y Y.
-        XXXXT = { kind = "action", id = "zantetsuken",
+        -- C5 / gravity burst: A A A A Y Y.
+        XXXXT = { kind = "action", id = "gravity_break",
             triangle = "XXXXTT" },
-        XXXXTT = { kind = "limit", id = "ars_arcanum" },
+        XXXXTT = { kind = "limit", id = "ragnarok" },
     },
 
     -- `open` accepts exactly one buffered edge; `release` is the earliest
@@ -5113,6 +5297,14 @@ JokCombatBranch = {
     waitingSourceTime = 0.0,
     neutralTrianglePending = false,
     neutralTriangleFrames = 0,
+    -- A terminal ground special may hand one logical family depth to the next
+    -- real native A. The state never writes KH1's comboPosition byte.
+    depthCarryState = nil,
+    depthCarryDepth = nil,
+    depthCarryFrames = 0,
+    depthCarryConfirmFrames = 0,
+    depthCarryAnimation = nil,
+    depthCarrySource = nil,
     -- These three virtual paths keep the validated aerial order independent
     -- from the ground map: native CE -> Hurricane Blast -> Aerial Sweep.
     -- The two Action nodes still reference their single canonical catalog
@@ -5139,13 +5331,177 @@ JokCombatBranch = {
     },
     airFamily = false,
     familyRoles = {
-        T = "Strong / burst",
+        T = "Strong / signature chain",
         XT = "C2 / pursuit",
         XXT = "C3 / crowd control",
-        XXXT = "C4 / combo pressure",
-        XXXXT = "C5 / execution",
+        XXXT = "C4 / ranged raid",
+        XXXXT = "C5 / gravity burst",
     },
 }
+
+function JokCombatBranch.pathDepth(path)
+    if type(path) ~= "string" then return nil end
+    local prefix = path:match("^(X*)T")
+    return prefix ~= nil and #prefix or nil
+end
+
+function JokCombatBranch.clearDepthCarry(reason, quiet)
+    local wasActive = JokCombatBranch.depthCarryState ~= nil
+    JokCombatBranch.depthCarryState = nil
+    JokCombatBranch.depthCarryDepth = nil
+    JokCombatBranch.depthCarryFrames = 0
+    JokCombatBranch.depthCarryConfirmFrames = 0
+    JokCombatBranch.depthCarryAnimation = nil
+    JokCombatBranch.depthCarrySource = nil
+    if wasActive and reason ~= nil and not quiet then
+        log("[branch-depth] closed: " .. reason .. ".")
+    end
+end
+
+function JokCombatBranch.activateDepthCarry(player)
+    if player == nil or not isGroundNormalContext(player) then return false end
+    -- C8-CA are reused by a few non-normal contexts with low secondary IDs.
+    -- Accept only the native physical variants observed by the normal string.
+    if player.animation >= 0xC8 and player.animation <= 0xCA
+        and player.secondary <= 0x02 then return false end
+    local nativeBeatDeferredFallback = type(deferredLinkKind) == "string"
+        and deferredLinkKind:sub(1, 12) == "musou-light:"
+    if nativeBeatDeferredFallback then
+        -- The physical Cross survived the terminal Action release and KH1 has
+        -- already opened C8-CA. Its queued target-free fallback is now stale:
+        -- retaining it would block Y for this entire attack, then emit a
+        -- duplicate C8 after recovery.
+        clearDeferredAttackCommand()
+        log("[branch-depth] native A won the handoff; deferred fallback cancelled.")
+    end
+    JokCombatBranch.depthCarryState = "active"
+    JokCombatBranch.depthCarryAnimation = player.animation
+    JokCombatBranch.depthCarryConfirmFrames = 0
+    log(string.format(
+        "[branch-depth] native A accepted: virtual depth=%d, next Y opens C%d.",
+        JokCombatBranch.depthCarryDepth, JokCombatBranch.depthCarryDepth + 1))
+    return true
+end
+
+function JokCombatBranch.armDepthCarry(path, label, player, crossLatched)
+    local depth = JokCombatBranch.pathDepth(path)
+    local nextDepth = depth ~= nil and depth + 1 or nil
+    JokCombatBranch.clearDepthCarry(nil, true)
+    if nextDepth == nil or nextDepth > 4 then
+        if depth ~= nil and depth >= 4 then
+            log("[branch-depth] " .. tostring(label)
+                .. " completed C5; the next A starts a new vanilla chain.")
+        end
+        return false
+    end
+
+    JokCombatBranch.depthCarryState = crossLatched and "waiting" or "armed"
+    JokCombatBranch.depthCarryDepth = nextDepth
+    JokCombatBranch.depthCarryFrames = CONFIG.branchDepthCarryFrames
+    JokCombatBranch.depthCarryConfirmFrames = crossLatched
+        and CONFIG.branchDepthConfirmFrames or 0
+    JokCombatBranch.depthCarrySource = label or path
+    log(string.format(
+        "[branch-depth] %s completed: next real A may carry virtual depth %d.",
+        tostring(JokCombatBranch.depthCarrySource), nextDepth))
+    if crossLatched then JokCombatBranch.activateDepthCarry(player) end
+    return true
+end
+
+function JokCombatBranch.depthCarryRootPath(player)
+    if JokCombatBranch.depthCarryState ~= "active"
+        or JokCombatBranch.depthCarryDepth == nil
+        or player == nil or not isGroundNormalContext(player)
+        or player.animation ~= JokCombatBranch.depthCarryAnimation then
+        return nil
+    end
+    return string.rep("X", JokCombatBranch.depthCarryDepth) .. "T"
+end
+
+function JokCombatBranch.updateDepthCarry(player, buttons, crossPressed,
+        trianglePressed)
+    local state = JokCombatBranch.depthCarryState
+    if state == nil then return false end
+
+    JokCombatBranch.depthCarryFrames = JokCombatBranch.depthCarryFrames - 1
+    if JokCombatBranch.depthCarryFrames <= 0 then
+        JokCombatBranch.clearDepthCarry("continuation timed out")
+        return false
+    end
+
+    local modifiers = BUTTON.L1 | BUTTON.R1 | BUTTON.L2 | BUTTON.R2
+    if (buttons & modifiers) ~= 0 then
+        JokCombatBranch.clearDepthCarry("modifier action took priority", true)
+        return false
+    end
+
+    if state == "armed" then
+        if trianglePressed then
+            JokCombatBranch.clearDepthCarry("Y started a new family", true)
+            return false
+        end
+        if crossPressed then
+            if player.airborne then
+                JokCombatBranch.clearDepthCarry(
+                    "air attack cannot carry ground depth")
+                return false
+            end
+            JokCombatBranch.depthCarryState = "waiting"
+            JokCombatBranch.depthCarryConfirmFrames =
+                CONFIG.branchDepthConfirmFrames
+            log("[branch-depth] physical A observed; waiting for KH1 acceptance.")
+            -- KH1 can publish C8-CA on the very same callback that exposes the
+            -- raw Cross edge. Inspect the accepted player state before testing
+            -- the neutral control byte, otherwise control=0x07 makes us discard
+            -- the carry precisely when the native attack has succeeded.
+            JokCombatBranch.activateDepthCarry(player)
+            return false
+        end
+        if player.control ~= 0x03
+            or not HUD.nativeRootSelectionAvailable() then
+            JokCombatBranch.clearDepthCarry(
+                "player state interrupted the continuation", true)
+            return false
+        end
+        return false
+    end
+
+    if state == "waiting" then
+        if JokCombatBranch.activateDepthCarry(player) then return false end
+        if player.control ~= 0x03 and not player.airborne then
+            JokCombatBranch.clearDepthCarry(
+                "physical A was interrupted before acceptance")
+            return false
+        end
+        if trianglePressed then
+            log("[branch-depth] Y ignored until the carried A becomes active.")
+            return true
+        end
+        if crossPressed then
+            JokCombatBranch.depthCarryConfirmFrames =
+                CONFIG.branchDepthConfirmFrames
+        end
+        JokCombatBranch.depthCarryConfirmFrames =
+            JokCombatBranch.depthCarryConfirmFrames - 1
+        if JokCombatBranch.depthCarryConfirmFrames <= 0 then
+            JokCombatBranch.depthCarryState = "armed"
+            JokCombatBranch.depthCarryConfirmFrames = 0
+            log("[branch-depth] A was not accepted; continuation remains armed.")
+        end
+        return false
+    end
+
+    if state == "active" then
+        if not isGroundNormalContext(player)
+            or player.animation ~= JokCombatBranch.depthCarryAnimation then
+            JokCombatBranch.clearDepthCarry("carried native A ended")
+        elseif crossPressed then
+            JokCombatBranch.clearDepthCarry(
+                "another physical A started a vanilla continuation", true)
+        end
+    end
+    return false
+end
 
 function JokCombatBranch.kindReady(node)
     if node == nil then return false end
@@ -5215,6 +5571,36 @@ function JokCombatBranch.prearmLimitChild(player)
     return JokCombatNativeLimit.arm(limit.id, player)
 end
 
+function JokCombatBranch.executeRootLimit(player, trianglePressed)
+    if not trianglePressed or JokCombatBranch.active
+        or JokCombatBranch.pendingPath ~= nil
+        or JokCombatBranch.waitingPath ~= nil then
+        return false
+    end
+    local path = JokCombatBranch.rootPath(player)
+    local node = JokCombatBranch.nodeForPath(path)
+    if node == nil or node.kind ~= "limit" then return false end
+    if not JokCombatBranch.nodeReady(node, player, path) then
+        log("[branch] " .. tostring(path)
+            .. " root Limit is unavailable in the current context.")
+        return true
+    end
+    if not JokCombatNativeLimit.arm(node.id, player) then
+        log("[branch] " .. path
+            .. " root Limit selector could not be armed; Y discarded.")
+        return true
+    end
+    if not JokCombatNativeLimit.acceptFinalInput(node.id, player) then
+        JokCombatNativeLimit.restore("root Limit final Y latch failed")
+        log("[branch] " .. path
+            .. " root Limit final Y could not be latched.")
+        return true
+    end
+    log("[branch] " .. path
+        .. " root Limit selector and final Y latched on the same frame.")
+    return true
+end
+
 function JokCombatBranch.initialize()
     JokCombatBranch.reset(nil, true, true)
     local count = 0
@@ -5269,19 +5655,28 @@ function JokCombatBranch.initialize()
         end
         unique[identity] = "contextual"
     end
-    if count ~= 13 or actionCount ~= 8 then
+    if count ~= 12 or actionCount ~= 8 then
         ConsolePrint(string.format(
             "[JokCombat:branch:fault] Musou ground map count mismatch: "
-            .. "nodes=%d/13 actions=%d/8.", count, actionCount))
+            .. "nodes=%d/12 actions=%d/8.", count, actionCount))
         valid = false
     end
-    if JokCombatBranch.nodes.XXXT == nil
-        or JokCombatBranch.nodes.XXXT.triangle ~= "XXXTT"
-        or JokCombatBranch.nodes.XXXTT == nil
-        or JokCombatBranch.nodes.XXXTT.triangle ~= "XXXTTT"
-        or JokCombatBranch.nodes.XXXTTT == nil then
-        ConsolePrint("[JokCombat:branch:fault] standard C4 "
-            .. "Slapshot/Blitz/Strike Raid topology is incomplete.")
+    if JokCombatBranch.nodes.T == nil
+        or JokCombatBranch.nodes.T.triangle ~= "TT"
+        or JokCombatBranch.nodes.TT == nil
+        or JokCombatBranch.nodes.TT.triangle ~= "TTT"
+        or JokCombatBranch.nodes.TTT == nil
+        or JokCombatBranch.nodes.TTT.triangle ~= "TTTT"
+        or JokCombatBranch.nodes.TTTT == nil
+        or JokCombatBranch.nodes.TTTT.triangle ~= "TTTTT"
+        or JokCombatBranch.nodes.TTTTT == nil
+        or JokCombatBranch.nodes.XXXT == nil
+        or JokCombatBranch.nodes.XXXT.kind ~= "limit"
+        or JokCombatBranch.nodes.XXXXT == nil
+        or JokCombatBranch.nodes.XXXXT.triangle ~= "XXXXTT"
+        or JokCombatBranch.nodes.XXXXTT == nil then
+        ConsolePrint("[JokCombat:branch:fault] requested Y/C4/C5 "
+            .. "topology is incomplete.")
         valid = false
     end
     if valid and #ACTION_CATALOG - 1 ~= 11 then valid = false end
@@ -5323,6 +5718,7 @@ function JokCombatBranch.reset(reason, quiet, skipCleanup)
     JokCombatBranch.neutralTrianglePending = false
     JokCombatBranch.neutralTriangleFrames = 0
     JokCombatBranch.airFamily = false
+    JokCombatBranch.clearDepthCarry(nil, true)
     if branchWasActive and not quiet then
         log("[branch] closed" .. (reason ~= nil and ": " .. reason or "."))
     end
@@ -5396,19 +5792,38 @@ end
 
 function JokCombatBranch.continuePhysical(player)
     local sourcePath = JokCombatBranch.path or "unknown"
-    log("[branch] " .. sourcePath
-        .. " + A -> native physical continuation; family closed and no "
-        .. "named ability dispatched.")
+    local sourceNode = JokCombatBranch.nodeForPath(sourcePath)
+    local carryTerminalDepth = not JokCombatBranch.airFamily
+        and sourceNode ~= nil and sourceNode.kind == "action"
+        and JokCombatBranch.triangleChild(
+            sourcePath, sourceNode, false) == nil
+    local sourceName = JokCombatBranch.nodeName(sourceNode)
+    if carryTerminalDepth then
+        log("[branch] " .. sourcePath
+            .. " + A -> terminal physical handoff queued with its depth.")
+    else
+        log("[branch] " .. sourcePath
+            .. " + A -> native physical continuation; family closed and no "
+            .. "named ability dispatched.")
+    end
     JokCombatBranch.reset("physical A continuation", true)
     clearComboIntent()
     clearTransitionCheck()
     clearDeferredAttackCommand()
     restoreActionRoutes()
     JokCombatBranch.refreshAirState(player)
-    if not queueAttackAfterRelease(
-            player, "musou-light:" .. sourcePath, nil, nil) then
+    local queued = queueAttackAfterRelease(
+        player, "musou-light:" .. sourcePath, nil, nil)
+    if not queued then
         log("[branch] " .. sourcePath
             .. " physical continuation could not be queued.")
+    elseif carryTerminalDepth then
+        -- A pressed in the safe tail of a terminal Action is already the real
+        -- continuation requested by the player. Preserve its depth while the
+        -- existing release/pulse path waits for KH1 to publish C8-CA; do not
+        -- require a second A after Ripple Drive has visibly finished.
+        JokCombatBranch.armDepthCarry(
+            sourcePath, sourceName, player, true)
     end
     return true
 end
@@ -5522,6 +5937,8 @@ end
 
 function JokCombatBranch.rootPath(player)
     if isGroundNormalContext(player) then
+        local carried = JokCombatBranch.depthCarryRootPath(player)
+        if carried ~= nil then return carried end
         local maximum = ReadByte(ADDRESS.maxGroundComboLength)
         local position = ReadByte(ADDRESS.comboPosition)
         if position < 1 or position >= maximum then return nil end
@@ -5729,6 +6146,29 @@ function JokCombatBranch.update(player, buttons, crossPressed,
         trianglePressed)
     if not CONFIG.branchCombos or not JokCombatBranch.valid then return false end
 
+    -- The signed selector branch above is the primary protection. If KH1 had
+    -- already
+    -- committed an old/stale grounded request before suppression, never let
+    -- that unexpected air transition retain ownership of X and Y. Releasing
+    -- only JokCombat's route/input state preserves the native animation while
+    -- guaranteeing that the next physical input works without a Dodge Roll.
+    if JokCombatBranch.active and not JokCombatBranch.airFamily
+        and player.airborne then
+        log("[ground-intent] unexpected grounded branch entered the air; "
+            .. "branch input ownership released.")
+        JokCombatBranch.reset("unexpected ground-to-air selector transition")
+        clearComboIntent()
+        clearTransitionCheck()
+        clearDeferredAttackCommand()
+        restoreActionRoutes()
+        return false
+    end
+
+    if JokCombatBranch.updateDepthCarry(
+            player, buttons, crossPressed, trianglePressed) then
+        return true
+    end
+
     local modified = (buttons & (BUTTON.L1 | BUTTON.R1
         | BUTTON.L2 | BUTTON.R2)) ~= 0
     if modified then
@@ -5737,9 +6177,10 @@ function JokCombatBranch.update(player, buttons, crossPressed,
         end
         return false
     end
-    -- A Limit's immediate parent Action pre-arms its real Reaction. One real
-    -- final-Y edge is then latched until KH1 can accept it; the player never
-    -- has to repeat Y merely because the parent Action is still recovering.
+    -- A Limit's immediate parent Action normally pre-arms its real Reaction.
+    -- One real final-Y edge is then latched until KH1 can accept it; the player
+    -- never has to repeat Y merely because the parent Action is recovering.
+    -- The direct C4 Strike Raid root is armed below on its own final-Y edge.
     if JokCombatNativeLimit.selectorOwned() then
         if trianglePressed then
             local limit = JokCombatNativeLimit.byId[
@@ -5761,7 +6202,8 @@ function JokCombatBranch.update(player, buttons, crossPressed,
     -- Native contextual commands (Save, Examine, Talk, etc.) own Triangle.
     -- Only a Reaction that exists while JokCombat owns no active node may gate
     -- a new family. Some complete Action records publish a transient non-zero
-    -- value after entry; treating that as a world interaction closed Vortex
+    -- value after entry; treating that as a world interaction closed the first
+    -- Strong Action
     -- immediately and left its controls suppressed. Neutral Y uses the short
     -- arbitration above to catch Talk/Examine/Save before Strong is dispatched.
     local nativeReaction = ReadShort(ADDRESS.reactionCommandId)
@@ -5776,6 +6218,14 @@ function JokCombatBranch.update(player, buttons, crossPressed,
     end
     if not HUD.nativeRootSelectionAvailable() and not branchOwnsInput then
         return false
+    end
+    -- C4 now begins directly with Strike Raid rather than an Action parent.
+    -- The physical final Y is still present on this frame, so publish the
+    -- native selector and latch that same edge before the generic root queue
+    -- can reject an un-prearmed Limit.
+    if not branchOwnsInput
+        and JokCombatBranch.executeRootLimit(player, trianglePressed) then
+        return true
     end
 
     local requestAccepted = JokCombatBranch.observeRequest(player)
@@ -5803,7 +6253,21 @@ function JokCombatBranch.update(player, buttons, crossPressed,
 
     if JokCombatBranch.path ~= nil then
         if player.animation ~= JokCombatBranch.animation then
-            JokCombatBranch.reset("active node ended or was interrupted")
+            local completedPath = JokCombatBranch.path
+            local completedNode = JokCombatBranch.nodeForPath(completedPath)
+            local terminalAction = not JokCombatBranch.airFamily
+                and completedNode ~= nil and completedNode.kind == "action"
+                and JokCombatBranch.triangleChild(
+                    completedPath, completedNode, false) == nil
+            local naturalRecovery = terminalAction and not player.airborne
+                and player.control == 0x03 and player.animation <= 0x07
+            local completedName = JokCombatBranch.nodeName(completedNode)
+            JokCombatBranch.reset("active node ended or was interrupted",
+                naturalRecovery)
+            if naturalRecovery then
+                JokCombatBranch.armDepthCarry(
+                    completedPath, completedName, player, false)
+            end
             return false
         end
 
@@ -5884,6 +6348,7 @@ function JokCombatBranch.update(player, buttons, crossPressed,
         return false
     end
 
+    local carriedRoot = JokCombatBranch.depthCarryRootPath(player)
     local root = JokCombatBranch.rootPath(player)
     local node = JokCombatBranch.nodeForPath(root)
     if node == nil then return false end
@@ -5896,6 +6361,10 @@ function JokCombatBranch.update(player, buttons, crossPressed,
         and root == JokCombatBranch.airFinisherPath
     if root == "T" then return JokCombatBranch.armNeutralTriangle() end
     local consumed = JokCombatBranch.queue(player, root)
+    if carriedRoot ~= nil and root == carriedRoot
+        and JokCombatBranch.active then
+        JokCombatBranch.clearDepthCarry(nil, true)
+    end
     if not JokCombatBranch.active then JokCombatBranch.airFamily = false end
     return consumed
 end
@@ -6317,6 +6786,7 @@ function _OnInit()
     local validActionRecordCount = validateCanonicalActionRecords()
     local branchValid, branchNodeCount, branchActionCount =
         JokCombatBranch.initialize()
+    local groundIntentReady = JokCombatGroundIntent.initialize()
     local guardCounterReady = JokCombatGuardCounter.initialize()
     loadActionLoadout()
     HUD.initialize()
@@ -6333,16 +6803,16 @@ function _OnInit()
     log(string.format("complete action records ready: %d/%d.",
         validActionRecordCount, #ACTION_CATALOG - 1))
     log(string.format("Musou Y map %s: %d ground nodes, "
-        .. "%d ground Action routes + five native Limits; "
+        .. "%d ground Action routes + four native Limits; "
         .. "two aerial Actions and Counterattack remain contextual.",
         branchValid and "ready" or "disabled",
         branchNodeCount, branchActionCount))
     log("legacy combo-magic recovery ready; no combo path can cast magic.")
     log(string.format(
-        "native Limit combos ready: %d/5; Sonic/Ars/Strike/Ragnarok use "
-            .. "temporary 0 MP costs, Trinity preserves party MP and requires "
-            .. "Donald + Goofy; first final Y uses one journaled native "
-            .. "input latch.", nativeLimitReadyCount))
+        "native Limit combos ready: %d/4; Sonic/Ars/Strike/Ragnarok use "
+            .. "temporary 0 MP costs; Trinity is excluded from the combo map; "
+            .. "first final Y uses one journaled native input latch.",
+        nativeLimitReadyCount))
     log("successful-Guard Counterattack detector "
         .. (guardCounterReady and "ready: read-only 0x10 signal -> A."
             or "disabled."))
@@ -6354,10 +6824,12 @@ function _OnInit()
         .. "release L1+R1+L2+R2 to toggle it; add D-pad Down to reset "
         .. "defaults; overlay is currently "
         .. (HUD.enabled and "on." or "off."))
-    log("family roles ready: Strong=burst, C2=pursuit, C3=crowd control, "
-        .. "C4=combo pressure, C5=execution.")
-    log("Combo Guide ready: C4 shows Slapshot -> Blitz -> Strike Raid; "
-        .. "A otherwise stays a native physical continuation.")
+    log("family roles ready: Strong=signature chain, C2=pursuit, "
+        .. "C3=crowd control, C4=ranged raid, C5=gravity burst.")
+    log("Combo Guide ready: Y=Slapshot/Vortex/Blitz/Zantetsuken/Ars; "
+        .. "C4=Strike Raid; C5=Gravity Break/Ragnarok.")
+    log("post-special depth ready: a completed terminal move plus one real A "
+        .. "opens the following ground family; C5 remains terminal.")
     log("neutral Y arbitration ready: two released frames before Strong; "
         .. "Reaction Commands and the first physical A keep native priority.")
     log("fourth loadout row ready: locked Summon borrows a reversible visual "
@@ -6367,6 +6839,10 @@ function _OnInit()
     log("Action Ability context ready: Hurricane Blast is callable on ground "
         .. "and in air; airborne family is native CE -> Hurricane Blast -> "
         .. "Aerial Sweep terminal, with fake-ground disabled.")
+    log("intentional air-entry gate "
+        .. (groundIntentReady and "ready" or "disabled")
+        .. ": grounded D6/CD target-follow is bypassed; jump and Kinetic Step "
+        .. "remain the only air entries.")
     log("Kinetic Step second-jump adapter "
         .. (JokCombatAirJump.enabled and "ready" or "disabled")
         .. ": one charge after a real first jump; B routes animation 0x0F, "
@@ -6464,6 +6940,7 @@ function _OnFrame()
         restoreAllPatches()
         return
     end
+    JokCombatGroundIntent.update(player, nativeLimitActive)
     updateLoadoutMenuRouting(configurationInputActive, dpadOwned)
     HUD.updateOverlay(buttons, player)
     if faulted then

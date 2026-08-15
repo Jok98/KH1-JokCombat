@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$Version = "v2.0.0",
+    [string]$Version = "v2.1.0",
     [string]$OutputDirectory = ""
 )
 
@@ -61,7 +61,7 @@ if (Test-Path -LiteralPath $archivePath) {
 
 Add-Type -AssemblyName System.IO.Compression
 $fixedTimestamp = [System.DateTimeOffset]::new(
-    2026, 8, 13, 0, 0, 0, [System.TimeSpan]::Zero)
+    2026, 8, 14, 0, 0, 0, [System.TimeSpan]::Zero)
 $archiveStream = [System.IO.File]::Open(
     $archivePath,
     [System.IO.FileMode]::CreateNew,

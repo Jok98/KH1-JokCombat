@@ -2,7 +2,7 @@
 
 This roadmap records planned work and research candidates. It does not promise
 a release date, and every runtime patch must pass the same fingerprint,
-ownership, restoration, and live-game validation rules used by v2.0.0.
+ownership, restoration, and live-game validation rules used by v2.1.0.
 
 ## Planned: Epic Games Store support
 
@@ -38,8 +38,8 @@ party behavior outside supported combat situations.
   and shutdown.
 - Automatically suspend the mode anywhere KH1 requires a scripted party or
   guest character.
-- Disable or safely replace Trinity Limit while Solo Sora mode is active; it
-  natively requires Donald and Goofy.
+- Keep Trinity Limit excluded from JokCombat's combo map; it natively requires
+  Donald and Goofy and remains available only through vanilla KH1 behavior.
 - Validate targeting, enemy aggro, ally healing, Limit state, party swapping,
   cutscenes, and save/reload behavior before release.
 

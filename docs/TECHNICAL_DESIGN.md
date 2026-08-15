@@ -1,8 +1,8 @@
-# JokCombat v2.0.0 Technical Design
+# JokCombat v2.1.0 Technical Design
 
 Status: release design for KH1 Final Mix, Steam Global.
 
-This document records the implementation choices behind JokCombat v2.0.0.
+This document records the implementation choices behind JokCombat v2.1.0.
 It describes the current design rather than every experiment that preceded it.
 The complete experimental record remains available in
 `DEVELOPMENT_HISTORY.md`.
@@ -31,7 +31,7 @@ complete cast path.
 
 | File | Release role |
 |---|---|
-| `JokCombat_CombatPrototype.lua` | Main v2.0.0 combat, input, HUD, movement, Action, and Limit controller. The historical filename is retained to avoid breaking existing installations. |
+| `JokCombat_CombatPrototype.lua` | Main v2.1.0 combat, input, HUD, movement, Action, and Limit controller. The historical filename is retained to avoid breaking existing installations. |
 | `JokCombat_NativeAbilities.lua` | Persistent native grant of Shared High Jump, Glide, Superglide, four Combo Plus, two Air Combo Plus, Combo Master, and 99 maximum AP for Sora, Donald, and Goofy. |
 | `JokCombat_NativeKeyblades.lua` | Persistent native grant of the 17 genuine Sora Keyblades other than Ultima Weapon, plus Save the Queen and Save the King, with unique-count reconciliation. |
 | `JokCombat_DropRate.lua` | Runtime-only 2.0x item and prize drop patch. |
@@ -40,7 +40,7 @@ complete cast path.
 `JokCombat_CommandMenuProbe.lua` are read-only development tools. They are not
 runtime dependencies and are not part of the normal release installation.
 
-The bundle is versioned as v2.0.0. Helper modules retain independent internal
+The bundle is versioned as v2.1.0. Helper modules retain independent internal
 versions because their memory contracts and release cadence are separate from
 the main combat controller.
 
@@ -57,7 +57,7 @@ from the validated baseline, the relevant subsystem disables itself instead of
 attempting a best-effort write.
 
 The Epic Games Store executable and other regional builds use different
-addresses and are not supported by v2.0.0.
+addresses and are not supported by v2.1.0.
 
 ## 4. Ownership boundaries
 
@@ -112,13 +112,13 @@ returns to native physical continuation.
 
 | Family | Prefix | Role | Route |
 |---|---|---|---|
-| Strong | `Y` | Burst | Vortex -> Gravity Break -> Ragnarok |
+| Strong | `Y` | Signature chain | Slapshot -> Vortex -> Blitz -> Zantetsuken -> Ars Arcanum |
 | C2 | `A Y` | Pursuit | Sliding Dash -> Sonic Blade |
-| C3 | `A A Y` | Crowd control | Stun Impact -> Ripple Drive -> Trinity Limit |
-| C4 | `A A A Y` | Combo pressure | Slapshot -> Blitz -> Strike Raid |
-| C5 | `A A A A Y` | Execution | Zantetsuken -> Ars Arcanum |
+| C3 | `A A Y` | Crowd control | Stun Impact -> Ripple Drive |
+| C4 | `A A A Y` | Ranged raid | Strike Raid |
+| C5 | `A A A A Y` | Gravity burst | Gravity Break -> Ragnarok |
 
-The five families contain eight unique ground Action Abilities and all five
+The five families contain eight unique ground Action Abilities and four active
 native Limits without duplicate named moves. The full input map, independent
 aerial family, availability rules, and Combo Guide examples are maintained in
 `JokCombat_BranchCombo_Mapping.md`.
@@ -147,6 +147,24 @@ The aerial family is independent from every ground family. A normal jump closes
 the current ground branch, while the second jump deliberately resets the air
 string so it can begin again. No airborne flag or fake altitude is written to
 force a ground-to-air transition.
+
+Steam Global's native Attack candidate builder reaches RVA `0x2A70D5` after a
+grounded target vector crosses its vertical threshold. Its stock seven-byte
+block chooses candidate `0` (`D6`, Aerial Sweep) when transient ability bit
+`0x02` is active, or candidate `1` (`CD`, the ordinary aerial hit) otherwise.
+Clearing the bit only changes the selected aerial move and cannot prevent the
+leap.
+
+While Sora is grounded, JokCombat replaces that exact signed instruction with
+`E9 01 01 00 00 90 90`, a near jump to KH1's existing ground-candidate scan at
+`0x2A71DB`. The original bytes `F6 05 34 7B AB 02 02` are restored as soon as
+Sora is genuinely airborne and during cleanup or unsupported contexts. Every
+write validates either the exact stock or exact owned signature. No target
+pointer, ability bit, airborne state, position or action record is modified,
+and the complete native aerial selector remains available after a real jump. A
+second state-machine guard releases all branch input ownership if a grounded
+request was already committed before the gate changed, preventing the resulting
+state from trapping both `A` and `Y` until Dodge Roll.
 
 ## 8. Native Action Ability dispatch
 
@@ -178,13 +196,34 @@ costs are journaled and restored conditionally on completion, cancel, timeout,
 fault, exit, or script reload. Launching the same Limit from KH1's menu keeps
 its vanilla cost.
 
-Trinity Limit is available only with Donald and Goofy present. Instead of
-inventing a shared cost record, JokCombat snapshots the party MP state and
-restores the native consumption for the combo invocation.
+Sonic Blade, Ars Arcanum, and Ragnarok are pre-armed by their parent Actions.
+Strike Raid begins C4 directly, so its selector and the same physical final-`Y`
+edge are journaled and latched together before the generic root dispatcher can
+reject an unprepared Limit.
+
+Trinity Limit is excluded from the active combo map because its native sequence
+owns Donald and Goofy. Its former catalog descriptor remains recovery-only so
+an F1 reload can still restore a v2.0.0 journal safely; it can never be armed by
+the current branch controller.
 
 Once KH1 exposes an active Limit state, JokCombat stops intercepting combat
 inputs until native recovery completes. This boundary prevents the orphaned
 Limit state that can otherwise leave Sora unable to move.
+
+After a terminal ground special completes, JokCombat preserves only its logical
+family depth. The next modifier-free physical `A` remains entirely native and
+must visibly enter a normal `C8`-`CA` attack before the following `Y` may select
+the next family. If that `A` is buffered inside the safe recovery tail of a
+terminal Action, the existing release/pulse pipeline carries the same depth;
+the player does not have to press it again after the animation reaches neutral.
+If the physical edge itself already opens `C8`-`CA`, that confirmation cancels
+the still-pending target-free pulse before it can block `Y` or create a duplicate
+attack after recovery.
+The native `comboPosition` byte is never written. A timeout,
+damage, jump, Guard, Dodge, shortcut, menu, timeout, or second physical `A`
+clears the carry. A rejected `A` does not consume the saved depth; the
+controller waits for another real native attempt within the same timeout. C5
+is terminal and returns to a fresh vanilla chain.
 
 ## 10. Command Menu overlay and R2 loadout
 
@@ -269,7 +308,7 @@ factor from being multiplied twice after Kinetic Step.
 | One total copy of each genuine non-Ultima Keyblade | Saved by KH1 after a normal save |
 | Save the Queen and Save the King | Saved by KH1 after a normal save |
 | R2 Action Ability assignments | Local `JokCombat_ActionLoadout.cfg` |
-| Branch state, Action routes, Limit selectors, second jump, input ownership, descent tuning | Process only |
+| Branch state, Action routes, Limit selectors, grounded high-target branch bypass, second jump, input ownership, descent tuning | Process only |
 | 2.0x item/prize drop multipliers | Process only |
 
 The native ability writer treats KH1's two stores separately. It preserves the
@@ -317,7 +356,7 @@ the retired combo-magic and fake-ground systems are not active code paths.
 Running another combat overhaul against the same input, action, command,
 ability, or Reaction structures is unsupported even with conditional restore.
 
-## 16. Known v2.0.0 limits
+## 16. Known v2.1.0 limits
 
 - Steam Global is the only validated executable.
 - Summons and combo magic are intentionally excluded.
@@ -342,13 +381,14 @@ python tests/test_release_metadata.py
 The distributable archive and checksum are built with:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File tools/Build-Release.ps1 -Version v2.0.0
+powershell -ExecutionPolicy Bypass -File tools/Build-Release.ps1 -Version v2.1.0
 ```
 
-The v2.0.0 gameplay baseline has also been tested live for native ground and
-aerial strings, all five branch families, all five Limits, the independent
-aerial family, R2 Actions, Guard/Dodge/Counterattack, Kinetic Step, both descent profiles, and
-the fixed drop multiplier.
+The v2.1.0 gameplay baseline has also been tested live for native ground and
+aerial strings, all five branch families, all four active combo Limits, the
+independent aerial family, R2 Actions, Guard/Dodge/Counterattack, Kinetic Step,
+both descent profiles, intentional ground-to-air entry, and the fixed drop
+multiplier.
 
 ## 18. Attribution
 
