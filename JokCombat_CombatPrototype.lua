@@ -112,6 +112,10 @@ local CONFIG = {
     -- complete cast (learned tier, MP, target, animation, VFX and effect).
     r2MagicShortcuts = true,
     r2MagicShortcutMenu = true,
+    -- While the native R2 page is being edited, tint the selected spell name
+    -- gold. The renderer extension is signed and completely restored outside
+    -- that page; L1 and every other KH1 text path retain their native colors.
+    r2MagicShortcutHighlight = true,
     actionLoadoutPrompt = true,
     actionLoadoutOverlay = true,
 
@@ -624,6 +628,95 @@ JokCombatR2NativeBridge = {
     ready = false,
     ownedNow = false,
     installLogged = false,
+    failureLogged = false,
+}
+
+-- KH1's Shortcut text wrapper accepts one grayscale byte and therefore has no
+-- native concept of an editor cursor. The row renderer does, however, draw Y,
+-- X and A separately. These two signed hooks extend only that call path: the
+-- selected row sends one private RGB sentinel and the text wrapper expands it
+-- to gold. Every other value follows the original three grayscale writes.
+--
+-- Both helpers live in untouched zero padding after the existing R2 input
+-- cave. The row helper also requires the complete active R2 journal signature,
+-- marker and owner byte, so physical L1 and inactive R2 pages cannot acquire
+-- the highlight even if a stale selection byte remains in memory.
+JokCombatR2ShortcutHighlight = {
+    rowHookAddress = 0x27C09B,
+    rowHookNormal = {
+        0x45, 0x0F, 0x44, 0xCD, 0x0F, 0xB6, 0x0E,
+    },
+    rowHookOwned = {
+        0xE8, 0x54, 0x1E, 0x13, 0x00, 0x90, 0x90,
+    },
+    rowCaveAddress = 0x3ADEF4,
+    rowCaveNormal = {
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00,
+    },
+    rowCaveOwned = {
+        -- Preserve KH1's pressed/disabled shade and original magic ID load.
+        0x45, 0x0F, 0x44, 0xCD,
+        0x0F, 0xB6, 0x0E,
+        -- Require "JR2M", marker C4 and owner tag 53.
+        0x81, 0x3D, 0xAB, 0x9A, 0xA0, 0x02,
+        0x4A, 0x52, 0x32, 0x4D,
+        0x75, 0x20,
+        0x80, 0x3D, 0xAA, 0x9A, 0xA0, 0x02, 0xC4,
+        0x75, 0x17,
+        0x80, 0x3D, 0xA9, 0x9A, 0xA0, 0x02, 0x53,
+        0x75, 0x0E,
+        -- BL is 1/2/4 for the three rows; +11 stores the selected mask.
+        0x38, 0x1D, 0xA2, 0x9A, 0xA0, 0x02,
+        0x75, 0x06,
+        -- Private 0050D0FF sentinel: RGB FF/D0/50 (gold).
+        0x41, 0xB9, 0xFF, 0xD0, 0x50, 0x00,
+        0xC3,
+    },
+    textHookAddress = 0x27A944,
+    textHookNormal = {
+        0x44, 0x88, 0x4C, 0x24, 0x58,
+        0x44, 0x88, 0x4C, 0x24, 0x59,
+        0x44, 0x88, 0x4C, 0x24, 0x5A,
+    },
+    textHookOwned = {
+        0xE8, 0xE7, 0x35, 0x13, 0x00,
+        0x90, 0x90, 0x90, 0x90, 0x90,
+        0x90, 0x90, 0x90, 0x90, 0x90,
+    },
+    textCaveAddress = 0x3ADF30,
+    textCaveNormal = {
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    },
+    textCaveOwned = {
+        -- Only the private sentinel receives RGB; native grayscale values are
+        -- copied exactly as before. CALL shifts the original stack by 8.
+        0x41, 0x81, 0xF9, 0xFF, 0xD0, 0x50, 0x00,
+        0x74, 0x10,
+        0x44, 0x88, 0x4C, 0x24, 0x60,
+        0x44, 0x88, 0x4C, 0x24, 0x61,
+        0x44, 0x88, 0x4C, 0x24, 0x62,
+        0xC3,
+        0x44, 0x89, 0xC8,
+        0x88, 0x44, 0x24, 0x60,
+        0xC1, 0xE8, 0x08,
+        0x88, 0x44, 0x24, 0x61,
+        0xC1, 0xE8, 0x08,
+        0x88, 0x44, 0x24, 0x62,
+        0xC3,
+    },
+    ready = false,
+    ownedNow = false,
     failureLogged = false,
 }
 
@@ -2467,6 +2560,10 @@ end
 
 function HUD.finishDirectEdit(reason, dpad)
     HUD.restoreNativeSelection()
+    if JokCombatR2ShortcutHighlight ~= nil
+        and JokCombatR2ShortcutHighlight.select ~= nil then
+        JokCombatR2ShortcutHighlight.select(0)
+    end
     local groupId = HUD.directEditGroup
     if groupId == nil then
         if dpad == 0 then HUD.dpadReleaseLock = false end
@@ -2622,6 +2719,7 @@ function HUD.updateDirectEditor(buttons, dpad, player, controlConsumed)
         ConsolePrint(string.format("[JokCombat:loadout] %s -> %s",
             slot.label, magic.name))
     end
+    JokCombatR2ShortcutHighlight.select(index)
     return true
 end
 
@@ -4657,6 +4755,173 @@ function JokCombatR2NativeBridge.initialize()
     return JokCombatR2NativeBridge.ensure()
 end
 
+function JokCombatR2ShortcutHighlight.matches(address, expected)
+    return JokCombatR2NativeBridge.matchesAt(address, expected)
+end
+
+function JokCombatR2ShortcutHighlight.activeNormal()
+    return JokCombatR2ShortcutHighlight.matches(
+            JokCombatR2ShortcutHighlight.rowHookAddress,
+            JokCombatR2ShortcutHighlight.rowHookNormal)
+        and JokCombatR2ShortcutHighlight.matches(
+            JokCombatR2ShortcutHighlight.rowCaveAddress,
+            JokCombatR2ShortcutHighlight.rowCaveNormal)
+        and JokCombatR2ShortcutHighlight.matches(
+            JokCombatR2ShortcutHighlight.textHookAddress,
+            JokCombatR2ShortcutHighlight.textHookNormal)
+        and JokCombatR2ShortcutHighlight.matches(
+            JokCombatR2ShortcutHighlight.textCaveAddress,
+            JokCombatR2ShortcutHighlight.textCaveNormal)
+end
+
+function JokCombatR2ShortcutHighlight.activeOwned()
+    return JokCombatR2ShortcutHighlight.matches(
+            JokCombatR2ShortcutHighlight.rowHookAddress,
+            JokCombatR2ShortcutHighlight.rowHookOwned)
+        and JokCombatR2ShortcutHighlight.matches(
+            JokCombatR2ShortcutHighlight.rowCaveAddress,
+            JokCombatR2ShortcutHighlight.rowCaveOwned)
+        and JokCombatR2ShortcutHighlight.matches(
+            JokCombatR2ShortcutHighlight.textHookAddress,
+            JokCombatR2ShortcutHighlight.textHookOwned)
+        and JokCombatR2ShortcutHighlight.matches(
+            JokCombatR2ShortcutHighlight.textCaveAddress,
+            JokCombatR2ShortcutHighlight.textCaveOwned)
+end
+
+function JokCombatR2ShortcutHighlight.restore(reason, quiet)
+    local rowHookOwned = JokCombatR2ShortcutHighlight.matches(
+        JokCombatR2ShortcutHighlight.rowHookAddress,
+        JokCombatR2ShortcutHighlight.rowHookOwned)
+    local rowCaveOwned = JokCombatR2ShortcutHighlight.matches(
+        JokCombatR2ShortcutHighlight.rowCaveAddress,
+        JokCombatR2ShortcutHighlight.rowCaveOwned)
+    local textHookOwned = JokCombatR2ShortcutHighlight.matches(
+        JokCombatR2ShortcutHighlight.textHookAddress,
+        JokCombatR2ShortcutHighlight.textHookOwned)
+    local textCaveOwned = JokCombatR2ShortcutHighlight.matches(
+        JokCombatR2ShortcutHighlight.textCaveAddress,
+        JokCombatR2ShortcutHighlight.textCaveOwned)
+    local wasOwned = JokCombatR2ShortcutHighlight.ownedNow
+        or rowHookOwned or rowCaveOwned or textHookOwned or textCaveOwned
+
+    -- Disconnect both callers before clearing executable tail padding.
+    if rowHookOwned then
+        WriteArray(JokCombatR2ShortcutHighlight.rowHookAddress,
+            JokCombatR2ShortcutHighlight.rowHookNormal)
+    end
+    if textHookOwned then
+        WriteArray(JokCombatR2ShortcutHighlight.textHookAddress,
+            JokCombatR2ShortcutHighlight.textHookNormal)
+    end
+    local rowHookSafe = JokCombatR2ShortcutHighlight.matches(
+        JokCombatR2ShortcutHighlight.rowHookAddress,
+        JokCombatR2ShortcutHighlight.rowHookNormal)
+    local textHookSafe = JokCombatR2ShortcutHighlight.matches(
+        JokCombatR2ShortcutHighlight.textHookAddress,
+        JokCombatR2ShortcutHighlight.textHookNormal)
+    if rowCaveOwned and rowHookSafe then
+        WriteArray(JokCombatR2ShortcutHighlight.rowCaveAddress,
+            JokCombatR2ShortcutHighlight.rowCaveNormal)
+    end
+    if textCaveOwned and textHookSafe then
+        WriteArray(JokCombatR2ShortcutHighlight.textCaveAddress,
+            JokCombatR2ShortcutHighlight.textCaveNormal)
+    end
+
+    JokCombatR2ShortcutHighlight.ownedNow = false
+    JokCombatR2ShortcutHighlight.ready =
+        JokCombatR2ShortcutHighlight.activeNormal()
+    if wasOwned and not JokCombatR2ShortcutHighlight.ready
+        and not JokCombatR2ShortcutHighlight.failureLogged then
+        JokCombatR2ShortcutHighlight.failureLogged = true
+        ConsolePrint("[JokCombat:r2-highlight:fault] Shortcut text renderer "
+            .. "changed by another writer; conditional restore left it "
+            .. "untouched.")
+    elseif wasOwned and not quiet then
+        log("R2 selected-row highlight restored"
+            .. (reason ~= nil and ": " .. reason or "."))
+    end
+    return wasOwned
+end
+
+function JokCombatR2ShortcutHighlight.ensure()
+    if not CONFIG.r2MagicShortcutHighlight
+        or not JokCombatR2ShortcutHighlight.ready then return false end
+    if JokCombatR2ShortcutHighlight.activeOwned() then
+        JokCombatR2ShortcutHighlight.ownedNow = true
+        return true
+    end
+    if not JokCombatR2ShortcutHighlight.activeNormal() then
+        JokCombatR2ShortcutHighlight.ready = false
+        if not JokCombatR2ShortcutHighlight.failureLogged then
+            JokCombatR2ShortcutHighlight.failureLogged = true
+            ConsolePrint("[JokCombat:r2-highlight:fault] Steam Shortcut "
+                .. "renderer signature mismatch; row highlight disabled.")
+        end
+        return false
+    end
+
+    -- Helpers first, generic RGB wrapper second, row redirect last. Until the
+    -- final write succeeds no KH1 path can emit JokCombat's private sentinel.
+    WriteArray(JokCombatR2ShortcutHighlight.rowCaveAddress,
+        JokCombatR2ShortcutHighlight.rowCaveOwned)
+    WriteArray(JokCombatR2ShortcutHighlight.textCaveAddress,
+        JokCombatR2ShortcutHighlight.textCaveOwned)
+    if not JokCombatR2ShortcutHighlight.matches(
+            JokCombatR2ShortcutHighlight.rowCaveAddress,
+            JokCombatR2ShortcutHighlight.rowCaveOwned)
+        or not JokCombatR2ShortcutHighlight.matches(
+            JokCombatR2ShortcutHighlight.textCaveAddress,
+            JokCombatR2ShortcutHighlight.textCaveOwned) then
+        JokCombatR2ShortcutHighlight.restore("helper write failed", true)
+        return false
+    end
+    WriteArray(JokCombatR2ShortcutHighlight.textHookAddress,
+        JokCombatR2ShortcutHighlight.textHookOwned)
+    if not JokCombatR2ShortcutHighlight.matches(
+            JokCombatR2ShortcutHighlight.textHookAddress,
+            JokCombatR2ShortcutHighlight.textHookOwned) then
+        JokCombatR2ShortcutHighlight.restore("RGB hook write failed", true)
+        return false
+    end
+    WriteArray(JokCombatR2ShortcutHighlight.rowHookAddress,
+        JokCombatR2ShortcutHighlight.rowHookOwned)
+    if not JokCombatR2ShortcutHighlight.activeOwned() then
+        JokCombatR2ShortcutHighlight.restore("row hook write failed", true)
+        return false
+    end
+
+    JokCombatR2ShortcutHighlight.ownedNow = true
+    return true
+end
+
+function JokCombatR2ShortcutHighlight.select(index)
+    if not JokCombatR2ShortcutHighlight.ownedNow
+        or not JokCombatR2Shortcut.journalValid() then return false end
+    local mask = 0
+    if index ~= nil and index >= 1 and index <= 3 then
+        mask = 1 << (index - 1)
+    end
+    local address = ADDRESS.magicRecovery + 0x11
+    if ReadByte(address) ~= mask then WriteByte(address, mask) end
+    return ReadByte(address) == mask
+end
+
+function JokCombatR2ShortcutHighlight.initialize()
+    JokCombatR2ShortcutHighlight.ready = false
+    JokCombatR2ShortcutHighlight.ownedNow = false
+    JokCombatR2ShortcutHighlight.failureLogged = false
+    JokCombatR2ShortcutHighlight.restore("reload recovery", true)
+    if not JokCombatR2ShortcutHighlight.activeNormal() then
+        ConsolePrint("[JokCombat:r2-highlight:fault] selected-row renderer "
+            .. "could not be normalized; highlight disabled.")
+        return false
+    end
+    JokCombatR2ShortcutHighlight.ready = true
+    return true
+end
+
 -- R2 is a second page of KH1's real three-slot Shortcut system. L1 remains the
 -- untouched vanilla page. This follows Shortcut Sets' proven native-page model:
 -- swap only the three real spell IDs. The signed bridge above converts physical
@@ -4667,6 +4932,7 @@ function JokCombatR2Shortcut.validSlotValue(value)
 end
 
 function JokCombatR2Shortcut.clearJournal()
+    WriteByte(ADDRESS.magicRecovery + 0x11, 0)
     WriteLong(ADDRESS.magicRecovery, 0)
 end
 
@@ -4719,6 +4985,9 @@ function JokCombatR2Shortcut.publishJournal()
     WriteByte(journal + 0x0E, NORMAL.l2ControlMap)
     WriteByte(journal + 0x0F, NORMAL.shortcutControlSelector)
     WriteByte(journal + 0x10, 0x53)
+    -- Bit 0/1/2 corresponds to the native Y/X/A row. The code hook also
+    -- requires the signature written below, so publication remains atomic.
+    WriteByte(journal + 0x11, 0x01)
     WriteLong(journal, JokCombatR2Shortcut.recoverySignature)
     return JokCombatR2Shortcut.journalValid()
 end
@@ -4726,6 +4995,7 @@ end
 function JokCombatR2Shortcut.restore(reason, quiet)
     local journal = ADDRESS.magicRecovery
     local ownedJournal = JokCombatR2Shortcut.journalValid()
+    JokCombatR2ShortcutHighlight.select(0)
     local restored = 0
     if ownedJournal then
         local l2Owned = ReadByte(ADDRESS.l2ControlMap)
@@ -4758,6 +5028,7 @@ function JokCombatR2Shortcut.restore(reason, quiet)
         end
         JokCombatR2Shortcut.clearJournal()
     end
+    JokCombatR2ShortcutHighlight.restore(reason, true)
     local wasActive = JokCombatR2Shortcut.active or ownedJournal
     JokCombatR2Shortcut.active = false
     if wasActive and not quiet then
@@ -4838,6 +5109,10 @@ function JokCombatR2Shortcut.arm()
         end
     end
     if not JokCombatR2Shortcut.publishJournal() then return false end
+
+    if JokCombatR2ShortcutHighlight.ensure() then
+        JokCombatR2ShortcutHighlight.select(1)
+    end
 
     for _, slot in ipairs(SHORTCUT_SLOTS) do
         local magic = JokCombatR2Shortcut.byId[loadout[slot.id]]
@@ -7237,6 +7512,7 @@ function _OnInit()
     JokCombatR2Shortcut.recoverStale()
     LegacyMagicRecovery.recoverStale()
     local nativeLimitReadyCount = JokCombatNativeLimit.initialize()
+    local r2HighlightReady = JokCombatR2ShortcutHighlight.initialize()
     local r2MagicReady = nativeShortcutAddressesReady
         and JokCombatR2Shortcut.initialize()
 
@@ -7346,6 +7622,9 @@ function _OnInit()
     log("R2 native magic page " .. (r2MagicReady and "ready" or "disabled")
         .. ": Y/X/A cast through KH1; D-pad Up/Down selects, "
         .. "Left/Right changes, release saves; B remains jump.")
+    log("R2 selected-row highlight "
+        .. (r2HighlightReady and "ready: active spell name is gold."
+            or "disabled: native Shortcut colors remain unchanged."))
     log("native Command Menu Combo Guide ready: up to four native rows; "
         .. "release L1+R1+L2+R2 to toggle it; add D-pad Down to reset "
         .. "defaults; overlay is currently "

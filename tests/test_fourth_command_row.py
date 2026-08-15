@@ -55,6 +55,12 @@ def main() -> None:
         "edge bridge waiting for KH1's next controller sample.",
         "function JokCombatR2Shortcut.distinctLearnedDefaults()",
         "function JokCombatR2Shortcut.nextSelectable(current, delta)",
+        "JokCombatR2ShortcutHighlight = {",
+        "function JokCombatR2ShortcutHighlight.ensure()",
+        "function JokCombatR2ShortcutHighlight.restore(reason, quiet)",
+        "function JokCombatR2ShortcutHighlight.select(index)",
+        "R2 selected-row highlight ",
+        "active spell name is gold.",
         "R2 magic defaults seeded away from L1: Y=%s X=%s A=%s.",
         'file:write("format_version=3\\n")',
         "invalid pre-v3 R2 magic preset detected; it will be replaced ",
@@ -209,6 +215,104 @@ def main() -> None:
     assert 'JokCombatR2NativeBridge.restore("retired bridge recovery", true)' in initialize
     assert 'JokCombatR2NativeBridge.restore("reload recovery", true)' in SOURCE
     assert "r2MagicReady = JokCombatR2NativeBridge.initialize()" in SOURCE
+
+    highlight_start = SOURCE.index("JokCombatR2ShortcutHighlight = {")
+    highlight_end = SOURCE.index("for index, magic in ipairs", highlight_start)
+    highlight = SOURCE[highlight_start:highlight_end]
+
+    def highlight_bytes(name: str) -> list[int]:
+        match = re.search(
+            rf"\n    {name} = \{{(.*?)\n    \}},", highlight, re.DOTALL
+        )
+        assert match is not None, f"missing {name} highlight bytes"
+        return [
+            int(value, 16)
+            for value in re.findall(r"0x([0-9A-Fa-f]{2})", match.group(1))
+        ]
+
+    row_hook_normal = highlight_bytes("rowHookNormal")
+    row_hook_owned = highlight_bytes("rowHookOwned")
+    row_cave_normal = highlight_bytes("rowCaveNormal")
+    row_cave_owned = highlight_bytes("rowCaveOwned")
+    text_hook_normal = highlight_bytes("textHookNormal")
+    text_hook_owned = highlight_bytes("textHookOwned")
+    text_cave_normal = highlight_bytes("textCaveNormal")
+    text_cave_owned = highlight_bytes("textCaveOwned")
+
+    assert row_hook_normal == [
+        0x45, 0x0F, 0x44, 0xCD, 0x0F, 0xB6, 0x0E
+    ]
+    assert len(row_hook_owned) == 7 and row_hook_owned[0] == 0xE8
+    assert row_cave_normal == [0x00] * 52
+    assert len(row_cave_owned) == 52
+    row_hook_rva = 0x27C09B
+    row_cave_rva = row_hook_rva + 5 + int.from_bytes(
+        bytes(row_hook_owned[1:5]), "little", signed=True
+    )
+    assert row_cave_rva == 0x3ADEF4
+    assert row_cave_owned[:7] == row_hook_normal
+    assert row_cave_owned[7:9] == [0x81, 0x3D]
+    signature_rva = row_cave_rva + 17 + int.from_bytes(
+        bytes(row_cave_owned[9:13]), "little", signed=True
+    )
+    assert signature_rva == 0x2DB79B0
+    assert row_cave_owned[13:17] == [0x4A, 0x52, 0x32, 0x4D]
+    marker_rva = row_cave_rva + 26 + int.from_bytes(
+        bytes(row_cave_owned[21:25]), "little", signed=True
+    )
+    owner_rva = row_cave_rva + 35 + int.from_bytes(
+        bytes(row_cave_owned[30:34]), "little", signed=True
+    )
+    selection_rva = row_cave_rva + 43 + int.from_bytes(
+        bytes(row_cave_owned[39:43]), "little", signed=True
+    )
+    assert marker_rva == 0x2DB79B8
+    assert owner_rva == 0x2DB79C0
+    assert selection_rva == 0x2DB79C1
+    assert row_cave_owned[45:51] == [
+        0x41, 0xB9, 0xFF, 0xD0, 0x50, 0x00
+    ]
+    assert row_cave_owned[-1] == 0xC3
+
+    assert text_hook_normal == [
+        0x44, 0x88, 0x4C, 0x24, 0x58,
+        0x44, 0x88, 0x4C, 0x24, 0x59,
+        0x44, 0x88, 0x4C, 0x24, 0x5A,
+    ]
+    assert len(text_hook_owned) == 15 and text_hook_owned[0] == 0xE8
+    text_hook_rva = 0x27A944
+    text_cave_rva = text_hook_rva + 5 + int.from_bytes(
+        bytes(text_hook_owned[1:5]), "little", signed=True
+    )
+    assert text_cave_rva == 0x3ADF30
+    assert text_cave_normal == [0x00] * 47
+    assert len(text_cave_owned) == 47
+    assert text_cave_owned[:9] == [
+        0x41, 0x81, 0xF9, 0xFF, 0xD0, 0x50, 0x00, 0x74, 0x10
+    ]
+    assert text_cave_owned[-1] == 0xC3
+
+    highlight_restore = SOURCE[
+        SOURCE.index("function JokCombatR2ShortcutHighlight.restore") :
+        SOURCE.index("function JokCombatR2ShortcutHighlight.ensure")
+    ]
+    highlight_ensure = SOURCE[
+        SOURCE.index("function JokCombatR2ShortcutHighlight.ensure") :
+        SOURCE.index("function JokCombatR2ShortcutHighlight.select")
+    ]
+    assert highlight_restore.index("rowHookAddress") < highlight_restore.index(
+        "rowCaveAddress"
+    )
+    assert highlight_restore.index("textHookAddress") < highlight_restore.index(
+        "textCaveAddress"
+    )
+    assert highlight_ensure.index("rowCaveAddress") < highlight_ensure.index(
+        "textHookAddress"
+    ) < highlight_ensure.index("rowHookAddress")
+    assert "JokCombatR2ShortcutHighlight.select(index)" in editor
+    assert "WriteByte(journal + 0x11, 0x01)" in publish
+    assert "JokCombatR2ShortcutHighlight.restore(reason, true)" in SOURCE
+    assert "JokCombatR2ShortcutHighlight.initialize()" in SOURCE
 
     print("PASS: fourth row and edge-bridged R2 magic page are reversible")
 
