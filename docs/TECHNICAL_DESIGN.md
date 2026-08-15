@@ -32,7 +32,7 @@ complete cast path.
 | File | Release role |
 |---|---|
 | `JokCombat_CombatPrototype.lua` | Main v2.1.0 combat, input, HUD, movement, Action, and Limit controller. The historical filename is retained to avoid breaking existing installations. |
-| `JokCombat_NativeAbilities.lua` | Persistent native grant of Shared High Jump, Glide, Superglide, four Combo Plus, two Air Combo Plus, Combo Master, and 99 maximum AP. |
+| `JokCombat_NativeAbilities.lua` | Persistent native grant of Shared High Jump, Glide, Superglide, four Combo Plus, two Air Combo Plus, Combo Master, and 99 maximum AP for Sora, Donald, and Goofy. |
 | `JokCombat_NativeKeyblades.lua` | Persistent native grant of the 17 genuine Sora Keyblades other than Ultima Weapon, plus Save the Queen and Save the King, with unique-count reconciliation. |
 | `JokCombat_DropRate.lua` | Runtime-only 2.0x item and prize drop patch. |
 

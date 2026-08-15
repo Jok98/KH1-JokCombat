@@ -1,6 +1,6 @@
 LUAGUI_NAME = "JokCombat Native Abilities"
 LUAGUI_AUTH = "Jok; Critical Mix reference by Xendra"
-LUAGUI_DESC = "Keeps JokCombat's Shared movement abilities and native combo passives learned and equipped."
+LUAGUI_DESC = "Keeps JokCombat's Shared movement abilities, party AP and native combo passives configured."
 
 -- JokCombat native ability grant for the current Steam Global build.
 --
@@ -13,11 +13,12 @@ LUAGUI_DESC = "Keeps JokCombat's Shared movement abilities and native combo pass
 -- visited by KH1.
 --
 -- The Steam save block starts at 0x2DE9360. Its four-byte save header is
--- followed by Sora's 0x74-byte Character record: AP max is Character+0x05
--- (save+0x09), while the 48 ability bytes start at Character+0x40
--- (save+0x44). These offsets are independently described by Kingdom Save
--- Editor's KH1 Character model and match the live Kingdom Key byte at
--- Character+0x32. Do not port the old EGS globals with one uniform delta.
+-- followed by Sora, Donald and Goofy's 0x74-byte Character records: AP max is
+-- Character+0x05, while Sora's 48 ability bytes start at Character+0x40. The
+-- Character layout is independently described by Kingdom Save Editor's KH1
+-- model and the 0x74 stride matches each character's live equipped-weapon
+-- byte at Character+0x32. Do not port the old EGS globals with one uniform
+-- delta.
 --
 -- Unlike the retired NativePassiveTest, these are deliberate progression
 -- writes. Once the player saves, the equipped abilities become part of that
@@ -32,7 +33,7 @@ LUAGUI_DESC = "Keeps JokCombat's Shared movement abilities and native combo pass
 -- misplaced entry. Later vanilla rewards are reconciled without touching any
 -- unrelated ability.
 
-local VERSION = "v0.6.0"
+local VERSION = "v0.7.0"
 local EXPECTED_GAME_ID = 0xAF71841E
 local FINGERPRINT = 0x7265737563697065 -- "epicures", little endian
 local ABILITY_SLOT_COUNT = 48
@@ -46,6 +47,9 @@ local ADDRESS = {
     fingerprint = 0x3B2271,
     playerPointer = 0x2537E48,
     soraMaxAP = 0x2DE9369,
+    -- Donald and Goofy are the next two Character records (stride 0x74).
+    donaldMaxAP = 0x2DE93DD,
+    goofyMaxAP = 0x2DE9451,
     soraAbilitySlots = 0x2DE93A4,
     -- Steam save block 0x2DE9360 + KH1FM SharedAbilities offset 0x599.
     -- The corresponding authorized Critical Mix EGS address is 0x2DE5F69;
@@ -56,6 +60,12 @@ local ADDRESS = {
     inMenu = 0x232DF80,
     saveMenuOpen = 0x232DF84,
     pauseMenuOpen = 0x2867374,
+}
+
+local PARTY_MAX_AP = {
+    { name = "Sora", address = ADDRESS.soraMaxAP },
+    { name = "Donald", address = ADDRESS.donaldMaxAP },
+    { name = "Goofy", address = ADDRESS.goofyMaxAP },
 }
 
 -- v0.1.x used EGS-derived globals ten bytes before the real Steam ability
@@ -432,6 +442,26 @@ local function describeSlotIndices(slots)
     return table.concat(indices, ",")
 end
 
+local function reconcilePartyMaxAP()
+    local changed = false
+    for _, character in ipairs(PARTY_MAX_AP) do
+        local previous = ReadByte(character.address)
+        if previous ~= TARGET_MAX_AP then
+            WriteByte(character.address, TARGET_MAX_AP)
+            if ReadByte(character.address) ~= TARGET_MAX_AP then
+                return false, string.format(
+                    "%s max AP write failed: %d -> %d",
+                    character.name, previous, TARGET_MAX_AP)
+            end
+            log(string.format(
+                "%s max AP set natively: %d -> %d.",
+                character.name, previous, TARGET_MAX_AP))
+            changed = true
+        end
+    end
+    return true, changed
+end
+
 local function ensureNativePassives()
     local changed = false
 
@@ -442,20 +472,12 @@ local function ensureNativePassives()
     end
     if repairedOrError > 0 then changed = true end
 
-    if ReadByte(ADDRESS.soraMaxAP) ~= TARGET_MAX_AP then
-        local previous = ReadByte(ADDRESS.soraMaxAP)
-        WriteByte(ADDRESS.soraMaxAP, TARGET_MAX_AP)
-        if ReadByte(ADDRESS.soraMaxAP) ~= TARGET_MAX_AP then
-            log(string.format(
-                "ERROR: Sora max AP write failed: %d -> %d.",
-                previous, TARGET_MAX_AP))
-            return false
-        end
-        log(string.format(
-            "Sora max AP set natively: %d -> %d.",
-            previous, TARGET_MAX_AP))
-        changed = true
+    local apOk, apChangedOrError = reconcilePartyMaxAP()
+    if not apOk then
+        log("ERROR: " .. apChangedOrError .. ".")
+        return false
     end
+    if apChangedOrError then changed = true end
 
     -- Movement abilities belong to the Shared list, not Sora's Character
     -- passives. Guarantee all three native records before removing the
@@ -521,8 +543,8 @@ local function ensureNativePassives()
     if changed then
         log("native ability grant complete; changes will persist when KH1 saves.")
     else
-        log("Shared movement set and native passive counts already exact "
-            .. "and equipped (3 + 4/2/1); no writes.")
+        log("party AP, Shared movement set and native passive counts already "
+            .. "exact and equipped (99/99/99 + 3 + 4/2/1); no writes.")
     end
     applied = true
     pendingReport = true
@@ -554,8 +576,11 @@ local function reportNativeState()
     local groundMax = ReadByte(ADDRESS.maxGroundCombo)
     local airMax = ReadByte(ADDRESS.maxAirCombo)
     log(string.format(
-        "verified native records: APmax=%d groundMax=%d airMax=%d; %s.",
+        "verified native records: APmax Sora/Donald/Goofy=%d/%d/%d "
+            .. "groundMax=%d airMax=%d; %s.",
         ReadByte(ADDRESS.soraMaxAP),
+        ReadByte(ADDRESS.donaldMaxAP),
+        ReadByte(ADDRESS.goofyMaxAP),
         groundMax,
         airMax,
         table.concat(details, ", ")))
@@ -585,7 +610,7 @@ function _OnInit()
     canRun = true
     log("Native Abilities " .. VERSION
         .. " ready: Shared High Jump/Glide/Superglide + exact native "
-        .. "counts 4/2/1 + persistent grant.")
+        .. "counts 4/2/1 + party AP 99/99/99 + persistent grant.")
 end
 
 function _OnFrame()
@@ -612,10 +637,12 @@ function _OnFrame()
 
     -- Keep the requested exact counts equipped. Natural rewards may append a
     -- surplus copy later; the next gameplay frame reconciles and compacts it.
-    if ReadByte(ADDRESS.soraMaxAP) ~= TARGET_MAX_AP then
-        applied = false
-        pendingReport = false
-        return
+    for _, character in ipairs(PARTY_MAX_AP) do
+        if ReadByte(character.address) ~= TARGET_MAX_AP then
+            applied = false
+            pendingReport = false
+            return
+        end
     end
 
     for _, sharedAbility in ipairs(SHARED_MOVEMENT) do
