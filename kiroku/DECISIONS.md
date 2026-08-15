@@ -107,6 +107,27 @@ Consequences:
 - Every new patch needs ownership, verification, timeout, reload, exit, and conflict behavior.
 - Another combat overhaul touching the same structures remains unsupported.
 
+### Decision: Recover 1 MP per 10 confirmed normal hits
+
+Status: active
+Area: resource economy
+
+Decision:
+Only native `C8-CE` normal attacks may earn melee-MP credit, at most once per
+animation; ten credits restore exactly 1 MP below the verified native cap.
+
+Rationale:
+The live-tested rate rewards active melee play without making magic or Limits
+effectively free, while confirmed contact edges avoid rewarding whiffs.
+
+Consequences:
+- Actions, Limits, magic, Guard, Counterattack, and low-secondary Limit reuse
+  never earn credit.
+- Partial credit is process-local and clears at full MP, on reload, and when the
+  player object changes.
+- MP writes are capped, immediately verified, and disabled until reload after a
+  verification failure.
+
 ## Replaced Or Obsolete Decisions
 
 - The configurable R2 Action Ability page was replaced by the native three-slot R2 magic page after Action shortcuts became redundant with the A/Y family map.

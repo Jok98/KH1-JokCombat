@@ -41,6 +41,7 @@ def test_release_manifest_is_minimal_and_complete() -> None:
         "JokCombat_StateProbe.lua",
         "JokCombat_InputProbe.lua",
         "JokCombat_CommandMenuProbe.lua",
+        "JokCombat_MPHitProbe.lua",
     ):
         assert f'    "{diagnostic}"' not in build_script
 
