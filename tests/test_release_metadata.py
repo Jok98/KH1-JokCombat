@@ -29,6 +29,7 @@ def test_release_manifest_is_minimal_and_complete() -> None:
         "JokCombat_NativeAbilities.lua",
         "JokCombat_NativeKeyblades.lua",
         "JokCombat_DropRate.lua",
+        "tools/Deploy-Local.ps1",
         "README.md",
         "CHANGELOG.md",
         "LICENSE",
@@ -56,7 +57,7 @@ def test_release_manifest_is_minimal_and_complete() -> None:
 def main() -> None:
     test_release_versions_are_consistent()
     test_release_manifest_is_minimal_and_complete()
-    print("PASS: v2.1.0 release metadata and seven-file manifest are consistent")
+    print("PASS: v2.1.0 release metadata and eight-file manifest are consistent")
 
 
 if __name__ == "__main__":

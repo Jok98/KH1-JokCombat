@@ -51,6 +51,8 @@ Notes:
 
 ## Done
 
+- Replaced the machine-specific absolute KH1 script path with LuaBackend's
+  standard relative path and added a verified runtime-only deploy helper.
 - `v2.1.0` shipped the rebuilt five-family A/Y map, native Limit latching, depth continuation, and intentional-only ground-to-air entry.
 - Post-tag work merged AP 99 for the full party and the functional native R2 magic page with selected-row highlighting.
 - The project-level Kiroku hub was initialized from repository and test evidence on 2026-08-15.

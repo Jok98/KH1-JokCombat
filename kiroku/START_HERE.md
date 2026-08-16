@@ -13,7 +13,7 @@
 - `R2` now opens a second native three-slot magic page with learned-spell editing and a gold selected row.
 - Native abilities, party AP, and weapon grants can persist after KH1 saves; combat routing and drop-rate changes are process-local.
 - Steam Global is the only supported executable, and all writers fail closed on invalid signatures or state.
-- Static tests, three Lua harnesses, and compilation of all seven Lua scripts passed on the inspected `main` baseline.
+- Static tests, five Lua harnesses, and compilation of all eight root Lua scripts passed on the inspected baseline.
 - Canonical release documentation still describes the retired R2 Action Ability page and must be reconciled before the next release.
 
 ## Next Action

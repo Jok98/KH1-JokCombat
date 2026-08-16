@@ -26,6 +26,7 @@ $releaseFiles = @(
     "JokCombat_NativeAbilities.lua",
     "JokCombat_NativeKeyblades.lua",
     "JokCombat_DropRate.lua",
+    "tools/Deploy-Local.ps1",
     "README.md",
     "CHANGELOG.md",
     "LICENSE"

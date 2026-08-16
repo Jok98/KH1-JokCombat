@@ -10,7 +10,10 @@ JokCombat is a LuaBackendHook combat overhaul for KINGDOM HEARTS FINAL MIX. It k
 - The latest tagged release is `v2.1.0` from 2026-08-14.
 - Three post-tag changes are merged: Donald and Goofy maximum AP set to 99, a second native magic shortcut page on `R2`, and gold highlighting for its selected row.
 - Confirmed native normal attacks now restore 1 MP after every 10 eligible hits, at most once per attack animation, with no charge banking at full MP.
-- The release bundle still consists of `JokCombat_CombatPrototype.lua`, `JokCombat_NativeAbilities.lua`, `JokCombat_NativeKeyblades.lua`, and `JokCombat_DropRate.lua`; four probe scripts remain optional diagnostics.
+- The release runtime payload consists of `JokCombat_CombatPrototype.lua`, `JokCombat_NativeAbilities.lua`, `JokCombat_NativeKeyblades.lua`, and `JokCombat_DropRate.lua`; four probe scripts remain optional diagnostics.
+- Local deployment now targets LuaBackend's standard Steam Documents
+  `scripts/kh1` directory and verifies the four runtime copies with SHA-256;
+  release archives include the deployment helper.
 - Gameplay scope is Steam Global only. Epic support and optional Solo Sora mode remain future work.
 - The first track, `melee-mp-regeneration`, is closed after successful live validation.
 

@@ -7,6 +7,8 @@ All notable player-facing changes to JokCombat are recorded here.
 ### Changed
 
 - Set Donald and Goofy's native maximum AP to `99`, matching Sora.
+- Restored LuaBackend's standard Steam `scripts/kh1` Documents path and added a
+  SHA-256-verified local deployment script for the four runtime modules.
 
 ## 2.1.0 - 2026-08-14
 

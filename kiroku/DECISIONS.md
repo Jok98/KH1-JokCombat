@@ -128,6 +128,27 @@ Consequences:
 - MP writes are capped, immediately verified, and disabled until reload after a
   verification failure.
 
+### Decision: Deploy from the repository to LuaBackend's standard path
+
+Status: active
+Area: installation and packaging
+
+Decision:
+Keep source files in the repository and deploy the four runtime modules to the
+standard Steam Documents `scripts/kh1` directory with a checked-in PowerShell
+helper; diagnostics remain opt-in.
+
+Rationale:
+A standard relative LuaBackend configuration is portable between users and a
+hash-verified deploy avoids maintaining a second hand-edited source tree.
+
+Consequences:
+- `LuaBackend.toml` uses `scripts/kh1/` with `relative = true`.
+- The deploy helper overwrites only named JokCombat files and never cleans the
+  destination.
+- Release archives include the helper so README instructions work outside a
+  Git checkout.
+
 ## Replaced Or Obsolete Decisions
 
 - The configurable R2 Action Ability page was replaced by the native three-slot R2 magic page after Action shortcuts became redundant with the A/Y family map.

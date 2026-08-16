@@ -78,10 +78,20 @@ Other regional builds and the Epic Games Store executable are not supported.
 ## Installation
 
 1. Back up your KH1 save.
-2. Create a clean script directory, for example:
+2. Configure the KH1 entry in `LuaBackend.toml` to use LuaBackend's standard
+   Steam Documents path:
+
+   ```toml
+   [kh1]
+   scripts = [{ path = "scripts/kh1/", relative = true }]
+   exe = "KINGDOM HEARTS FINAL MIX.exe"
+   game_docs = "My Games/KINGDOM HEARTS HD 1.5+2.5 ReMIX"
+   ```
+
+   This resolves to:
 
    ```text
-   C:\Users\<you>\Documents\KH_mod\scripts\kh1
+   C:\Users\<you>\Documents\My Games\KINGDOM HEARTS HD 1.5+2.5 ReMIX\scripts\kh1
    ```
 
 3. Copy these release files into that directory:
@@ -93,25 +103,28 @@ Other regional builds and the Epic Games Store executable are not supported.
    JokCombat_DropRate.lua
    ```
 
-4. Point the KH1 entry in `LuaBackend.toml` to that directory:
+   From a source checkout or an extracted release, the same runtime-only
+   deployment can be performed automatically from PowerShell:
 
-   ```toml
-   [kh1]
-   scripts = [
-       { path = "C:\\Users\\<you>\\Documents\\KH_mod\\scripts\\kh1", relative = false }
-   ]
+   ```powershell
+   .\tools\Deploy-Local.ps1
    ```
 
-5. Start KH1 or press `F1` in the LuaBackend console to reload all scripts.
+   Add `-IncludeDiagnostics` only when the four optional probes are needed.
+   The deploy script verifies every copied file with SHA-256 and never removes
+   unrelated files from the destination.
+
+4. Start KH1 or press `F1` in the LuaBackend console to reload all scripts.
    A successful load reports `JokCombat v2.1.0`, Native Abilities, Native
    Keyblades, and the `200%` Drop Rate module.
 
-The three probe scripts in this repository are optional developer diagnostics
+The four probe scripts in this repository are optional developer diagnostics
 and are not required for normal play.
 
 ## Upgrading
 
-Back up the save, then replace the old runtime files with all four files listed
+Back up the save, then run `tools/Deploy-Local.ps1` from a source checkout or
+extracted release, or replace the old runtime files with all four files listed
 above. Users upgrading directly from 1.0.0 must also copy
 `JokCombat_NativeKeyblades.lua`, introduced in 2.0.0. The existing
 `JokCombat_ActionLoadout.cfg` remains compatible and does not need to be

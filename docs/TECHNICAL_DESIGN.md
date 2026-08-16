@@ -36,9 +36,10 @@ complete cast path.
 | `JokCombat_NativeKeyblades.lua` | Persistent native grant of the 17 genuine Sora Keyblades other than Ultima Weapon, plus Save the Queen and Save the King, with unique-count reconciliation. |
 | `JokCombat_DropRate.lua` | Runtime-only 2.0x item and prize drop patch. |
 
-`JokCombat_StateProbe.lua`, `JokCombat_InputProbe.lua`, and
-`JokCombat_CommandMenuProbe.lua` are read-only development tools. They are not
-runtime dependencies and are not part of the normal release installation.
+`JokCombat_StateProbe.lua`, `JokCombat_InputProbe.lua`,
+`JokCombat_CommandMenuProbe.lua`, and `JokCombat_MPHitProbe.lua` are read-only
+development tools. They are not runtime dependencies and are not part of the
+normal release installation.
 
 The bundle is versioned as v2.1.0. Helper modules retain independent internal
 versions because their memory contracts and release cadence are separate from
@@ -383,6 +384,17 @@ The distributable archive and checksum are built with:
 ```powershell
 powershell -ExecutionPolicy Bypass -File tools/Build-Release.ps1 -Version v2.1.0
 ```
+
+Local development and extracted releases deploy the four runtime modules with:
+
+```powershell
+.\tools\Deploy-Local.ps1
+```
+
+The default destination is LuaBackend's Steam Documents path,
+`My Games\KINGDOM HEARTS HD 1.5+2.5 ReMIX\scripts\kh1`. The script performs no
+cleanup, verifies every copied file with SHA-256, and includes the four
+diagnostic probes only when `-IncludeDiagnostics` is explicit.
 
 The v2.1.0 gameplay baseline has also been tested live for native ground and
 aerial strings, all five branch families, all four active combo Limits, the
