@@ -5,6 +5,7 @@
 *.pre-v*.lua
 JokCombat_ActionLoadout.cfg
 dist/
+__pycache__/
 
 # Windows metadata
 Thumbs.db

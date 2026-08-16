@@ -107,6 +107,53 @@ Consequences:
 - Every new patch needs ownership, verification, timeout, reload, exit, and conflict behavior.
 - Another combat overhaul touching the same structures remains unsupported.
 
+### Decision: Recover 1 MP per 10 confirmed normal hits
+
+Status: active
+Area: resource economy
+
+Decision:
+Only native `C8-CE` normal attacks may earn melee-MP credit, at most once per
+animation; ten credits restore exactly 1 MP below the verified native cap.
+
+Rationale:
+The live-tested rate rewards active melee play without making magic or Limits
+effectively free, while confirmed contact edges avoid rewarding whiffs.
+
+Consequences:
+- Actions, Limits, magic, Guard, Counterattack, and low-secondary Limit reuse
+  never earn credit.
+- Partial credit is process-local and clears at full MP, on reload, and when the
+  player object changes.
+- MP writes are capped, immediately verified, and disabled until reload after a
+  verification failure.
+
+### Decision: Recommend OpenKH while preserving direct LuaBackend deployment
+
+Status: active
+Area: installation and packaging
+
+Decision:
+Publish a root OpenKH manifest and dedicated OpenKH archive as the recommended
+player installation, while retaining the checked-in PowerShell helper for
+development and users who run LuaBackend directly; diagnostics remain opt-in.
+
+Rationale:
+OpenKH provides centralized installation, enable/disable, ordering, and GitHub
+updates without manual per-file copies. A standard relative LuaBackend path and
+hash-verified helper remain useful when OpenKH is unavailable or while testing
+source changes.
+
+Consequences:
+- `mod.yml` is KH1-specific and exposes only the four required runtime modules.
+- Release builds produce a root-level `-OpenKH.zip` in addition to the full
+  conventional archive.
+- `LuaBackend.toml` uses `scripts/kh1/` with `relative = true`.
+- The deploy helper overwrites only named JokCombat files and never cleans the
+  destination.
+- The full release archive includes the helper so direct instructions work
+  outside a Git checkout.
+
 ## Replaced Or Obsolete Decisions
 
 - The configurable R2 Action Ability page was replaced by the native three-slot R2 magic page after Action shortcuts became redundant with the A/Y family map.

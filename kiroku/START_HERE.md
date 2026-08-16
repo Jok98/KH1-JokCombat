@@ -7,19 +7,19 @@
 
 ## Current State
 
-- The latest public release is `v2.1.0`; `main` also contains unreleased party-AP and R2-magic changes.
+- The latest public release is `v2.2.0` from 2026-08-16.
 - Normal ground and aerial `A` strings remain native and use Combo Master, four Combo Plus, and two Air Combo Plus.
 - Contextual `Y` families expose eight unique Action Abilities and four native Limits; defense, movement, and the aerial family remain separate.
 - `R2` now opens a second native three-slot magic page with learned-spell editing and a gold selected row.
 - Native abilities, party AP, and weapon grants can persist after KH1 saves; combat routing and drop-rate changes are process-local.
 - Steam Global is the only supported executable, and all writers fail closed on invalid signatures or state.
-- Static tests, three Lua harnesses, and compilation of all seven Lua scripts passed on the inspected `main` baseline.
-- Canonical release documentation still describes the retired R2 Action Ability page and must be reconciled before the next release.
+- `v2.2.0` adds party AP 99, a second native R2 magic page with gold selection, 1 MP per 10 confirmed normal hits, standard local deployment, and OpenKH packaging.
+- Nine static tests, five Lua harnesses, and compilation of all eight root Lua scripts pass on the release baseline.
+- OpenKH is the recommended installation path; direct LuaBackend deployment remains supported for development and fallback use.
 
 ## Next Action
 
-- Update README, changelog, technical design, roadmap wording, and release metadata for the second R2 magic page and party AP changes.
-- Decide the next version, repeat static and Lua validation, perform the live-game regression matrix, then build and publish the release archive.
+- No release work is active. Preserve the `v2.2.0` baseline and start Epic or Solo Sora research only when explicitly selected.
 
 ## Hard Constraints
 
@@ -36,5 +36,4 @@
 - `STATE.md` and `WORK.md` for verified status, open questions, and the release backlog.
 - `ARCHITECTURE.md` for module ownership and runtime flows.
 - `DECISIONS.md` and `CONSTRAINTS.md` before changing combat or progression rules.
-- `IDEAS.md` and `RISKS.md` for deferred directions and fragile areas.
-- `LOG.md` only when memory-update history matters.
+- `IDEAS.md`, `RISKS.md`, and `LOG.md` for deferred directions, fragile areas, or update history.

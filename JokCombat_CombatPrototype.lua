@@ -1,8 +1,8 @@
 LUAGUI_NAME = "JokCombat"
 LUAGUI_AUTH = "Jok; Critical Mix reference by Xendra / KSX"
-LUAGUI_DESC = "Native Cross combo, Musou-style Y Action/Limit families, one-cycle double jump, configurable loadout and universal defense."
+LUAGUI_DESC = "Native Cross combo, Musou-style Y Action/Limit families, one-cycle double jump, second R2 magic page and universal defense."
 
--- JokCombat v2.1.0 for the current Steam Global executable.
+-- JokCombat v2.2.0 for the current Steam Global executable.
 -- Critical Mix was used as an authorized technical reference. This script is
 -- intentionally limited to combat/input state and does not persist changes to
 -- story flags, rewards, inventory, AP, levels, worlds, chests, or synthesis.
@@ -33,6 +33,13 @@ local CONFIG = {
     -- value, applies a multiplier, and restores only its exact owned value.
     normalAttackSpeedup = true,
     normalAttackSpeedMultiplier = 1.15,
+
+    -- A confirmed native normal hit contributes one process-local charge.
+    -- Ten charges restore exactly 1 MP, capped by Sora's live battle-slot max.
+    -- Whiffs, Y Actions, Limits, defense and multiple targets in one animation
+    -- do not add charges; hits made while MP is full are never banked.
+    meleeMPRecovery = true,
+    meleeHitsPerMP = 10,
 
     -- Modifier-free Triangle selects the Musou-style Strong/C2/C3/C4/C5
     -- family. Eight ground Action Abilities and four native Limits form
@@ -163,7 +170,7 @@ local CONFIG = {
 
 local EXPECTED_GAME_ID = 0xAF71841E
 local FINGERPRINT = 0x7265737563697065 -- "epicures", little endian
-local VERSION = "v2.1.0"
+local VERSION = "v2.2.0"
 
 local ADDRESS = {
     fingerprint = 0x3B2271,
@@ -1042,7 +1049,8 @@ local HUD = {
     dpadReleaseLock = false,
     controlChordHeld = false,
     controlChordUsed = false,
-    -- KH1 renders locked Summon as command 0x00. While the R2 overlay owns all
+    -- KH1 renders locked Summon as command 0x00. While the four-row Combo
+    -- Guide owns all
     -- four face inputs, command 0x06 is borrowed only as a normal visual
     -- carrier for row four and is restored conditionally when the overlay ends.
     nativeFallbackCommandId = 0x06,
@@ -2449,6 +2457,9 @@ local function restoreAllPatches()
     if JokCombatAttackSpeed ~= nil
         and JokCombatAttackSpeed.restore ~= nil then
         JokCombatAttackSpeed.restore("patch restore", true)
+    end
+    if JokCombatMeleeMP ~= nil and JokCombatMeleeMP.reset ~= nil then
+        JokCombatMeleeMP.reset("patch restore", true, true)
     end
     if JokCombatAirJump ~= nil
         and JokCombatAirJump.restoreRoutes ~= nil then
@@ -4252,6 +4263,175 @@ function JokCombatAttackSpeed.observe(player, nativeLimitActive)
     -- Never fight a newer owner. In particular, do not multiply an external
     -- value on the next frame while this physical string is still active.
     JokCombatAttackSpeed.blockCycle("playback speed changed externally")
+end
+
+-- Steam Global live capture on 2026-08-15 confirmed that native C8-CE normal
+-- contacts raise 0x296B230 to 0x01, while whiffs do not. Strike Raid may raise
+-- 0x40 and Slapshot may raise 0x01, but both occur outside C8-CE. Keep that
+-- animation boundary and the existing low-secondary Limit exclusion, then
+-- accept at most one rising contact edge per native attack animation.
+JokCombatMeleeMP = {
+    enabled = false,
+    hitsPerMP = 10,
+    currentMPOffset = 0x44,
+    maxMPOffset = 0x48,
+    credit = 0,
+    playerPointer = nil,
+    active = false,
+    animation = nil,
+    lastTime = 0.0,
+    hitSeen = false,
+    lastSignal = nil,
+    fullLogged = false,
+    layoutFaultLogged = false,
+}
+
+function JokCombatMeleeMP.clearAttack()
+    JokCombatMeleeMP.active = false
+    JokCombatMeleeMP.animation = nil
+    JokCombatMeleeMP.lastTime = 0.0
+    JokCombatMeleeMP.hitSeen = false
+end
+
+function JokCombatMeleeMP.reset(reason, clearCredit, quiet)
+    local hadProgress = JokCombatMeleeMP.credit > 0
+        or JokCombatMeleeMP.active
+    JokCombatMeleeMP.clearAttack()
+    JokCombatMeleeMP.playerPointer = nil
+    JokCombatMeleeMP.lastSignal = nil
+    JokCombatMeleeMP.fullLogged = false
+    JokCombatMeleeMP.layoutFaultLogged = false
+    if clearCredit then JokCombatMeleeMP.credit = 0 end
+    if hadProgress and not quiet and reason ~= nil then
+        log("[melee-mp] local charge reset (" .. reason .. ").")
+    end
+end
+
+function JokCombatMeleeMP.initialize()
+    JokCombatMeleeMP.enabled = false
+    JokCombatMeleeMP.hitsPerMP = CONFIG.meleeHitsPerMP
+    JokCombatMeleeMP.credit = 0
+    JokCombatMeleeMP.reset("reload", true, true)
+    if CONFIG.meleeMPRecovery ~= true then return false end
+    if type(JokCombatMeleeMP.hitsPerMP) ~= "number"
+        or JokCombatMeleeMP.hitsPerMP < 2
+        or JokCombatMeleeMP.hitsPerMP > 20
+        or JokCombatMeleeMP.hitsPerMP % 1 ~= 0 then
+        log("[melee-mp] invalid hit threshold; recovery disabled.")
+        return false
+    end
+    JokCombatMeleeMP.enabled = true
+    return true
+end
+
+function JokCombatMeleeMP.ownsAnimation(player)
+    if player == nil or player.animation < 0xC8
+        or player.animation > 0xCE then
+        return false
+    end
+    return not (player.animation <= 0xCA and player.secondary <= 0x02)
+end
+
+function JokCombatMeleeMP.readBattleMP(player)
+    local slot = ReadShort(player.pointer + PLAYER.slotReference, true)
+    if slot < 0x8000 or slot > 0xFFFF then return nil end
+    local base = ADDRESS.battleSlotBase + slot
+    local currentAddress = base + JokCombatMeleeMP.currentMPOffset
+    local currentMP = ReadByte(currentAddress)
+    local maxMP = ReadByte(base + JokCombatMeleeMP.maxMPOffset)
+    if maxMP < 1 or maxMP > 99 or currentMP > maxMP then return nil end
+    return currentAddress, currentMP, maxMP
+end
+
+function JokCombatMeleeMP.acceptHit(player, signal)
+    local currentAddress, currentMP, maxMP =
+        JokCombatMeleeMP.readBattleMP(player)
+    if currentAddress == nil then
+        if not JokCombatMeleeMP.layoutFaultLogged then
+            log("[melee-mp] invalid Sora MP layout; hit ignored.")
+            JokCombatMeleeMP.layoutFaultLogged = true
+        end
+        return
+    end
+    JokCombatMeleeMP.layoutFaultLogged = false
+
+    if currentMP >= maxMP then
+        JokCombatMeleeMP.credit = 0
+        if not JokCombatMeleeMP.fullLogged then
+            log(string.format(
+                "[melee-mp] confirmed 0x%02X normal hit at full MP; "
+                    .. "no charge banked (%d/%d).",
+                signal, currentMP, maxMP))
+            JokCombatMeleeMP.fullLogged = true
+        end
+        return
+    end
+    JokCombatMeleeMP.fullLogged = false
+
+    JokCombatMeleeMP.credit = JokCombatMeleeMP.credit + 1
+    if JokCombatMeleeMP.credit < JokCombatMeleeMP.hitsPerMP then
+        log(string.format(
+            "[melee-mp] confirmed normal hit: charge=%d/%d mp=%d/%d.",
+            JokCombatMeleeMP.credit, JokCombatMeleeMP.hitsPerMP,
+            currentMP, maxMP))
+        return
+    end
+
+    local desired = math.min(maxMP, currentMP + 1)
+    WriteByte(currentAddress, desired)
+    local observed = ReadByte(currentAddress)
+    JokCombatMeleeMP.credit = 0
+    if observed ~= desired then
+        JokCombatMeleeMP.enabled = false
+        log(string.format(
+            "[melee-mp] MP write verification failed (%d expected, %d read); "
+                .. "recovery disabled until reload.",
+            desired, observed))
+        return
+    end
+    log(string.format(
+        "[melee-mp] 1 MP restored after %d confirmed normal hits: %d/%d.",
+        JokCombatMeleeMP.hitsPerMP, observed, maxMP))
+end
+
+function JokCombatMeleeMP.observe(player, nativeLimitActive)
+    if not JokCombatMeleeMP.enabled or player == nil then return end
+
+    if JokCombatMeleeMP.playerPointer ~= nil
+        and JokCombatMeleeMP.playerPointer ~= player.pointer then
+        JokCombatMeleeMP.reset("player changed", true, true)
+    end
+    JokCombatMeleeMP.playerPointer = player.pointer
+
+    local signal = ReadByte(ADDRESS.connectCounter)
+    local normal = not nativeLimitActive
+        and player.airborneState < 0x20
+        and JokCombatMeleeMP.ownsAnimation(player)
+    if not normal then
+        JokCombatMeleeMP.clearAttack()
+    else
+        local restarted = JokCombatMeleeMP.active
+            and JokCombatMeleeMP.animation == player.animation
+            and player.time + 0.50 < JokCombatMeleeMP.lastTime
+        local changed = JokCombatMeleeMP.active
+            and JokCombatMeleeMP.animation ~= player.animation
+        if not JokCombatMeleeMP.active or restarted or changed then
+            JokCombatMeleeMP.active = true
+            JokCombatMeleeMP.animation = player.animation
+            JokCombatMeleeMP.hitSeen = false
+        end
+        JokCombatMeleeMP.lastTime = player.time
+    end
+
+    local hitEdge = JokCombatMeleeMP.lastSignal ~= nil
+        and signal ~= JokCombatMeleeMP.lastSignal
+        and (signal == 0x01 or signal == 0x40)
+    if hitEdge and JokCombatMeleeMP.active
+        and not JokCombatMeleeMP.hitSeen then
+        JokCombatMeleeMP.hitSeen = true
+        JokCombatMeleeMP.acceptHit(player, signal)
+    end
+    JokCombatMeleeMP.lastSignal = signal
 end
 
 local function actionKind(action)
@@ -7586,6 +7766,7 @@ function _OnInit()
     JokCombatAirJump.initialize(airRouteValid)
     local airAttackBrakeReady = JokCombatAirAttackBrake.initialize()
     JokCombatAttackSpeed.initialize()
+    JokCombatMeleeMP.initialize()
     local validActionRecordCount = validateCanonicalActionRecords()
     local branchValid, branchNodeCount, branchActionCount =
         JokCombatBranch.initialize()
@@ -7612,6 +7793,11 @@ function _OnInit()
         branchNodeCount, branchActionCount))
     log("legacy combo-magic recovery ready; no combo path can cast magic.")
     log(string.format(
+        "melee MP recovery %s: 1 MP every %d confirmed native normal hits; "
+            .. "full-MP hits are not banked.",
+        JokCombatMeleeMP.enabled and "ready" or "disabled",
+        JokCombatMeleeMP.hitsPerMP))
+    log(string.format(
         "native Limit combos ready: %d/4; Sonic/Ars/Strike/Ragnarok use "
             .. "temporary 0 MP costs; Trinity is excluded from the combo map; "
             .. "first final Y uses one journaled native input latch.",
@@ -7637,7 +7823,7 @@ function _OnInit()
         .. "opens the following ground family; C5 remains terminal.")
     log("neutral Y arbitration ready: two released frames before Strong; "
         .. "Reaction Commands and the first physical A keep native priority.")
-    log("fourth loadout row ready: locked Summon borrows a reversible visual "
+    log("fourth Combo Guide row ready: locked Summon borrows a reversible visual "
         .. "carrier; only a native 0xFF slot remains three-row.")
     log("native Ripple Drive/Stun Impact/Gravity Break/Zantetsuken "
         .. "selectors ready.")
@@ -7727,6 +7913,7 @@ function _OnFrame()
     JokCombatNativeLimit.update(player, buttons)
     local nativeLimitActive = JokCombatNativeLimit.activeState(player)
     JokCombatAttackSpeed.observe(player, nativeLimitActive)
+    JokCombatMeleeMP.observe(player, nativeLimitActive)
     JokCombatAirAttackBrake.observe(player, nativeLimitActive)
     JokCombatAirJump.observe(player, buttons)
     JokCombatGuardCounter.update(player, buttons)
@@ -7944,7 +8131,7 @@ function _OnFrame()
     end
 
     -- Counterattack belongs only to a confirmed successful Guard. It consumes
-    -- a modifier-free physical A before either the Musou tree or R2 loadout
+    -- a modifier-free physical A before either the Musou tree or R2 magic page
     -- can interpret the same edge.
     if not actionConsumed and crossPressed
         and (buttons & (BUTTON.L1 | BUTTON.R1 | BUTTON.L2 | BUTTON.R2)) == 0
