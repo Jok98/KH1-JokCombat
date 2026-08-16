@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$Version = "v2.1.0",
+    [string]$Version = "v2.2.0",
     [string]$OutputDirectory = ""
 )
 
@@ -21,16 +21,21 @@ if (-not $outputPath.StartsWith(
     throw "OutputDirectory must remain inside the repository."
 }
 
-$releaseFiles = @(
+$runtimeFiles = @(
     "JokCombat_CombatPrototype.lua",
     "JokCombat_NativeAbilities.lua",
     "JokCombat_NativeKeyblades.lua",
-    "JokCombat_DropRate.lua",
+    "JokCombat_DropRate.lua"
+)
+$releaseFiles = @(
+    $runtimeFiles
+    "mod.yml",
     "tools/Deploy-Local.ps1",
     "README.md",
     "CHANGELOG.md",
     "LICENSE"
 )
+$openKhFiles = @("mod.yml") + $runtimeFiles
 
 foreach ($relativePath in $releaseFiles) {
     $sourcePath = Join-Path $repoRoot $relativePath
@@ -55,54 +60,90 @@ New-Item -ItemType Directory -Path $outputPath -Force | Out-Null
 $bundleName = "KH1-JokCombat-$Version"
 $archivePath = Join-Path $outputPath ($bundleName + ".zip")
 $checksumPath = $archivePath + ".sha256"
-
-if (Test-Path -LiteralPath $archivePath) {
-    Remove-Item -LiteralPath $archivePath -Force
-}
+$openKhArchivePath = Join-Path $outputPath ($bundleName + "-OpenKH.zip")
+$openKhChecksumPath = $openKhArchivePath + ".sha256"
 
 Add-Type -AssemblyName System.IO.Compression
 $fixedTimestamp = [System.DateTimeOffset]::new(
-    2026, 8, 14, 0, 0, 0, [System.TimeSpan]::Zero)
-$archiveStream = [System.IO.File]::Open(
-    $archivePath,
-    [System.IO.FileMode]::CreateNew,
-    [System.IO.FileAccess]::Write,
-    [System.IO.FileShare]::None)
-try {
-    $archive = [System.IO.Compression.ZipArchive]::new(
-        $archiveStream,
-        [System.IO.Compression.ZipArchiveMode]::Create,
-        $false)
+    2026, 8, 16, 0, 0, 0, [System.TimeSpan]::Zero)
+
+function New-JokCombatArchive {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path,
+        [Parameter(Mandatory = $true)]
+        [string[]]$Files,
+        [string]$EntryPrefix = ""
+    )
+
+    if (Test-Path -LiteralPath $Path) {
+        Remove-Item -LiteralPath $Path -Force
+    }
+
+    $archiveStream = [System.IO.File]::Open(
+        $Path,
+        [System.IO.FileMode]::CreateNew,
+        [System.IO.FileAccess]::Write,
+        [System.IO.FileShare]::None)
     try {
-        foreach ($relativePath in $releaseFiles) {
-            $entryName = ($bundleName + "/" + $relativePath).Replace('\', '/')
-            $entry = $archive.CreateEntry(
-                $entryName,
-                [System.IO.Compression.CompressionLevel]::Optimal)
-            $entry.LastWriteTime = $fixedTimestamp
-            $sourceStream = [System.IO.File]::OpenRead(
-                (Join-Path $repoRoot $relativePath))
-            $entryStream = $entry.Open()
-            try {
-                $sourceStream.CopyTo($entryStream)
-            } finally {
-                $entryStream.Dispose()
-                $sourceStream.Dispose()
+        $archive = [System.IO.Compression.ZipArchive]::new(
+            $archiveStream,
+            [System.IO.Compression.ZipArchiveMode]::Create,
+            $false)
+        try {
+            foreach ($relativePath in $Files) {
+                $entryName = $relativePath.Replace('\', '/')
+                if (-not [string]::IsNullOrWhiteSpace($EntryPrefix)) {
+                    $entryName = ($EntryPrefix.TrimEnd('/', '\') + "/" + $entryName)
+                }
+                $entry = $archive.CreateEntry(
+                    $entryName,
+                    [System.IO.Compression.CompressionLevel]::Optimal)
+                $entry.LastWriteTime = $fixedTimestamp
+                $sourceStream = [System.IO.File]::OpenRead(
+                    (Join-Path $repoRoot $relativePath))
+                $entryStream = $entry.Open()
+                try {
+                    $sourceStream.CopyTo($entryStream)
+                } finally {
+                    $entryStream.Dispose()
+                    $sourceStream.Dispose()
+                }
             }
+        } finally {
+            $archive.Dispose()
         }
     } finally {
-        $archive.Dispose()
+        $archiveStream.Dispose()
     }
-} finally {
-    $archiveStream.Dispose()
 }
 
-$hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $archivePath).Hash.ToLowerInvariant()
-[System.IO.File]::WriteAllText(
-    $checksumPath,
-    $hash + "  " + [System.IO.Path]::GetFileName($archivePath) + [Environment]::NewLine,
-    [System.Text.UTF8Encoding]::new($false))
+function Write-JokCombatChecksum {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path,
+        [Parameter(Mandatory = $true)]
+        [string]$ChecksumPath
+    )
+
+    $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $Path).Hash.ToLowerInvariant()
+    [System.IO.File]::WriteAllText(
+        $ChecksumPath,
+        $hash + "  " + [System.IO.Path]::GetFileName($Path) + [Environment]::NewLine,
+        [System.Text.UTF8Encoding]::new($false))
+    return $hash
+}
+
+New-JokCombatArchive -Path $archivePath -Files $releaseFiles -EntryPrefix $bundleName
+New-JokCombatArchive -Path $openKhArchivePath -Files $openKhFiles
+$hash = Write-JokCombatChecksum -Path $archivePath -ChecksumPath $checksumPath
+$openKhHash = Write-JokCombatChecksum `
+    -Path $openKhArchivePath `
+    -ChecksumPath $openKhChecksumPath
 
 Write-Output "Archive: $archivePath"
 Write-Output "SHA256: $hash"
 Write-Output "Checksum: $checksumPath"
+Write-Output "OpenKH archive: $openKhArchivePath"
+Write-Output "OpenKH SHA256: $openKhHash"
+Write-Output "OpenKH checksum: $openKhChecksumPath"

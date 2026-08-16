@@ -2,29 +2,9 @@
 
 ## Ongoing
 
-- No combat implementation is currently in progress; `main` contains merged post-`v2.1.0` changes awaiting release reconciliation.
+- No combat implementation or release work is currently in progress; `v2.2.0` is the stable baseline.
 
 ## TODO
-
-### Task: Reconcile documentation with the R2 magic page
-
-Status: todo
-Completion:
-README, changelog, technical design, roadmap terminology, controls, configuration filename, persistence table, known limits, and validation text all describe the native three-slot R2 magic page and no current document presents the retired Action Ability page as active.
-
-Notes:
-- Preserve historical R2 Action details only in archived development history.
-- Include the selected-row gold highlight and learned-spell/default behavior.
-
-### Task: Prepare the next release
-
-Status: todo
-Completion:
-A version is chosen, all version metadata and dates agree, static and Lua tests pass, the complete live-game regression matrix passes, the release archive/checksum are rebuilt, and the GitHub release is published.
-
-Notes:
-- Include Donald and Goofy AP 99 plus the R2 second magic page in release notes.
-- Recheck upgrade guidance from `JokCombat_ActionLoadout.cfg` to `JokCombat_MagicShortcuts.cfg`.
 
 ### Task: Add Epic Games Store support
 
@@ -51,6 +31,11 @@ Notes:
 
 ## Done
 
+- Published `v2.2.0` with reconciled documentation and metadata, nine passing Python tests, five passing Lua harnesses, eight compiled root scripts, deterministic conventional/OpenKH archives, and checksums.
+- Replaced the retired R2 Action Ability page with a native three-slot learned-magic page, selected-row highlighting, and local `JokCombat_MagicShortcuts.cfg` persistence.
+- Added confirmed-hit melee MP recovery at exactly 1 MP per 10 eligible native normal hits.
+- Added OpenKH-native GitHub/archive installation while keeping direct
+  LuaBackend deployment as a supported fallback.
 - Replaced the machine-specific absolute KH1 script path with LuaBackend's
   standard relative path and added a verified runtime-only deploy helper.
 - `v2.1.0` shipped the rebuilt five-family A/Y map, native Limit latching, depth continuation, and intentional-only ground-to-air entry.

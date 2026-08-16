@@ -4,11 +4,29 @@ All notable player-facing changes to JokCombat are recorded here.
 
 ## Unreleased
 
+## 2.2.0 - 2026-08-16
+
+### Added
+
+- Added a second native three-slot magic Shortcut page on exact `R2`, with
+  `Y`/`X`/`A` casting, D-pad editing from learned spells, automatic saving,
+  and a gold highlight on the selected row. KH1 still owns spell tier, MP,
+  targeting, animation, VFX, and effects.
+- Added balanced melee MP recovery: every ten confirmed native normal hits
+  restore exactly 1 MP. Whiffs, Actions, Limits, magic, Guard, and
+  Counterattack do not contribute, and progress is cleared at full MP.
+- Added a KH1-specific OpenKH manifest and a dedicated `-OpenKH.zip` release
+  package for GitHub or archive installation through OpenKH Mod Manager.
+- Added `tools/Deploy-Local.ps1` for hash-verified deployment of the four
+  runtime modules to LuaBackend's standard Steam Documents directory.
+
 ### Changed
 
 - Set Donald and Goofy's native maximum AP to `99`, matching Sora.
-- Restored LuaBackend's standard Steam `scripts/kh1` Documents path and added a
-  SHA-256-verified local deployment script for the four runtime modules.
+- Switched direct LuaBackend installation from a machine-specific absolute
+  path to the standard relative Steam Documents path.
+- Retired the redundant configurable R2 Action Ability page; all Action
+  Abilities remain available through the contextual `A`/`Y` combat families.
 
 ## 2.1.0 - 2026-08-14
 

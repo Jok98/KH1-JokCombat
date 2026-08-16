@@ -2,7 +2,7 @@
 
 This roadmap records planned work and research candidates. It does not promise
 a release date, and every runtime patch must pass the same fingerprint,
-ownership, restoration, and live-game validation rules used by v2.1.0.
+ownership, restoration, and live-game validation rules used by v2.2.0.
 
 ## Planned: Epic Games Store support
 
@@ -19,7 +19,7 @@ been selected and validated.
   Command Menu HUD, Limits, native ability/save changes, Kinetic Step, and the
   drop-rate patch.
 - Disable all writes on an unknown executable or failed signature check.
-- Run the complete ground, aerial, R2 loadout, Limit, save/reload, room-change,
+- Run the complete ground, aerial, R2 magic-page, Limit, save/reload, room-change,
   death, and script-reload test matrix before declaring Epic support.
 - Prefer one universal release archive once both profiles are validated.
 

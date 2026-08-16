@@ -128,26 +128,31 @@ Consequences:
 - MP writes are capped, immediately verified, and disabled until reload after a
   verification failure.
 
-### Decision: Deploy from the repository to LuaBackend's standard path
+### Decision: Recommend OpenKH while preserving direct LuaBackend deployment
 
 Status: active
 Area: installation and packaging
 
 Decision:
-Keep source files in the repository and deploy the four runtime modules to the
-standard Steam Documents `scripts/kh1` directory with a checked-in PowerShell
-helper; diagnostics remain opt-in.
+Publish a root OpenKH manifest and dedicated OpenKH archive as the recommended
+player installation, while retaining the checked-in PowerShell helper for
+development and users who run LuaBackend directly; diagnostics remain opt-in.
 
 Rationale:
-A standard relative LuaBackend configuration is portable between users and a
-hash-verified deploy avoids maintaining a second hand-edited source tree.
+OpenKH provides centralized installation, enable/disable, ordering, and GitHub
+updates without manual per-file copies. A standard relative LuaBackend path and
+hash-verified helper remain useful when OpenKH is unavailable or while testing
+source changes.
 
 Consequences:
+- `mod.yml` is KH1-specific and exposes only the four required runtime modules.
+- Release builds produce a root-level `-OpenKH.zip` in addition to the full
+  conventional archive.
 - `LuaBackend.toml` uses `scripts/kh1/` with `relative = true`.
 - The deploy helper overwrites only named JokCombat files and never cleans the
   destination.
-- Release archives include the helper so README instructions work outside a
-  Git checkout.
+- The full release archive includes the helper so direct instructions work
+  outside a Git checkout.
 
 ## Replaced Or Obsolete Decisions
 

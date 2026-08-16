@@ -1,8 +1,8 @@
-# JokCombat v2.1.0 Technical Design
+# JokCombat v2.2.0 Technical Design
 
 Status: release design for KH1 Final Mix, Steam Global.
 
-This document records the implementation choices behind JokCombat v2.1.0.
+This document records the implementation choices behind JokCombat v2.2.0.
 It describes the current design rather than every experiment that preceded it.
 The complete experimental record remains available in
 `DEVELOPMENT_HISTORY.md`.
@@ -31,7 +31,7 @@ complete cast path.
 
 | File | Release role |
 |---|---|
-| `JokCombat_CombatPrototype.lua` | Main v2.1.0 combat, input, HUD, movement, Action, and Limit controller. The historical filename is retained to avoid breaking existing installations. |
+| `JokCombat_CombatPrototype.lua` | Main v2.2.0 combat, input, HUD, movement, Action, Limit, native R2 magic-page, and melee-MP controller. The historical filename is retained to avoid breaking existing installations. |
 | `JokCombat_NativeAbilities.lua` | Persistent native grant of Shared High Jump, Glide, Superglide, four Combo Plus, two Air Combo Plus, Combo Master, and 99 maximum AP for Sora, Donald, and Goofy. |
 | `JokCombat_NativeKeyblades.lua` | Persistent native grant of the 17 genuine Sora Keyblades other than Ultima Weapon, plus Save the Queen and Save the King, with unique-count reconciliation. |
 | `JokCombat_DropRate.lua` | Runtime-only 2.0x item and prize drop patch. |
@@ -41,7 +41,7 @@ complete cast path.
 development tools. They are not runtime dependencies and are not part of the
 normal release installation.
 
-The bundle is versioned as v2.1.0. Helper modules retain independent internal
+The bundle is versioned as v2.2.0. Helper modules retain independent internal
 versions because their memory contracts and release cadence are separate from
 the main combat controller.
 
@@ -58,7 +58,7 @@ from the validated baseline, the relevant subsystem disables itself instead of
 attempting a best-effort write.
 
 The Epic Games Store executable and other regional builds use different
-addresses and are not supported by v2.1.0.
+addresses and are not supported by v2.2.0.
 
 ## 4. Ownership boundaries
 
@@ -71,8 +71,9 @@ The central architectural choice is to give each action to one owner:
 - KH1 owns native magic, Reaction Commands, menu confirmation, and every
   internal follow-up after a Limit has begun.
 - JokCombat owns universal Guard, ground-only Dodge admission, the
-  successful-Guard Counterattack window, the R2 Action loadout, and the
-  Kinetic Step request. KH1 owns native airborne Square/Superglide.
+  successful-Guard Counterattack window, selection and reversible bridging of
+  the second R2 magic page, and the Kinetic Step request. KH1 owns native
+  magic casting and airborne Square/Superglide.
 - KH1 still executes the resulting Guard, Dodge, Counterattack, Action,
   jump, and Limit through native records or dispatchers.
 
@@ -103,6 +104,15 @@ the completed phase of ground finisher `CB` or aerial finisher `CE`, a fresh
 `A` reopens the native string. Presses made during earlier recovery are not
 queued. This keeps the combo cyclic without recreating every normal attack in
 Lua.
+
+Confirmed native contact edges during owned normal attack animations `C8`
+through `CE` contribute at most one melee-MP credit per animation. Ten credits
+restore exactly 1 MP below the verified native cap. Whiffs, Actions, Limits,
+magic, Guard, Counterattack, and low-secondary Limit reuse are excluded. Full
+MP clears partial progress so credit cannot be banked before casting; the
+counter is also cleared on reload and player-object changes. The capped MP
+write is immediately verified and the subsystem fails closed until reload if
+verification fails.
 
 ## 6. Contextual A/Y families
 
@@ -226,30 +236,36 @@ clears the carry. A rejected `A` does not consume the saved depth; the
 controller waits for another real native attempt within the same timeout. C5
 is terminal and returns to a fresh vanilla chain.
 
-## 10. Command Menu overlay and R2 loadout
+## 10. Command Menu surfaces and R2 magic page
 
-The HUD does not create an external overlay. It temporarily reuses the text
-tokens and selection behavior of KH1's Command Menu, showing at most four
-rows in the lower-left corner.
+JokCombat does not create an external overlay. It temporarily reuses KH1's
+native Command Menu or Shortcut surfaces.
 
-Holding `R2` opens the only configurable Action group:
+Exact `R2` opens a second three-slot magic Shortcut page:
 
-- D-pad Up/Down moves through editable rows using KH1's native cursor pulse;
-- D-pad Left/Right cycles the available Action Abilities;
-- releasing `R2` saves the configuration once to
-  `JokCombat_ActionLoadout.cfg` beside the script.
+- `Y`, `X`, and `A` cast the three assigned learned spells; `B` remains native
+  jump or Kinetic Step;
+- D-pad Up/Down selects a row and Left/Right cycles learned spells;
+- releasing `R2` saves the page once to `JokCombat_MagicShortcuts.cfg` beside
+  the script;
+- the selected spell name is temporarily colored gold.
 
-Guard remains fixed and cannot be replaced. If the four-row root exposes
-locked Summon as command `0x00` (or unlocked Summon as `0x36`), JokCombat
-temporarily substitutes command `0x06` only as a visual carrier for the fourth
-R2 Action label. The original command byte is stored in the signed recovery
-journal and restored conditionally when the overlay closes or after F1 reload.
-An actual `0xFF` fourth slot remains a three-row surface.
+The page snapshots KH1's native L1 Shortcut slots, temporarily swaps in the R2
+assignments, and uses a signature-checked physical R2-to-Shortcut edge bridge.
+KH1's own dispatcher therefore retains spell tier, MP cost, targeting,
+animation, VFX, effect, and failure rules. L1 remains the original page.
+Temporary slot bytes, input bridge state, and text colors are restored only
+when they still contain JokCombat's exact owned values.
 
-During a combo, the same Command Menu surface becomes a read-only Combo Guide
-that lists only the valid future `Y` actions. The native `A` continuation is
-implicit. Releasing `L1 + R1 + L2 + R2` without D-pad input toggles the overlay
-and Guide persistently.
+During a combo, the lower-left root Command Menu becomes a separate read-only
+Combo Guide listing only the valid future `Y` actions. The native `A`
+continuation is implicit. If the four-row root exposes locked Summon as
+command `0x00` or unlocked Summon as `0x36`, JokCombat temporarily substitutes
+command `0x06` only as a visual carrier for the fourth Guide row. Its original
+command byte is journaled and restored conditionally when the Guide closes or
+after F1 reload. An actual `0xFF` fourth slot remains a three-row surface.
+Releasing `L1 + R1 + L2 + R2` without D-pad input toggles the Guide
+persistently.
 
 ## 11. Defense and contextual Counterattack
 
@@ -257,7 +273,7 @@ Universal Guard is fixed to `L2 + B` and may cancel other ordinary actions.
 Dodge Roll is fixed to grounded `X`, may cancel ordinary ground actions, and
 cannot cancel itself. While airborne, JokCombat neither forces the Dodge
 selector nor enables its air bypass: `X` stays entirely native for Superglide.
-Native magic shortcut modifiers also keep priority, so `R1 + X` remains a magic
+Native magic shortcut modifiers also keep priority, so `L1 + X` remains a magic
 input rather than a Dodge request.
 
 Counterattack is not an offensive combo node. A short `A` window opens only
@@ -304,12 +320,12 @@ factor from being multiplied twice after Kinetic Step.
 
 | Change | Persistence |
 |---|---|
-| 99 maximum AP | Saved by KH1 after a normal save |
+| 99 maximum AP for Sora, Donald, and Goofy | Saved by KH1 after a normal save |
 | Shared High Jump, Glide, Superglide, and exact 4/2/1 combo passive counts | Saved by KH1 after a normal save |
 | One total copy of each genuine non-Ultima Keyblade | Saved by KH1 after a normal save |
 | Save the Queen and Save the King | Saved by KH1 after a normal save |
-| R2 Action Ability assignments | Local `JokCombat_ActionLoadout.cfg` |
-| Branch state, Action routes, Limit selectors, grounded high-target branch bypass, second jump, input ownership, descent tuning | Process only |
+| R2 learned-magic assignments | Local `JokCombat_MagicShortcuts.cfg` |
+| Branch state, Action routes, Limit selectors, grounded high-target branch bypass, second jump, input ownership, descent tuning, partial melee-MP credit | Process only |
 | 2.0x item/prize drop multipliers | Process only |
 
 The native ability writer treats KH1's two stores separately. It preserves the
@@ -357,7 +373,7 @@ the retired combo-magic and fake-ground systems are not active code paths.
 Running another combat overhaul against the same input, action, command,
 ability, or Reaction structures is unsupported even with conditional restore.
 
-## 16. Known v2.1.0 limits
+## 16. Known v2.2.0 limits
 
 - Steam Global is the only validated executable.
 - Summons and combo magic are intentionally excluded.
@@ -376,14 +392,27 @@ python tests/test_branch_mapping.py
 python tests/test_attack_speed.py
 python tests/test_drop_rate.py
 python tests/test_fourth_command_row.py
+python tests/test_local_deploy.py
+python tests/test_melee_mp_recovery.py
+python tests/test_mp_hit_probe.py
+python tests/test_openkh_manifest.py
 python tests/test_release_metadata.py
 ```
 
-The distributable archive and checksum are built with:
+The distributable archives and checksums are built with:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File tools/Build-Release.ps1 -Version v2.1.0
+powershell -ExecutionPolicy Bypass -File tools/Build-Release.ps1 -Version v2.2.0
 ```
+
+The build produces a conventional archive containing documentation and the
+direct deployment helper, plus a dedicated `-OpenKH.zip`. The OpenKH archive
+places `mod.yml` and the four runtime Lua modules at its root so it can be
+selected directly through **Select and install Mod Archive or Lua Script**.
+The same root manifest allows GitHub installation with
+`Jok98/KH1-JokCombat`; `game: kh1` prevents selection for another title and
+each runtime module is declared as a game-agnostic `copy` asset under
+`scripts/`. Diagnostic probes are excluded from both OpenKH inputs.
 
 Local development and extracted releases deploy the four runtime modules with:
 
@@ -396,11 +425,13 @@ The default destination is LuaBackend's Steam Documents path,
 cleanup, verifies every copied file with SHA-256, and includes the four
 diagnostic probes only when `-IncludeDiagnostics` is explicit.
 
-The v2.1.0 gameplay baseline has also been tested live for native ground and
+The v2.2.0 gameplay baseline has also been tested live for native ground and
 aerial strings, all five branch families, all four active combo Limits, the
-independent aerial family, R2 Actions, Guard/Dodge/Counterattack, Kinetic Step,
-both descent profiles, intentional ground-to-air entry, and the fixed drop
-multiplier.
+independent aerial family, the distinct R2 magic page and selected-row
+highlight, Guard/Dodge/Counterattack, Kinetic Step, both descent profiles,
+intentional ground-to-air entry, the 1-MP-per-10-hits payout, and the fixed
+drop multiplier. The OpenKH manifest and both release archives are validated
+statically; direct LuaBackend remains the live-tested runtime baseline.
 
 ## 18. Attribution
 

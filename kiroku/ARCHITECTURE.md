@@ -44,9 +44,10 @@
 
 - Runtime: LuaBackendHook/LuaEngine for KH1 with `scripts/kh1` resolved relative to the Steam Documents folder `My Games\KINGDOM HEARTS HD 1.5+2.5 ReMIX`.
 - Local configuration: `JokCombat_MagicShortcuts.cfg`; the legacy `JokCombat_ActionLoadout.cfg` is read only for overlay-preference migration.
-- Static verification: seven `tests/test_*.py` scripts.
+- Static verification: nine `tests/test_*.py` scripts.
 - Lua harnesses: five `tests/*_test.lua` files; syntax compilation should cover all eight root Lua scripts.
 - Local deployment: `tools/Deploy-Local.ps1` copies the four runtime modules to the standard Steam Documents path, verifies SHA-256, never cleans unrelated files, and includes probes only by explicit switch.
-- Packaging: `tools/Build-Release.ps1`, which builds an eight-file archive including the deployment helper and a SHA-256 checksum under ignored `dist/`.
+- OpenKH distribution: root `mod.yml` declares KH1 and copies only the four runtime modules under `scripts/`; users can install the GitHub repository directly through OpenKH.
+- Packaging: `tools/Build-Release.ps1` builds a nine-file conventional archive plus a root-level five-file `-OpenKH.zip`, with a SHA-256 checksum for each under ignored `dist/`.
 - Canonical product documentation: `README.md`, `CHANGELOG.md`, `docs/TECHNICAL_DESIGN.md`, `docs/JokCombat_BranchCombo_Mapping.md`, and `docs/ROADMAP.md`.
 - Attribution: Critical Mix by Xendra/KSX is an authorized technical inspiration/reference; its code is not distributed in this repository.

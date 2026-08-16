@@ -4,7 +4,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-VERSION = "2.1.0"
+VERSION = "2.2.0"
 TAG = f"v{VERSION}"
 
 
@@ -19,7 +19,7 @@ def test_release_versions_are_consistent() -> None:
         "docs/TECHNICAL_DESIGN.md"
     )
     assert f"Stato: **{TAG}" in read("docs/JokCombat_BranchCombo_Mapping.md")
-    assert f"## {VERSION} - 2026-08-14" in read("CHANGELOG.md")
+    assert f"## {VERSION} - 2026-08-16" in read("CHANGELOG.md")
 
 
 def test_release_manifest_is_minimal_and_complete() -> None:
@@ -29,6 +29,7 @@ def test_release_manifest_is_minimal_and_complete() -> None:
         "JokCombat_NativeAbilities.lua",
         "JokCombat_NativeKeyblades.lua",
         "JokCombat_DropRate.lua",
+        "mod.yml",
         "tools/Deploy-Local.ps1",
         "README.md",
         "CHANGELOG.md",
@@ -46,8 +47,8 @@ def test_release_manifest_is_minimal_and_complete() -> None:
     ):
         assert f'    "{diagnostic}"' not in build_script
 
-    assert '    "v2.1.0"' not in build_script
-    assert '[string]$Version = "v2.1.0"' in build_script
+    assert '    "v2.2.0"' not in build_script
+    assert '[string]$Version = "v2.2.0"' in build_script
     assert "System.IO.Compression.ZipArchive]::new" in build_script
     assert "$entry.LastWriteTime = $fixedTimestamp" in build_script
     assert "Compress-Archive" not in build_script
@@ -57,7 +58,7 @@ def test_release_manifest_is_minimal_and_complete() -> None:
 def main() -> None:
     test_release_versions_are_consistent()
     test_release_manifest_is_minimal_and_complete()
-    print("PASS: v2.1.0 release metadata and eight-file manifest are consistent")
+    print("PASS: v2.2.0 release metadata and nine-file manifest are consistent")
 
 
 if __name__ == "__main__":

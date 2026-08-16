@@ -1,0 +1,21 @@
+title: "KH1 JokCombat"
+originalAuthor: "Jok"
+description: "Native-first combat overhaul for KINGDOM HEARTS FINAL MIX on Steam Global. Requires Panacea and LuaBackend when installed through OpenKH."
+game: kh1
+assets:
+- name: scripts/JokCombat_CombatPrototype.lua
+  method: copy
+  source:
+  - name: JokCombat_CombatPrototype.lua
+- name: scripts/JokCombat_NativeAbilities.lua
+  method: copy
+  source:
+  - name: JokCombat_NativeAbilities.lua
+- name: scripts/JokCombat_NativeKeyblades.lua
+  method: copy
+  source:
+  - name: JokCombat_NativeKeyblades.lua
+- name: scripts/JokCombat_DropRate.lua
+  method: copy
+  source:
+  - name: JokCombat_DropRate.lua

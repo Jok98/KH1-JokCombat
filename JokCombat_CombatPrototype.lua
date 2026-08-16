@@ -1,8 +1,8 @@
 LUAGUI_NAME = "JokCombat"
 LUAGUI_AUTH = "Jok; Critical Mix reference by Xendra / KSX"
-LUAGUI_DESC = "Native Cross combo, Musou-style Y Action/Limit families, one-cycle double jump, configurable loadout and universal defense."
+LUAGUI_DESC = "Native Cross combo, Musou-style Y Action/Limit families, one-cycle double jump, second R2 magic page and universal defense."
 
--- JokCombat v2.1.0 for the current Steam Global executable.
+-- JokCombat v2.2.0 for the current Steam Global executable.
 -- Critical Mix was used as an authorized technical reference. This script is
 -- intentionally limited to combat/input state and does not persist changes to
 -- story flags, rewards, inventory, AP, levels, worlds, chests, or synthesis.
@@ -170,7 +170,7 @@ local CONFIG = {
 
 local EXPECTED_GAME_ID = 0xAF71841E
 local FINGERPRINT = 0x7265737563697065 -- "epicures", little endian
-local VERSION = "v2.1.0"
+local VERSION = "v2.2.0"
 
 local ADDRESS = {
     fingerprint = 0x3B2271,
@@ -1049,7 +1049,8 @@ local HUD = {
     dpadReleaseLock = false,
     controlChordHeld = false,
     controlChordUsed = false,
-    -- KH1 renders locked Summon as command 0x00. While the R2 overlay owns all
+    -- KH1 renders locked Summon as command 0x00. While the four-row Combo
+    -- Guide owns all
     -- four face inputs, command 0x06 is borrowed only as a normal visual
     -- carrier for row four and is restored conditionally when the overlay ends.
     nativeFallbackCommandId = 0x06,
@@ -7822,7 +7823,7 @@ function _OnInit()
         .. "opens the following ground family; C5 remains terminal.")
     log("neutral Y arbitration ready: two released frames before Strong; "
         .. "Reaction Commands and the first physical A keep native priority.")
-    log("fourth loadout row ready: locked Summon borrows a reversible visual "
+    log("fourth Combo Guide row ready: locked Summon borrows a reversible visual "
         .. "carrier; only a native 0xFF slot remains three-row.")
     log("native Ripple Drive/Stun Impact/Gravity Break/Zantetsuken "
         .. "selectors ready.")
@@ -8130,7 +8131,7 @@ function _OnFrame()
     end
 
     -- Counterattack belongs only to a confirmed successful Guard. It consumes
-    -- a modifier-free physical A before either the Musou tree or R2 loadout
+    -- a modifier-free physical A before either the Musou tree or R2 magic page
     -- can interpret the same edge.
     if not actionConsumed and crossPressed
         and (buttons & (BUTTON.L1 | BUTTON.R1 | BUTTON.L2 | BUTTON.R2)) == 0

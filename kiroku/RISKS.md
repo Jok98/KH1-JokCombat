@@ -2,17 +2,6 @@
 
 ## Open Risks
 
-### Risk: Runtime and release documentation have diverged
-
-Condition:
-`main` implements a native R2 magic page, but README and the v2.1 technical design still document the retired R2 Action Ability page; the changelog records only the party-AP post-tag change.
-
-Impact:
-Users may install or operate the feature incorrectly, and the next release could be packaged with misleading controls and upgrade guidance even while metadata tests pass.
-
-Mitigation:
-Complete the documentation-reconciliation task before choosing or publishing the next version, and add assertions for the new controls and configuration filename.
-
 ### Risk: Fixed executable addresses drift
 
 Condition:
@@ -75,6 +64,7 @@ Group subsystem state in deliberate global tables or refactor bounded code witho
 
 ## Closed Risks
 
+- Runtime and release documentation divergence was closed by the `v2.2.0` metadata, controls, persistence, validation, and packaging reconciliation.
 - Ground attacks following airborne targets was closed by the signature-checked grounded candidate-branch bypass in v2.1.0.
 - Animation-only Action routing was closed by copying and validating complete native action records.
 - Ground Dodge stealing airborne Superglide was closed by leaving airborne `X` entirely native.
