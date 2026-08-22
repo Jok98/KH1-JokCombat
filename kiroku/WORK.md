@@ -2,7 +2,7 @@
 
 ## Ongoing
 
-- No combat implementation or release work is currently in progress; `v2.2.0` is the stable baseline.
+- The post-`v2.2.0` safe physical-continuation fix is implemented and validated, awaiting review and merge; no release work is active.
 
 ## TODO
 

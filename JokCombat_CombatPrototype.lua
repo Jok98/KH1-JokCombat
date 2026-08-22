@@ -5963,6 +5963,22 @@ function JokCombatNativeLimit.update(player, buttons)
         and (lastButtons & modifierMask) == 0
     local crossStarted = (buttons & BUTTON.CROSS) ~= 0
         and (lastButtons & BUTTON.CROSS) == 0
+    local branchPhysicalContinuation = crossStarted
+        and not JokCombatNativeLimit.activationObserved
+        and JokCombatBranch ~= nil and JokCombatBranch.active
+        and JokCombatBranch.path == limit.prefix
+        and JokCombatBranch.animation ~= nil
+        and player.animation == JokCombatBranch.animation
+    if branchPhysicalContinuation then
+        -- A closes the current Musou family. Return the pre-armed child Limit
+        -- selector without resetting that family so the same physical edge can
+        -- enter its bounded safe-release buffer later in this frame.
+        JokCombatNativeLimit.restore("physical A continuation", true)
+        log(string.format(
+            "[limit:%s] pre-armed selector yielded to physical A continuation.",
+            limit.tag))
+        return false
+    end
     if not JokCombatNativeLimit.activationObserved
         and (ReadByte(ADDRESS.world) == 0x09
             or nonTriangleStarted or modifierStarted) then
@@ -6363,6 +6379,15 @@ JokCombatBranch = {
     pendingSourceAnimation = nil,
     pendingSourceTime = 0.0,
     pendingRelease = 0.0,
+    -- One physical A may be remembered while the current named Action reaches
+    -- its safe release time. Unlike the legacy normal-attack queue, this state
+    -- owns exactly one edge and never advances more than one native attack.
+    physicalPending = false,
+    physicalPendingPath = nil,
+    physicalPendingAnimation = nil,
+    physicalPendingSourceTime = 0.0,
+    physicalPendingRelease = 0.0,
+    physicalPendingFrames = 0,
     waitingPath = nil,
     waitingAnimation = nil,
     waitingFrames = 0,
@@ -6760,6 +6785,7 @@ end
 function JokCombatBranch.reset(reason, quiet, skipCleanup)
     local branchWasActive = JokCombatBranch.active
         or JokCombatBranch.pendingPath ~= nil
+        or JokCombatBranch.physicalPending
         or JokCombatBranch.waitingPath ~= nil
         or JokCombatBranch.neutralTrianglePending
     if branchWasActive and not skipCleanup and canRun then
@@ -6791,6 +6817,7 @@ function JokCombatBranch.reset(reason, quiet, skipCleanup)
     JokCombatBranch.neutralTrianglePending = false
     JokCombatBranch.neutralTriangleFrames = 0
     JokCombatBranch.airFamily = false
+    JokCombatBranch.clearPhysicalContinuation(nil, true)
     JokCombatBranch.clearDepthCarry(nil, true)
     if branchWasActive and not quiet then
         log("[branch] closed" .. (reason ~= nil and ": " .. reason or "."))
@@ -6863,6 +6890,19 @@ function JokCombatBranch.fallback(player, path)
     return true
 end
 
+function JokCombatBranch.clearPhysicalContinuation(reason, quiet)
+    local wasPending = JokCombatBranch.physicalPending
+    JokCombatBranch.physicalPending = false
+    JokCombatBranch.physicalPendingPath = nil
+    JokCombatBranch.physicalPendingAnimation = nil
+    JokCombatBranch.physicalPendingSourceTime = 0.0
+    JokCombatBranch.physicalPendingRelease = 0.0
+    JokCombatBranch.physicalPendingFrames = 0
+    if wasPending and reason ~= nil and not quiet then
+        log("[branch] buffered physical A closed: " .. reason .. ".")
+    end
+end
+
 function JokCombatBranch.continuePhysical(player)
     local sourcePath = JokCombatBranch.path or "unknown"
     local sourceNode = JokCombatBranch.nodeForPath(sourcePath)
@@ -6899,6 +6939,68 @@ function JokCombatBranch.continuePhysical(player)
             sourcePath, sourceName, player, true)
     end
     return true
+end
+
+function JokCombatBranch.queuePhysicalContinuation(player)
+    if JokCombatBranch.physicalPending then
+        log("[branch] repeated A ignored: one physical continuation is already buffered.")
+        return true
+    end
+
+    local window = JokCombatBranch.windows[player.animation]
+    if window == nil then
+        log(string.format(
+            "[branch] %s + A ignored: animation 0x%02X has no safe release window.",
+            tostring(JokCombatBranch.path), player.animation))
+        JokCombatBranch.reset("missing physical continuation window")
+        return true
+    end
+
+    JokCombatBranch.physicalPending = true
+    JokCombatBranch.physicalPendingPath = JokCombatBranch.path
+    JokCombatBranch.physicalPendingAnimation = player.animation
+    JokCombatBranch.physicalPendingSourceTime = player.time
+    JokCombatBranch.physicalPendingRelease = window.release
+    JokCombatBranch.physicalPendingFrames = CONFIG.branchInputTimeoutFrames
+    log(string.format(
+        "[branch] %s + A buffered once: anim=0x%02X time=%.2f releases=%.2f.",
+        tostring(JokCombatBranch.path), player.animation,
+        player.time, window.release))
+
+    if player.time >= window.release then
+        return JokCombatBranch.continuePhysical(player)
+    end
+    return true
+end
+
+function JokCombatBranch.advancePhysicalContinuation(player)
+    if not JokCombatBranch.physicalPending then return false end
+
+    local sourceChanged = JokCombatBranch.path
+            ~= JokCombatBranch.physicalPendingPath
+        or player.animation ~= JokCombatBranch.physicalPendingAnimation
+        or player.time + 0.5 < JokCombatBranch.physicalPendingSourceTime
+        or ReadByte(ADDRESS.commandMenuSlot) ~= 0
+    if sourceChanged then
+        JokCombatBranch.reset("buffered physical A source changed")
+        return false
+    end
+
+    JokCombatBranch.physicalPendingFrames =
+        JokCombatBranch.physicalPendingFrames - 1
+    if JokCombatBranch.physicalPendingFrames <= 0 then
+        JokCombatBranch.reset("buffered physical A timed out")
+        return false
+    end
+    if player.time < JokCombatBranch.physicalPendingRelease then
+        return true
+    end
+
+    log(string.format(
+        "[branch] %s + A reached its safe release: time=%.2f threshold=%.2f.",
+        tostring(JokCombatBranch.physicalPendingPath), player.time,
+        JokCombatBranch.physicalPendingRelease))
+    return JokCombatBranch.continuePhysical(player)
 end
 
 function JokCombatBranch.execute(player, path)
@@ -7181,6 +7283,7 @@ function JokCombatBranch.guideEntries(player, buttons)
         return nil
     end
     if JokCombatBranch.pendingPath ~= nil
+        or JokCombatBranch.physicalPending
         or JokCombatBranch.waitingPath ~= nil then
         return nil
     end
@@ -7249,6 +7352,16 @@ function JokCombatBranch.update(player, buttons, crossPressed,
             JokCombatBranch.reset("modifier shortcut took priority")
         end
         return false
+    end
+    if JokCombatBranch.physicalPending then
+        local continuationOwned =
+            JokCombatBranch.advancePhysicalContinuation(player)
+        if continuationOwned then
+            if crossPressed or trianglePressed then
+                log("[branch] repeated input ignored: physical A continuation already buffered.")
+            end
+            return true
+        end
     end
     -- A Limit's immediate parent Action normally pre-arms its real Reaction.
     -- One real final-Y edge is then latched until KH1 can accept it; the player
@@ -7344,6 +7457,15 @@ function JokCombatBranch.update(player, buttons, crossPressed,
             return false
         end
 
+        -- A always closes the named family, but it must not release the
+        -- current native Action before that Action's authored safe window.
+        -- Remember exactly one edge and let advancePhysicalContinuation issue
+        -- the single native handoff when the release threshold is reached.
+        local node = JokCombatBranch.nodeForPath(JokCombatBranch.path)
+        if crossPressed then
+            return JokCombatBranch.queuePhysicalContinuation(player)
+        end
+
         -- Retry a parent pre-arm while its native Action remains active. The
         -- normal case succeeds in observeRequest; this covers a transiently
         -- busy root selector. If the first final Y is the edge that makes the
@@ -7376,18 +7498,6 @@ function JokCombatBranch.update(player, buttons, crossPressed,
         end
         if not crossPressed and not trianglePressed then return false end
 
-        local node = JokCombatBranch.nodeForPath(JokCombatBranch.path)
-        if crossPressed then
-            if node ~= nil and node.kind == "air_finisher"
-                and player.time < CONFIG.airFinisherRestartTime then
-                log(string.format(
-                    "Aerial Finisher physical continuation ignored before "
-                    .. "native recovery: time=%.2f opens=%.2f.",
-                    player.time, CONFIG.airFinisherRestartTime))
-                return true
-            end
-            return JokCombatBranch.continuePhysical(player)
-        end
         local child = JokCombatBranch.triangleChild(
             JokCombatBranch.path, node, JokCombatBranch.airFamily)
         local childNode = JokCombatBranch.nodeForPath(child)
