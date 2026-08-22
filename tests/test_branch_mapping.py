@@ -212,6 +212,78 @@ def assert_post_special_depth(nodes: dict[str, dict[str, str]]) -> None:
     assert "JokCombatBranch.clearDepthCarry(nil, true)" in SOURCE
 
 
+def assert_safe_physical_continuation() -> None:
+    queue_start = SOURCE.index(
+        "function JokCombatBranch.queuePhysicalContinuation"
+    )
+    queue_end = SOURCE.index(
+        "function JokCombatBranch.advancePhysicalContinuation", queue_start
+    )
+    queue = SOURCE[queue_start:queue_end]
+    assert "JokCombatBranch.physicalPending = true" in queue
+    assert "JokCombatBranch.physicalPendingRelease = window.release" in queue
+    assert "CONFIG.branchInputTimeoutFrames" in queue
+    assert "one physical continuation is already buffered" in queue
+    release_gate = queue.index("if player.time >= window.release then")
+    dispatch = queue.index("JokCombatBranch.continuePhysical(player)")
+    assert release_gate < dispatch, (
+        "physical A may dispatch immediately only after the safe release"
+    )
+
+    advance_start = queue_end
+    advance_end = SOURCE.index(
+        "function JokCombatBranch.execute", advance_start
+    )
+    advance = SOURCE[advance_start:advance_end]
+    assert "ReadByte(ADDRESS.commandMenuSlot) ~= 0" in advance
+    assert 'JokCombatBranch.reset("buffered physical A source changed")' in advance
+    assert 'JokCombatBranch.reset("buffered physical A timed out")' in advance
+    wait_gate = advance.index(
+        "if player.time < JokCombatBranch.physicalPendingRelease then"
+    )
+    safe_dispatch = advance.index(
+        "JokCombatBranch.continuePhysical(player)", wait_gate
+    )
+    assert wait_gate < safe_dispatch
+
+    branch_start = SOURCE.index(
+        "function JokCombatBranch.update(player, buttons, crossPressed,"
+    )
+    branch_end = SOURCE.index(
+        "local function updateLoadoutMenuRouting", branch_start
+    )
+    branch = SOURCE[branch_start:branch_end]
+    pending_gate = branch.index("if JokCombatBranch.physicalPending then")
+    selector_gate = branch.index("JokCombatNativeLimit.selectorOwned()")
+    assert pending_gate < selector_gate, (
+        "a buffered physical A must advance before a child Limit is pre-armed"
+    )
+    cross_gate = branch.index("if crossPressed then", branch.index(
+        "if JokCombatBranch.path ~= nil then"
+    ))
+    prearm = branch.index("JokCombatBranch.prearmLimitChild(player)", cross_gate)
+    assert cross_gate < prearm
+    assert "return JokCombatBranch.queuePhysicalContinuation(player)" in branch
+    assert "return JokCombatBranch.continuePhysical(player)" not in branch
+
+    limit_start = SOURCE.index("function JokCombatNativeLimit.update")
+    limit_end = SOURCE.index("JokCombatGuardCounter = {", limit_start)
+    limit_update = SOURCE[limit_start:limit_end]
+    yield_gate = limit_update.index("local branchPhysicalContinuation")
+    generic_cancel = limit_update.index(
+        "JokCombatNativeLimit.finish(\"combo selector cancelled\")"
+    )
+    assert yield_gate < generic_cancel
+    assert 'JokCombatNativeLimit.restore("physical A continuation", true)' in (
+        limit_update
+    )
+    assert "pre-armed selector yielded to physical A continuation" in limit_update
+
+    guide_start = SOURCE.index("function JokCombatBranch.guideEntries")
+    guide_end = SOURCE.index("function JokCombatBranch.update", guide_start)
+    assert "or JokCombatBranch.physicalPending" in SOURCE[guide_start:guide_end]
+
+
 def assert_aerial_is_independent() -> None:
     guards = (
         'airFinisherPath = "AIR_CE"',
@@ -225,7 +297,7 @@ def assert_aerial_is_independent() -> None:
         "if path == JokCombatBranch.airSweepPath then return nil end",
         "return JokCombatBranch.airFinisherPath",
         "native CE -> Hurricane Blast -> Aerial Sweep",
-        "Aerial Finisher physical continuation ignored before",
+        "function JokCombatBranch.queuePhysicalContinuation",
         "player.airborne",
     )
     for guard in guards:
@@ -730,6 +802,7 @@ def main() -> None:
     assert_map(nodes)
     assert_action_partition(nodes)
     assert_post_special_depth(nodes)
+    assert_safe_physical_continuation()
     assert_aerial_is_independent()
     assert_native_limits()
     assert_guard_counter()
