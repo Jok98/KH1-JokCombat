@@ -4,6 +4,20 @@ All notable player-facing changes to JokCombat are recorded here.
 
 ## Unreleased
 
+## 2.2.1 - 2026-09-05
+
+### Fixed
+
+- Fixed physical `A` continuation after a named `Y` Action releasing the move
+  before its safe recovery window, which could leave combo inputs unresponsive.
+  One press is now remembered until that window; repeated presses do not queue
+  additional attacks.
+- Fixed pre-armed Limit selectors interfering with a physical `A` continuation
+  from their parent Action. The selector now yields while preserving the branch
+  needed for the native attack handoff.
+- Clear the pending continuation on source or menu changes, interruptions, and
+  timeout, and hide the Combo Guide while that continuation is waiting.
+
 ## 2.2.0 - 2026-08-16
 
 ### Added
