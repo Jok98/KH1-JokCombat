@@ -10,6 +10,7 @@ JokCombat is a LuaBackendHook combat overhaul for KINGDOM HEARTS FINAL MIX. It k
 - Donald and Goofy maximum AP are 99, matching Sora.
 - Exact `R2` opens a second native three-slot magic Shortcut page with learned-spell editing, automatic saving, and gold highlighting for its selected row.
 - Confirmed native normal attacks now restore 1 MP after every 10 eligible hits, at most once per attack animation, with no charge banking at full MP.
+- A post-`v2.2.0` branch fix now holds one physical `A` edge until the current named Action reaches its safe release window; repeated inputs do not form a queue, and state/menu interruptions clear the pending edge.
 - The release runtime payload consists of `JokCombat_CombatPrototype.lua`, `JokCombat_NativeAbilities.lua`, `JokCombat_NativeKeyblades.lua`, and `JokCombat_DropRate.lua`; four probe scripts remain optional diagnostics.
 - Local deployment now targets LuaBackend's standard Steam Documents
   `scripts/kh1` directory and verifies the four runtime copies with SHA-256;
@@ -30,6 +31,7 @@ JokCombat is a LuaBackendHook combat overhaul for KINGDOM HEARTS FINAL MIX. It k
 - All five Lua regression harnesses passed, including MP payout and hit-probe simulations.
 - The user previously confirmed the R2 second page, distinct spells, and selected-row highlight in live gameplay before merge.
 - The user confirmed the final 1-MP-per-10-hits payout and balance in live Steam Global gameplay.
+- The safe physical-continuation implementation passes all nine Python tests, and its staged OpenKH runtime copy matches the repository source by SHA-256.
 - Canonical documentation, release metadata, controls, persistence rules, and packaging now agree on the `v2.2.0` runtime.
 
 ## Open Questions

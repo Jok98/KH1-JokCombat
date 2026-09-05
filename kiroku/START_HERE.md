@@ -14,12 +14,13 @@
 - Native abilities, party AP, and weapon grants can persist after KH1 saves; combat routing and drop-rate changes are process-local.
 - Steam Global is the only supported executable, and all writers fail closed on invalid signatures or state.
 - `v2.2.0` adds party AP 99, a second native R2 magic page with gold selection, 1 MP per 10 confirmed normal hits, standard local deployment, and OpenKH packaging.
+- A post-`v2.2.0` fix buffers exactly one physical `A` after a named `Y` branch until that Action's safe release window, preventing premature cancellation and preserving native depth continuation.
 - Nine static tests, five Lua harnesses, and compilation of all eight root Lua scripts pass on the release baseline.
 - OpenKH is the recommended installation path; direct LuaBackend deployment remains supported for development and fallback use.
 
 ## Next Action
 
-- No release work is active. Preserve the `v2.2.0` baseline and start Epic or Solo Sora research only when explicitly selected.
+- Review and merge the safe physical-continuation fix; no release work is active.
 
 ## Hard Constraints
 
