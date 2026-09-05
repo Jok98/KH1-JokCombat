@@ -676,7 +676,7 @@ def assert_intentional_air_entry() -> None:
 
 def assert_integration() -> None:
     guards = (
-        'VERSION = "v2.2.0"',
+        'VERSION = "v2.2.1"',
         "branchActionAbilities = true",
         "branchLimits = true",
         "comboGuide = true",

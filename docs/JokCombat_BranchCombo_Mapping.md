@@ -1,6 +1,6 @@
 # JokCombat — mappa combo contestuale A / Y
 
-Stato: **v2.2.0 — 5 FAMIGLIE; ACTION 8/8 + LIMIT NATIVI 4/4**
+Stato: **v2.2.1 — 5 FAMIGLIE; ACTION 8/8 + LIMIT NATIVI 4/4**
 
 Ambito: KH1 Final Mix, Steam Global, Sora
 Input abbreviati: `A` = Croce, `Y` = Triangolo
@@ -12,8 +12,10 @@ Input abbreviati: `A` = Croce, `Y` = Triangolo
 2. Il numero di `A` prima del primo `Y` sceglie la famiglia terrestre. Dopo il
    primo `Y`, `Y` avanza nella stessa famiglia. `B` resta sempre il salto
    nativo e chiude l'eventuale famiglia terrestre attiva.
-3. Un `A` dopo una mossa nominata chiude immediatamente la famiglia e torna a
-   una continuazione fisica vanilla. Non esistono prefissi reverse nascosti.
+3. Un `A` dopo una mossa nominata richiede una continuazione fisica vanilla.
+   Durante una Action viene conservata una sola pressione fino alla sua
+   finestra sicura di rilascio, poi la famiglia si chiude. Non esistono
+   prefissi reverse nascosti e lo spam non crea una coda di attacchi.
 4. Ogni `Y` produce subito la mossa indicata: la sequenza non è una password
    attesa fino all'ultimo tasto.
 5. Ogni Action Ability ha un solo ruolo contestuale: Strong è la catena
@@ -248,6 +250,10 @@ la profondità virtuale soltanto durante l'attacco confermato.
 
 - Ogni Action concatenabile conserva la propria finestra di prebuffer/release
   e accetta al massimo un input.
+- La continuazione fisica con `A` attende la soglia di release anche se premuta
+  prima. Un eventuale selettore Limit prearmato cede alla continuazione; la
+  Guide resta nascosta durante l'attesa. Cambio di Action, menu o timeout
+  annullano la pressione conservata.
 - Guard, Dodge, modificatori, reaction command, menu, reload e perdita del
   player object chiudono sempre la famiglia e ogni selector posseduto. Anche il
   salto chiude sempre la famiglia terrestre attiva.

@@ -1,6 +1,6 @@
 # KH1 JokCombat
 
-**Version 2.2.0**
+**Version 2.2.1**
 
 JokCombat is a combat overhaul for **KINGDOM HEARTS FINAL MIX** on the Steam
 Global release. It keeps KH1's native attacks at the center of combat, then
@@ -17,6 +17,8 @@ an extended ground-to-air cycle, universal defense, and faster progression.
   because its native sequence requires Donald and Goofy.
 - Post-special depth continuation: after a terminal move, one real native `A`
   can advance into the following ground family; C5 remains the endpoint.
+- Pressing `A` during a named Action remembers one continuation until its safe
+  recovery window, preventing early cancellation without queuing extra attacks.
 - Five direct ground families and a separate three-step aerial branch
   available after any normal aerial hit.
 - Ground attacks never auto-chase an airborne target: a normal jump or Kinetic
@@ -99,7 +101,7 @@ Back up your KH1 save before using either installation method.
 3. Enable JokCombat in the KH1 mod list, then choose **Mod Loader > Build and
    Run**. OpenKH stages all four runtime modules automatically; no individual
    file copy is required.
-4. A successful load reports `JokCombat v2.2.0`, Native Abilities, Native
+4. A successful load reports `JokCombat v2.2.1`, Native Abilities, Native
    Keyblades, and the `200%` Drop Rate module in the LuaBackend console.
 
 OpenKH installation uses the root [`mod.yml`](mod.yml), which deliberately
@@ -145,7 +147,7 @@ are not installed.
    unrelated files from the destination.
 
 3. Start KH1 or press `F1` in the LuaBackend console to reload all scripts.
-   A successful load reports `JokCombat v2.2.0`, Native Abilities, Native
+   A successful load reports `JokCombat v2.2.1`, Native Abilities, Native
    Keyblades, and the `200%` Drop Rate module.
 
 The four probe scripts in this repository are optional developer diagnostics
@@ -192,7 +194,7 @@ patch are process-only.
   JokCombat temporarily borrows a normal command record so the fourth Combo
   Guide row remains visible. The native row is restored as soon as the Guide
   closes.
-- Perfect Guard and a dedicated enemy-launcher system are not part of v2.2.0.
+- Perfect Guard and a dedicated enemy-launcher system are not part of v2.2.1.
 
 ## Documentation
 

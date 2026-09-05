@@ -1,8 +1,8 @@
-# JokCombat v2.2.0 Technical Design
+# JokCombat v2.2.1 Technical Design
 
 Status: release design for KH1 Final Mix, Steam Global.
 
-This document records the implementation choices behind JokCombat v2.2.0.
+This document records the implementation choices behind JokCombat v2.2.1.
 It describes the current design rather than every experiment that preceded it.
 The complete experimental record remains available in
 `DEVELOPMENT_HISTORY.md`.
@@ -31,7 +31,7 @@ complete cast path.
 
 | File | Release role |
 |---|---|
-| `JokCombat_CombatPrototype.lua` | Main v2.2.0 combat, input, HUD, movement, Action, Limit, native R2 magic-page, and melee-MP controller. The historical filename is retained to avoid breaking existing installations. |
+| `JokCombat_CombatPrototype.lua` | Main v2.2.1 combat, input, HUD, movement, Action, Limit, native R2 magic-page, and melee-MP controller. The historical filename is retained to avoid breaking existing installations. |
 | `JokCombat_NativeAbilities.lua` | Persistent native grant of Shared High Jump, Glide, Superglide, four Combo Plus, two Air Combo Plus, Combo Master, and 99 maximum AP for Sora, Donald, and Goofy. |
 | `JokCombat_NativeKeyblades.lua` | Persistent native grant of the 17 genuine Sora Keyblades other than Ultima Weapon, plus Save the Queen and Save the King, with unique-count reconciliation. |
 | `JokCombat_DropRate.lua` | Runtime-only 2.0x item and prize drop patch. |
@@ -41,7 +41,7 @@ complete cast path.
 development tools. They are not runtime dependencies and are not part of the
 normal release installation.
 
-The bundle is versioned as v2.2.0. Helper modules retain independent internal
+The bundle is versioned as v2.2.1. Helper modules retain independent internal
 versions because their memory contracts and release cadence are separate from
 the main combat controller.
 
@@ -58,7 +58,7 @@ from the validated baseline, the relevant subsystem disables itself instead of
 attempting a best-effort write.
 
 The Epic Games Store executable and other regional builds use different
-addresses and are not supported by v2.2.0.
+addresses and are not supported by v2.2.1.
 
 ## 4. Ownership boundaries
 
@@ -120,6 +120,14 @@ The count of native `A` attacks before the first `Y` selects a family. Every
 accepted `Y` immediately performs the named move; the player never enters a
 silent password sequence. A subsequent `A` closes the special family and
 returns to native physical continuation.
+
+During a named Action, exactly one physical `A` edge can wait for that
+Action's `window.release` threshold. The controller never releases the native
+Action before this threshold and never builds a backlog from repeated presses.
+The pending edge is bounded by a timeout and cleared on source, menu, or state
+changes. If the Action has pre-armed a child Limit, its selector yields to `A`
+without resetting the parent branch. The Combo Guide stays hidden while the
+physical continuation waits, then the existing native handoff resumes it.
 
 | Family | Prefix | Role | Route |
 |---|---|---|---|
@@ -373,7 +381,7 @@ the retired combo-magic and fake-ground systems are not active code paths.
 Running another combat overhaul against the same input, action, command,
 ability, or Reaction structures is unsupported even with conditional restore.
 
-## 16. Known v2.2.0 limits
+## 16. Known v2.2.1 limits
 
 - Steam Global is the only validated executable.
 - Summons and combo magic are intentionally excluded.
@@ -402,7 +410,7 @@ python tests/test_release_metadata.py
 The distributable archives and checksums are built with:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File tools/Build-Release.ps1 -Version v2.2.0
+powershell -ExecutionPolicy Bypass -File tools/Build-Release.ps1 -Version v2.2.1
 ```
 
 The build produces a conventional archive containing documentation and the
@@ -432,6 +440,11 @@ highlight, Guard/Dodge/Counterattack, Kinetic Step, both descent profiles,
 intentional ground-to-air entry, the 1-MP-per-10-hits payout, and the fixed
 drop multiplier. The OpenKH manifest and both release archives are validated
 statically; direct LuaBackend remains the live-tested runtime baseline.
+
+For v2.2.1, all nine Python checks and five Lua regression harnesses passed,
+and all eight root Lua scripts compiled with Lua 5.3. These checks cover the
+safe physical-continuation change without claiming a new full gameplay pass;
+runtime behavior remains subject to the Steam Global gameplay checks above.
 
 ## 18. Attribution
 

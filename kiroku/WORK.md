@@ -2,7 +2,7 @@
 
 ## Ongoing
 
-- The post-`v2.2.0` safe physical-continuation fix is implemented and validated, awaiting review and merge; no release work is active.
+- No additional combat implementation is active; `v2.2.1` is the code and documentation baseline. Verify GitHub for publishing and integration status.
 
 ## TODO
 
@@ -31,6 +31,7 @@ Notes:
 
 ## Done
 
+- Prepared `v2.2.1` with safe one-edge physical continuation, aligned metadata and documentation, nine passing Python checks, five passing Lua harnesses, eight compiled root scripts, and reproducible direct/OpenKH archives with verified checksums. The last full live-tested baseline remains `v2.2.0`.
 - Published `v2.2.0` with reconciled documentation and metadata, nine passing Python tests, five passing Lua harnesses, eight compiled root scripts, deterministic conventional/OpenKH archives, and checksums.
 - Replaced the retired R2 Action Ability page with a native three-slot learned-magic page, selected-row highlighting, and local `JokCombat_MagicShortcuts.cfg` persistence.
 - Added confirmed-hit melee MP recovery at exactly 1 MP per 10 eligible native normal hits.

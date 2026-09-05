@@ -2,7 +2,7 @@ LUAGUI_NAME = "JokCombat"
 LUAGUI_AUTH = "Jok; Critical Mix reference by Xendra / KSX"
 LUAGUI_DESC = "Native Cross combo, Musou-style Y Action/Limit families, one-cycle double jump, second R2 magic page and universal defense."
 
--- JokCombat v2.2.0 for the current Steam Global executable.
+-- JokCombat v2.2.1 for the current Steam Global executable.
 -- Critical Mix was used as an authorized technical reference. This script is
 -- intentionally limited to combat/input state and does not persist changes to
 -- story flags, rewards, inventory, AP, levels, worlds, chests, or synthesis.
@@ -170,7 +170,7 @@ local CONFIG = {
 
 local EXPECTED_GAME_ID = 0xAF71841E
 local FINGERPRINT = 0x7265737563697065 -- "epicures", little endian
-local VERSION = "v2.2.0"
+local VERSION = "v2.2.1"
 
 local ADDRESS = {
     fingerprint = 0x3B2271,
